@@ -179,3 +179,88 @@ func TestChannelKeys_包含全部已登记通道(t *testing.T) {
 		}
 	}
 }
+
+// TestEnabledSubMethods_按已开通项过滤目录 校验聚合通道的子方式筛选。
+//
+// 这条不变量防的是"用户看不到微信入口"：站长在后台勾了 wxpay，
+// 但若筛选逻辑写错（例如按目录顺序无脑返回全部、或忽略大小写差异），
+// 前端要么少给入口，要么给出平台并未开通的方式。
+func TestEnabledSubMethods_按已开通项过滤目录(t *testing.T) {
+	// 只开通两个：结果应保持目录顺序（支付宝在前），而不是站长填写的顺序
+	options := EnabledSubMethods("epay", []string{"wxpay", "alipay"})
+	if len(options) != 2 {
+		t.Fatalf("应返回 2 个子方式，实际 %v", options)
+	}
+	if options[0].Name != "alipay" || options[0].Label != "支付宝" {
+		t.Errorf("第一项应为 alipay（支付宝），实际 %+v", options[0])
+	}
+	if options[1].Name != "wxpay" || options[1].Label != "微信支付" {
+		t.Errorf("第二项应为 wxpay（微信支付），实际 %+v", options[1])
+	}
+
+	// 模型平台支持但目录里没有的值：照样下发，标签回退为原始代码
+	options = EnabledSubMethods("epay", []string{"alipay", "custom_pay"})
+	if len(options) != 2 {
+		t.Fatalf("目录外的值也应下发，实际 %v", options)
+	}
+	if options[1].Name != "custom_pay" || options[1].Label != "custom_pay" {
+		t.Errorf("目录外值的标签应回退为原始代码，实际 %+v", options[1])
+	}
+
+	// 空白与重复值要清洗掉（否则会渲染出两个一模一样的入口）
+	options = EnabledSubMethods("epay", []string{" alipay ", "", "alipay", "  "})
+	if len(options) != 1 || options[0].Name != "alipay" {
+		t.Fatalf("重复/空白项应被清洗，实际 %v", options)
+	}
+
+	// 没有配置任何类型 → nil（视为"该通道没有子方式"）
+	if options = EnabledSubMethods("epay", nil); options != nil {
+		t.Errorf("未配置类型时应返回 nil，实际 %v", options)
+	}
+	// 没有子方式概念的通道即使传了值也不展开
+	if options = EnabledSubMethods("stripe", []string{"alipay"}); options != nil {
+		t.Errorf("stripe 不应有子方式，实际 %v", options)
+	}
+}
+
+// TestSubMethodLabel_未登记时回退原名 校验展示名的回退行为。
+func TestSubMethodLabel_未登记时回退原名(t *testing.T) {
+	if label := SubMethodLabel("epay", "wxpay"); label != "微信支付" {
+		t.Errorf("wxpay 应显示「微信支付」，实际 %q", label)
+	}
+	if label := SubMethodLabel("epay", "unknown_pay"); label != "unknown_pay" {
+		t.Errorf("未登记的值应回退为原始代码，实际 %q", label)
+	}
+	if label := SubMethodLabel("epay", "  "); label != "" {
+		t.Errorf("空白值应返回空串，实际 %q", label)
+	}
+}
+
+// TestChannelSubMethodsOptions_与目录同源 校验后台字段选项不会与目录脱节。
+//
+// 后台的可勾选项与用户看到的子方式必须来自同一份目录，
+// 否则会出现"后台能勾、用户看不到"或反之的静默错配。
+func TestChannelSubMethodsOptions_与目录同源(t *testing.T) {
+	channel, ok := FindChannel("epay")
+	if !ok {
+		t.Fatal("找不到 epay 通道")
+	}
+	var types *Field
+	for index := range channel.Fields {
+		if channel.Fields[index].Key == "types" {
+			types = &channel.Fields[index]
+		}
+	}
+	if types == nil {
+		t.Fatal("epay 通道应有 types 字段")
+	}
+	subs := ChannelSubMethods("epay")
+	if len(types.Options) != len(subs) {
+		t.Fatalf("types 字段选项 %d 项与子方式目录 %d 项不一致", len(types.Options), len(subs))
+	}
+	for index, option := range types.Options {
+		if option.Value != subs[index].Name || option.Label != subs[index].Label {
+			t.Errorf("第 %d 项与目录不一致：选项 %+v，目录 %+v", index, option, subs[index])
+		}
+	}
+}

@@ -17,12 +17,21 @@
 //	                POST /api/admin/orders/{no}/mark-paid —— 人工确认入账
 //	                POST /api/admin/orders/{no}/close     —— 关闭订单
 //	                POST /api/admin/orders/{no}/refund    —— 退款（扣回额度）
-//	回调（无需登录）：POST /api/payments/{method}/notify
+//
+// 回调（无需登录）：POST /api/payments/{method}/notify
+//
+// 子支付方式（sub_method）：
+//
+//	易支付这类聚合通道只有一个 method（epay），但用户要选的是"支付宝还是微信"。
+//	因此普通通道只下发 method，聚合通道额外下发 sub_methods（见 paymentSubMethods），
+//	前端把每个子方式渲染成一行独立选项；下单时由 resolveSubMethod 校验并落库，
+//	订单记录里因此能看到"我到底用支付宝还是微信充的"。
 //
 // 扩展（Extend）：
 //
 //	新增支付通道：在 internal/payment 实现 Provider 并在 NewRegistry 注册，
-//	本文件与路由都无需改动（回调路径已按 {method} 通配）。
+//	本文件与路由都无需改动（回调路径已按 {method} 通配）；
+//	若该通道也有"子方式"，在 payment.ChannelSubMethods 里登记一条目录即可。
 package server
 
 import (
@@ -59,15 +68,21 @@ type orderDTO struct {
 	Quota      int64  `json:"quota"`
 	Method     string `json:"method"`
 	SubMethod  string `json:"sub_method"`
-	Status     int    `json:"status"`
-	StatusText string `json:"status_text"`
-	PayURL     string `json:"pay_url"`
-	Remark     string `json:"remark"`
-	UserID     uint64 `json:"user_id"`
-	Credited   bool   `json:"credited"`
-	CreatedAt  int64  `json:"created_at"`
-	PaidAt     int64  `json:"paid_at"`
-	ExpiresAt  int64  `json:"expires_at"`
+	// MethodLabel / SubMethodLabel 是面向使用者的中文名（如「支付宝」）。
+	//
+	// 由后端翻译而不是前端映射：子方式的中文名属于"支付通道知识"，
+	// 与注册表放在一起维护才不会出现"后端加了通道、前端忘了加名字"。
+	MethodLabel    string `json:"method_label"`
+	SubMethodLabel string `json:"sub_method_label"`
+	Status         int    `json:"status"`
+	StatusText     string `json:"status_text"`
+	PayURL         string `json:"pay_url"`
+	Remark         string `json:"remark"`
+	UserID         uint64 `json:"user_id"`
+	Credited       bool   `json:"credited"`
+	CreatedAt      int64  `json:"created_at"`
+	PaidAt         int64  `json:"paid_at"`
+	ExpiresAt      int64  `json:"expires_at"`
 }
 
 // toOrderDTO 把领域模型转为对外 DTO。
@@ -79,22 +94,24 @@ func toOrderDTO(order *model.PaymentOrder) orderDTO {
 		return orderDTO{}
 	}
 	return orderDTO{
-		TradeNo:    order.TradeNo,
-		Amount:     order.Amount,
-		AmountText: order.AmountYuan(),
-		Currency:   order.Currency,
-		Quota:      order.Quota,
-		Method:     order.Method,
-		SubMethod:  order.SubMethod,
-		Status:     int(order.Status),
-		StatusText: order.Status.String(),
-		PayURL:     order.PayURL,
-		Remark:     order.Remark,
-		UserID:     order.UserID,
-		Credited:   order.IsCredited(),
-		CreatedAt:  unixOrZero(order.CreatedAt),
-		PaidAt:     unixOrZero(order.PaidAt),
-		ExpiresAt:  unixOrZero(order.ExpiresAt),
+		TradeNo:        order.TradeNo,
+		Amount:         order.Amount,
+		AmountText:     order.AmountYuan(),
+		Currency:       order.Currency,
+		Quota:          order.Quota,
+		Method:         order.Method,
+		SubMethod:      order.SubMethod,
+		MethodLabel:    paymentMethodLabel(order.Method),
+		SubMethodLabel: payment.SubMethodLabel(order.Method, order.SubMethod),
+		Status:         int(order.Status),
+		StatusText:     order.Status.String(),
+		PayURL:         order.PayURL,
+		Remark:         order.Remark,
+		UserID:         order.UserID,
+		Credited:       order.IsCredited(),
+		CreatedAt:      unixOrZero(order.CreatedAt),
+		PaidAt:         unixOrZero(order.PaidAt),
+		ExpiresAt:      unixOrZero(order.ExpiresAt),
 	}
 }
 
@@ -118,6 +135,10 @@ func (s *Server) handlePublicPaymentInfo(c *gin.Context) {
 			"name":  method,
 			"label": paymentMethodLabel(method),
 			"ready": s.paymentMethodReady(method),
+			// sub_methods 展开该通道下的"子支付方式"（如易支付的支付宝/微信）。
+			// 没有子方式的通道（Stripe、人工确认）下发空数组，
+			// 前端据此决定"渲染一行"还是"渲染多行由用户选"。
+			"sub_methods": s.paymentSubMethods(settings.Payment, method),
 		})
 	}
 
@@ -159,6 +180,47 @@ func paymentMethodLabel(method string) string {
 	default:
 		return method
 	}
+}
+
+// paymentSubMethods 返回某通道当前可用的子支付方式（下单页要展示的选项）。
+//
+// 数据来源是"注册表的目录"与"站长已开通的类型"的交集：
+// 目录在 payment 包（与通道知识一起维护），已开通项在设置表的 "<通道>.types"。
+// 非空时前端会把每个子方式渲染成一行独立的选项（如「支付宝」「微信支付」）。
+func (s *Server) paymentSubMethods(pay model.PaymentSettings, method string) []gin.H {
+	options := payment.EnabledSubMethods(method, pay.ParamList(method, "types"))
+	result := make([]gin.H, 0, len(options))
+	for _, item := range options {
+		result = append(result, gin.H{"name": item.Name, "label": item.Label})
+	}
+	return result
+}
+
+// resolveSubMethod 解析并校验下单请求里的子支付方式。
+//
+// 三种情况：
+//  1. 通道无子方式（Stripe/人工确认）：原样返回（子方式无意义，留空即可）；
+//  2. 有子方式但请求没传：回退为第一个已开通项——
+//     这既保证订单记录里能看到"实际用了什么"，也避免"下单时是支付宝、
+//     订单里却是一片空白"的对不上；
+//  3. 传了但不在已开通列表里：返回 ok=false，由调用方拒绝。
+//
+// 为什么必须校验：type 会原样拼进收银台地址。放着不校验，
+// 用户就能提交一个平台没给本站开通的类型（如自己填个 bank），
+// 结果是"跳到收银台后被平台报莫名错误"，这类故障最难排查。
+func resolveSubMethod(pay model.PaymentSettings, method, requested string) (string, bool) {
+	options := payment.EnabledSubMethods(method, pay.ParamList(method, "types"))
+	if len(options) == 0 {
+		return strings.TrimSpace(requested), true
+	}
+	sub := strings.TrimSpace(requested)
+	if sub == "" {
+		return options[0].Name, true
+	}
+	if !payment.HasSubMethod(options, sub) {
+		return "", false
+	}
+	return sub, true
 }
 
 // createOrderRequest 是下单请求体。
@@ -227,6 +289,13 @@ func (s *Server) handleCreateOrder(c *gin.Context) {
 		return
 	}
 
+	subMethod, ok := resolveSubMethod(pay, method, req.SubMethod)
+	if !ok {
+		oai.WriteError(c.Writer, http.StatusBadRequest,
+			"该支付方式未开通，请刷新页面后重试", oai.TypeInvalidRequest, "payment_sub_method_disabled")
+		return
+	}
+
 	quota := pay.AmountToQuota(req.AmountCents)
 	if quota <= 0 {
 		// 兑换比例配置错误时不应产生"付钱但到账 0 额度"的订单
@@ -253,7 +322,7 @@ func (s *Server) handleCreateOrder(c *gin.Context) {
 		Currency:  pay.CurrencyOrDefault(),
 		Quota:     quota,
 		Method:    method,
-		SubMethod: strings.TrimSpace(req.SubMethod),
+		SubMethod: subMethod,
 		Status:    model.PaymentStatusPending,
 		Remark:    truncateRunes(strings.TrimSpace(req.Remark), 200),
 		ExpiresAt: time.Now().Add(time.Duration(ttl) * time.Minute),

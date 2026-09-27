@@ -190,9 +190,13 @@ func Channels() []Channel {
 				{
 					Key: "types", Label: "开通的支付方式", Kind: KindList, Source: SourceSetting,
 					Placeholder: "alipay,wxpay",
-					Help: "逗号分隔。常用值：alipay（支付宝）、wxpay（微信）。" +
-						"与平台后台实际开通的方式保持一致，填错会导致用户看不到对应入口。",
+					Help: "勾选你在易支付平台实际开通的方式（可多选）。" +
+						"这里勾了什么，用户充值时就只能看到什么；填错会导致用户看不到对应入口。",
 					Required: true,
+					// Options 让后台渲染成"带中文名的可勾选项"，
+					// 而不是让站长手打 alipay/wxpay —— 手打最容易拼错，
+					// 而拼错的后果是"用户看不到微信入口"这种不报错的静默故障。
+					Options: subMethodOptions("epay"),
 				},
 				{
 					Key: "key", Label: "商户密钥", Kind: KindText, Source: SourceSecret,
@@ -353,6 +357,123 @@ func ChannelLabel(key string) string {
 		return channel.Label
 	}
 	return key
+}
+
+// SubMethod 描述一个通道下的"子支付方式"。
+//
+// 为什么需要它：易支付这类聚合通道只有一个 Provider（一个下单入口，
+// 参数是 type=alipay/wxpay），但用户在收银台上真正要选的是"支付宝还是微信"。
+// 只把通道名发给前端，用户就只看得到一个「在线支付」，无法表达自己的选择，
+// 订单记录里也只剩一个看不出所以然的子方式代码。
+// 因此把"通道 → 子方式目录"登记在这里，与通道自身的知识放在一起维护。
+type SubMethod struct {
+	// Name 是下单时传给支付平台的 type 值（如 alipay）。
+	Name string
+	// Label 是面向用户展示的中文名（如「支付宝」）。
+	Label string
+}
+
+// subMethodOptions 把子方式目录转成字段选项（供后台渲染成可勾选项）。
+func subMethodOptions(channelKey string) []FieldOption {
+	subs := ChannelSubMethods(channelKey)
+	if len(subs) == 0 {
+		return nil
+	}
+	options := make([]FieldOption, 0, len(subs))
+	for _, item := range subs {
+		options = append(options, FieldOption{Value: item.Name, Label: item.Label})
+	}
+	return options
+}
+
+// ChannelSubMethods 返回某通道登记的子支付方式目录。
+//
+// 返回 nil 表示该通道没有"子方式"概念（如 Stripe、人工确认）——
+// 前端据此决定渲染单行还是多行选项。
+func ChannelSubMethods(channelKey string) []SubMethod {
+	switch strings.TrimSpace(channelKey) {
+	case "epay":
+		// 常用值取自公开的易支付接口约定；未列出的自定义值仍可用
+		// （见 EnabledSubMethods：目录外的值照样下发，只是没有中文名）。
+		return []SubMethod{
+			{Name: "alipay", Label: "支付宝"},
+			{Name: "wxpay", Label: "微信支付"},
+			{Name: "qqpay", Label: "QQ 钱包"},
+			{Name: "jdpay", Label: "京东支付"},
+			{Name: "bank", Label: "网银支付"},
+		}
+	}
+	return nil
+}
+
+// SubMethodLabel 返回子方式的展示名；未登记时回退为名字本身。
+//
+// 回退而不是报错的原因：站长完全可以填平台支持但目录里没有的 type，
+// 此时展示原始代码也好过展示空白。
+func SubMethodLabel(channelKey, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	for _, item := range ChannelSubMethods(channelKey) {
+		if item.Name == name {
+			return item.Label
+		}
+	}
+	return name
+}
+
+// EnabledSubMethods 按"站长已开通的类型"过滤目录，并保持目录顺序。
+//
+// enabled 一般来自设置表的 "<通道>.types"。语义要点：
+//   - 通道没有子方式概念（目录为 nil，如 Stripe/人工确认）→ 返回 nil：
+//     即使设置里误留了值也不展开，免得前端把 Stripe 渲染成好几个入口；
+//   - 目录内且已开通的，用中文名下发（用户看到「支付宝」而不是 «alipay»）；
+//   - 目录外的自定义值也照样下发，标签回退为原始值（不因目录不全而丢功能）；
+//   - enabled 为空时返回 nil：视为"该通道没有子方式"，与目录为 nil 同样处理。
+func EnabledSubMethods(channelKey string, enabled []string) []SubMethod {
+	catalog := ChannelSubMethods(channelKey)
+	if len(catalog) == 0 || len(enabled) == 0 {
+		return nil
+	}
+	wanted := make(map[string]bool, len(enabled))
+	for _, item := range enabled {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			wanted[trimmed] = true
+		}
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
+
+	result := make([]SubMethod, 0, len(wanted))
+	for _, item := range catalog {
+		if wanted[item.Name] {
+			result = append(result, item)
+			delete(wanted, item.Name)
+		}
+	}
+	// 目录外的值：保持站长填写的顺序，标签回退为原始代码
+	for _, item := range enabled {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" || !wanted[trimmed] {
+			continue
+		}
+		result = append(result, SubMethod{Name: trimmed, Label: trimmed})
+		delete(wanted, trimmed)
+	}
+	return result
+}
+
+// HasSubMethod 判断某个子方式是否在候选集合里（下单校验用）。
+func HasSubMethod(options []SubMethod, name string) bool {
+	name = strings.TrimSpace(name)
+	for _, item := range options {
+		if item.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateChannelEnabled 校验"启用这个通道"是否成立。
