@@ -196,6 +196,15 @@ func TokenAuth(tokens model.TokenRepository, users model.UserRepository, reserve
 		// 只有知道是哪个模型，才能判断"这次调用要不要花钱"；
 		// 而免费模型必须能被额度为 0 的用户正常调用。
 		//
+		// 还要先判断"本次请求是否根本没有请求体"：GET/HEAD 这类只读元数据端点
+		// （GET /v1/models 拉模型清单、GET /v1/tasks 查异步任务）没有 model 字段可言。
+		// 它们既不涉及模型白名单，也不产生任何上游调用与费用，因此
+		// 【既不校验白名单、也不走额度墙】。否则会出现两个都真实发生过的荒谬后果：
+		//   · 带模型白名单的令牌拉模型清单 → 400「请求体不是合法的 JSON」；
+		//   · 余额为 0 的用户连"有哪些模型可用"都看不到 → 429。
+		// 结果是用户根本接不进来，而站长从日志里只会看到一串 400/429。
+		bodyless := isBodylessRequest(c.Request)
+
 		//   - 白名单非空时【必须】拿到模型名，拿不到就按错误响应返回；
 		//   - 白名单为空时，为判断计费而【尽力】读取模型名：
 		//     读不到（请求体非法/缺 model/超限）不报错，但也不豁免额度墙（保守），
@@ -204,7 +213,10 @@ func TokenAuth(tokens model.TokenRepository, users model.UserRepository, reserve
 			modelName   string
 			promptBytes int
 		)
-		if len(token.Models) > 0 {
+		switch {
+		case bodyless:
+			// 无请求体的元数据请求：没有模型需要校验，也不产生费用
+		case len(token.Models) > 0:
 			name, size, err := peekModelFromBody(c)
 			if err != nil {
 				writeModelBodyError(c, err)
@@ -216,7 +228,7 @@ func TokenAuth(tokens model.TokenRepository, users model.UserRepository, reserve
 					"model.not_allowed", oai.TypePermission, oai.CodeModelNotAllowed)
 				return
 			}
-		} else if owner != nil && reserver != nil && owner.Quota != model.QuotaUnlimited {
+		case owner != nil && reserver != nil && owner.Quota != model.QuotaUnlimited:
 			// 只有"额度有限、可能被额度墙拦住"的账号才需要为判断计费而读请求体：
 			// 不限额度的账号无论如何都会放行，读它纯属浪费（保持"绝大多数请求零额外开销"）。
 			if name, size, err := peekModelFromBody(c); err == nil {
@@ -258,7 +270,9 @@ func TokenAuth(tokens model.TokenRepository, users model.UserRepository, reserve
 		//  2) 判定要用 <= 0 而不是 == 0：已用超过总额度时剩余为负数，
 		//     只判 0 会把"已经超额"的账号放行。
 		needReserve := false
-		if owner != nil && !exemptFromQuota {
+		// bodyless：无请求体的只读元数据请求（GET /v1/models 等）跳过额度墙。
+		// 它们不产生任何费用，"余额为 0 就不让看模型清单"只会把用户挡在门外。
+		if owner != nil && !bodyless && !exemptFromQuota {
 			// 统计在途预留：仅在"有限额度 + 启用了预留"时才需要查库。
 			if reserver != nil && owner.Quota != model.QuotaUnlimited {
 				if p, perr := reserver.PendingReserved(c.Request.Context(), owner.ID); perr == nil {
@@ -362,6 +376,17 @@ func tryReserveQuota(c *gin.Context, reserver QuotaReserver, token *model.Token,
 		return "", true
 	}
 	return requestID, true
+}
+
+// isBodylessRequest 判断本次请求是否没有请求体。
+//
+// 判据刻意用 HTTP 方法而不是"读出来是空的"：
+//   - GET / HEAD 在语义上就没有请求体，其中的 /v1 端点（/v1/models、/v1/tasks）
+//     都是只读元数据，不产生任何上游调用与费用；
+//   - POST 即使体为空也应走原有的解析错误路径（错误信息保持一致，
+//     也避免"空体 POST 被当成元数据请求"而绕过额度墙）。
+func isBodylessRequest(r *http.Request) bool {
+	return r.Method == http.MethodGet || r.Method == http.MethodHead
 }
 
 // peekModelFromBody 读取请求体并取出 model 名与请求体长度。

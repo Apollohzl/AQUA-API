@@ -772,3 +772,118 @@ func TestTokenAuth_信任额度旁路_跳过预留(t *testing.T) {
 		t.Fatalf("信任额度旁路不应写预留，实际 %d 次", reserver.reserveCalls)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 只读元数据请求（GET /v1/models 等）
+// ---------------------------------------------------------------------------
+
+// createMetadataProbeToken 创建一个归属指定用户的令牌（可带模型白名单）。
+func createMetadataProbeToken(t *testing.T, tokens model.TokenRepository, userID uint64, models []string) string {
+	t.Helper()
+
+	key, err := model.GenerateTokenKey()
+	if err != nil {
+		t.Fatalf("生成令牌失败: %v", err)
+	}
+	token := &model.Token{
+		OwnerID:        userID,
+		Name:           "metadata-probe",
+		Key:            key,
+		Status:         model.TokenStatusEnabled,
+		UnlimitedQuota: true, // 令牌本身不限额度，让失败只可能来自账号级校验或白名单
+		Models:         models,
+	}
+	if err := tokens.Create(context.Background(), token); err != nil {
+		t.Fatalf("创建令牌失败: %v", err)
+	}
+	return key
+}
+
+// TestTokenAuth_元数据请求不受额度墙与白名单影响 覆盖"拉取模型清单被误拦"的线上问题。
+//
+// 线上实测（2026-09-27）有两种表现，都让用户接不进来
+// （SDK / IDE 插件启动时第一件事就是拉模型清单）：
+//   - 余额 0 的用户      → GET /v1/models 返回 429「账号额度已用尽」；
+//   - 带模型白名单的令牌  → GET /v1/models 返回 400「请求体不是合法的 JSON」。
+//
+// 而 GET 类只读元数据端点既没有"被调用的模型"，也不产生任何上游调用与费用，
+// 因此既不该查白名单、也不该走额度墙。本用例同时锁住"不能因此放宽 POST"。
+func TestTokenAuth_元数据请求不受额度墙与白名单影响(t *testing.T) {
+	tokens, users := newTokenAndUserRepos(t)
+	ctx := context.Background()
+
+	owner := &model.User{
+		Username:     "metadata-owner",
+		PasswordHash: "test-hash-placeholder",
+		Role:         model.UserRoleUser,
+		Status:       model.UserStatusEnabled,
+		Quota:        0, // 关键：余额为 0
+	}
+	if err := users.Create(ctx, owner); err != nil {
+		t.Fatalf("创建用户失败: %v", err)
+	}
+
+	reserver := &fakeQuotaReserver{priced: true, estimateAmount: 500}
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(TokenAuth(tokens, users, reserver))
+	engine.GET("/v1/models", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"object": "list"})
+	})
+	engine.POST("/v1/chat/completions", okHandler)
+
+	getModels := func(key string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		req.Header.Set("Authorization", "Bearer "+key)
+		rec := httptest.NewRecorder()
+		engine.ServeHTTP(rec, req)
+		return rec
+	}
+
+	t.Run("余额为 0 也能拉取模型清单", func(t *testing.T) {
+		key := createMetadataProbeToken(t, tokens, owner.ID, nil)
+		rec := getModels(key)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("余额 0 拉模型清单应放行（200），实际 %d（%s）", rec.Code, rec.Body.String())
+		}
+		if reserver.reserveCalls != 0 {
+			t.Fatalf("元数据请求不应写额度预留，实际 %d 次", reserver.reserveCalls)
+		}
+	})
+
+	t.Run("带模型白名单的令牌也能拉取模型清单", func(t *testing.T) {
+		key := createMetadataProbeToken(t, tokens, owner.ID, []string{"allowed-model"})
+		rec := getModels(key)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("白名单令牌拉模型清单应放行（200），实际 %d（%s）", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("POST 仍严格校验白名单", func(t *testing.T) {
+		key := createMetadataProbeToken(t, tokens, owner.ID, []string{"allowed-model"})
+		rec := doAuthRequest(t, engine, map[string]string{"Authorization": "Bearer " + key},
+			`{"model":"other-model","messages":[]}`)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("白名单外的模型应被拒（403），实际 %d（%s）", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("POST 缺 model 字段仍按原样报错", func(t *testing.T) {
+		key := createMetadataProbeToken(t, tokens, owner.ID, []string{"allowed-model"})
+		rec := doAuthRequest(t, engine, map[string]string{"Authorization": "Bearer " + key},
+			`{"messages":[]}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("缺 model 应返回 400，实际 %d（%s）", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("余额为 0 调用计费模型仍被额度墙拦住", func(t *testing.T) {
+		key := createMetadataProbeToken(t, tokens, owner.ID, nil)
+		rec := doAuthRequest(t, engine, map[string]string{"Authorization": "Bearer " + key},
+			`{"model":"priced-model","messages":[]}`)
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("余额 0 调用计费模型应返回 429，实际 %d（%s）", rec.Code, rec.Body.String())
+		}
+	})
+}
