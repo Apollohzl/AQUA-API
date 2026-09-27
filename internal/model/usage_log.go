@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -52,10 +53,17 @@ const (
 //     （可能包含上游地址或密钥片段）；
 //   - RequestID 用于与客户端日志对账，排查"客户端说失败、服务端说成功"这类问题。
 type UsageLog struct {
-	ID               uint64 // 主键
-	UserID           uint64 // 调用者用户 ID（0 表示未认证或系统调用）
-	TokenID          uint64 // 使用的访问令牌 ID
-	ChannelID        uint64 // 命中的上游渠道 ID
+	ID        uint64 // 主键
+	UserID    uint64 // 调用者用户 ID（0 表示未认证或系统调用）
+	TokenID   uint64 // 使用的访问令牌 ID
+	ChannelID uint64 // 命中的上游渠道 ID
+	// ChannelKeyID 是本次实际使用的【池内密钥记录 ID】（迁移 0032）。
+	//
+	// 0 表示不适用或未采集：渠道使用单密钥模式、请求在选渠道前就失败、
+	// 或本条是迁移之前写入的历史日志。
+	// 记下它的意义：可以回答"这把密钥被用了多少"，进而结合上游进价
+	// 算出"余额还剩多少"——否则余额永远只是一个静态的人工快照。
+	ChannelKeyID     uint64
 	Model            string // 请求的模型名（对外模型名）
 	UpstreamModel    string // 实际发给上游的模型名（经渠道映射改写）；空串表示与 Model 相同
 	PromptTokens     int    // 输入 token 数
@@ -243,4 +251,45 @@ type UsageLogRepository interface {
 
 	// TopModels 返回用量最高的前 N 个模型，按请求数降序。
 	TopModels(ctx context.Context, q UsageLogQuery, limit int) ([]ModelUsage, error)
+
+	// SumUsageByChannelKey 按 (密钥, 模型) 汇总某渠道的用量，用于密钥余额核算。
+	//
+	// 口径（重要）：
+	//   - 只统计 status_code < 400 的【成功】请求：失败请求通常不消耗上游额度，
+	//     把它们算进成本会让余额看起来比实际掉得更快；
+	//   - 只统计 channel_key_id > 0 的行：单密钥模式与历史数据无法归属到具体凭据；
+	//   - 统计范围为【全部历史】（余额是累计量，不能只看某个时间窗）。
+	SumUsageByChannelKey(ctx context.Context, channelID uint64) ([]*ChannelKeyUsage, error)
+}
+
+// ChannelKeyUsage 是一把密钥在某个模型上的用量汇总（密钥余额核算的输入）。
+//
+// 按 (密钥, 模型) 而不是只按密钥分组，是因为不同模型的进价差别极大，
+// 必须逐模型匹配进价后再累加，否则算出的成本会明显失真。
+type ChannelKeyUsage struct {
+	ChannelKeyID uint64 // 池内密钥记录 ID（> 0）
+	ChannelID    uint64 // 所属渠道
+	Model        string // 请求的对外模型名
+	// UpstreamModel 是实际发给上游的模型名（映射改写后的名字）；空串表示与 Model 相同。
+	//
+	// 匹配上游进价时必须用它：钱是上游按上游模型名收的。
+	UpstreamModel    string
+	Requests         int64 // 成功请求数
+	PromptTokens     int64 // 输入 token 合计
+	CompletionTokens int64 // 输出 token 合计
+	CachedTokens     int64 // 其中命中缓存合计
+}
+
+// CostModelName 返回用于匹配上游进价的模型名。
+//
+// 优先用上游模型名（成本由上游按该名字决定），为空时回退对外名——
+// 与 usage_logs.upstream_model 的空值语义一致（空 = 映射未改写，两者相同）。
+func (u *ChannelKeyUsage) CostModelName() string {
+	if u == nil {
+		return ""
+	}
+	if name := strings.TrimSpace(u.UpstreamModel); name != "" {
+		return name
+	}
+	return u.Model
 }

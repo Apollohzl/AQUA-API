@@ -943,7 +943,10 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 		TokenID:   identity.TokenID,
 		Group:     group,
 		ChannelID: ch.ID,
-		Model:     modelName,
+		// 记录"本次用的是池内哪把密钥"：后台据此按密钥聚合用量，
+		// 结合上游进价算出该密钥的已消耗与剩余（单密钥模式为 0）。
+		ChannelKeyID: target.keyID,
+		Model:        modelName,
 		// 仅当映射改写了模型名时才记录上游名（否则为空串，表示与对外名一致）。
 		UpstreamModel:   upstreamModelForLog(upstreamModel, modelRewritten),
 		Usage:           usage,

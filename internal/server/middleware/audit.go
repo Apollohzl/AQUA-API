@@ -319,4 +319,6 @@ var auditActionLabels = map[string]string{
 	"POST /api/admin/sensitive-words/import": "批量导入敏感词",
 	"PUT /api/admin/sensitive-words/:id":     "更新敏感词",
 	"DELETE /api/admin/sensitive-words/:id":  "删除敏感词",
+
+	"PUT /api/admin/channels/:id/costs": "保存渠道上游进价",
 }

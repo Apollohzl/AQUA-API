@@ -41,7 +41,7 @@ const (
 const defaultSeriesDays = 7
 
 // usageLogColumns 集中定义查询列，顺序必须与 scanUsageLog 的扫描顺序严格一致。
-const usageLogColumns = `id, user_id, token_id, channel_id, model, upstream_model, prompt_tokens, completion_tokens,
+const usageLogColumns = `id, user_id, token_id, channel_id, channel_key_id, model, upstream_model, prompt_tokens, completion_tokens,
 	total_tokens, cached_tokens, reasoning_tokens, first_token_ms, tokens_per_second,
 	quota, latency_ms, is_stream, status_code, error, request_id, created_at`
 
@@ -69,11 +69,11 @@ func (r *usageLogRepository) Create(ctx context.Context, log *model.UsageLog) er
 
 	res, err := r.db.ExecContext(ctx, `
 		INSERT INTO usage_logs
-			(user_id, token_id, channel_id, model, upstream_model, prompt_tokens, completion_tokens, total_tokens,
+			(user_id, token_id, channel_id, channel_key_id, model, upstream_model, prompt_tokens, completion_tokens, total_tokens,
 			 cached_tokens, reasoning_tokens, first_token_ms, tokens_per_second,
 			 quota, latency_ms, is_stream, status_code, error, request_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		log.UserID, log.TokenID, log.ChannelID, log.Model, log.UpstreamModel,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		log.UserID, log.TokenID, log.ChannelID, log.ChannelKeyID, log.Model, log.UpstreamModel,
 		log.PromptTokens, log.CompletionTokens, log.TotalTokens,
 		log.CachedTokens, log.ReasoningTokens, log.FirstTokenMS, log.TokensPerSecond,
 		log.Quota, log.LatencyMS, boolToInt(log.IsStream), log.StatusCode,
@@ -293,6 +293,50 @@ func (r *usageLogRepository) TopModels(ctx context.Context, q model.UsageLogQuer
 	return result, nil
 }
 
+// SumUsageByChannelKey 按 (密钥, 模型) 汇总某渠道的用量，用于密钥余额核算。
+//
+// SQL 层面的三个约束与 model.UsageLogRepository 的接口注释一一对应：
+//   - status_code < 400：只算成功请求（失败通常不消耗上游额度）；
+//   - channel_key_id > 0：无法归属到具体凭据的行（单密钥模式 / 历史数据）不参与；
+//   - channel_id = ?：一次只算一个渠道，避免把别的渠道成本混进来。
+//
+// 用 SUM(...) 时必须 COALESCE：SQLite 对全 NULL 列求和返回 NULL，
+// 直接扫进 int64 会报错（历史上列可空，虽然新代码总是写 0）。
+func (r *usageLogRepository) SumUsageByChannelKey(ctx context.Context, channelID uint64) ([]*model.ChannelKeyUsage, error) {
+	if channelID == 0 {
+		return []*model.ChannelKeyUsage{}, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT channel_key_id, channel_id, model, upstream_model,
+		       COUNT(1),
+		       COALESCE(SUM(prompt_tokens), 0),
+		       COALESCE(SUM(completion_tokens), 0),
+		       COALESCE(SUM(cached_tokens), 0)
+		FROM usage_logs
+		WHERE channel_id = ? AND channel_key_id > 0 AND status_code < 400
+		GROUP BY channel_key_id, model, upstream_model
+		ORDER BY channel_key_id ASC`, channelID)
+	if err != nil {
+		return nil, fmt.Errorf("store: 按密钥汇总用量失败: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make([]*model.ChannelKeyUsage, 0, 32)
+	for rows.Next() {
+		var item model.ChannelKeyUsage
+		if err := rows.Scan(&item.ChannelKeyID, &item.ChannelID, &item.Model, &item.UpstreamModel,
+			&item.Requests, &item.PromptTokens, &item.CompletionTokens, &item.CachedTokens); err != nil {
+			return nil, fmt.Errorf("store: 读取密钥用量汇总失败: %w", err)
+		}
+		result = append(result, &item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: 遍历密钥用量汇总失败: %w", err)
+	}
+	return result, nil
+}
+
 // buildUsageWhere 构造日志查询的 WHERE 子句与参数。
 func buildUsageWhere(q model.UsageLogQuery) (string, []any) {
 	var (
@@ -374,6 +418,7 @@ func scanUsageLog(sc rowScanner) (*model.UsageLog, error) {
 		userID           uint64
 		tokenID          uint64
 		channelID        uint64
+		channelKeyID     uint64
 		modelName        string
 		upstreamModel    string
 		promptTokens     int
@@ -392,7 +437,7 @@ func scanUsageLog(sc rowScanner) (*model.UsageLog, error) {
 		createdAt        int64
 	)
 
-	if err := sc.Scan(&id, &userID, &tokenID, &channelID, &modelName, &upstreamModel,
+	if err := sc.Scan(&id, &userID, &tokenID, &channelID, &channelKeyID, &modelName, &upstreamModel,
 		&promptTokens, &completionTokens, &totalTokens,
 		&cachedTokens, &reasoningTokens, &firstTokenMS, &tokensPerSecond,
 		&quota, &latencyMS,
@@ -408,6 +453,7 @@ func scanUsageLog(sc rowScanner) (*model.UsageLog, error) {
 		UserID:           userID,
 		TokenID:          tokenID,
 		ChannelID:        channelID,
+		ChannelKeyID:     channelKeyID,
 		Model:            modelName,
 		UpstreamModel:    upstreamModel,
 		PromptTokens:     promptTokens,

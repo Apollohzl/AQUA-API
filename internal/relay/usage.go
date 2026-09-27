@@ -405,7 +405,12 @@ type usageEntry struct {
 	// 空字符串表示未指定，由 Billing 回退到默认分组。
 	Group     string
 	ChannelID uint64
-	Model     string
+	// ChannelKeyID 是本次实际使用的池内密钥记录 ID（0 = 单密钥模式或未采集）。
+	//
+	// 它让"这把密钥被用了多少"成为可计算的事实，进而能结合上游进价
+	// 算出余额剩余；失败请求不计消耗，因此失败路径允许留 0。
+	ChannelKeyID uint64
+	Model        string
 	// UpstreamModel 是本次实际发给上游的模型名（映射改写后的名字）。
 	//
 	// 语义约定：无映射或映射未改变模型名时为空串（表示"上游模型 = 对外模型"），
@@ -441,6 +446,7 @@ func (r *Relay) recordUsage(ctx context.Context, entry usageEntry) {
 		UserID:           entry.UserID,
 		TokenID:          entry.TokenID,
 		ChannelID:        entry.ChannelID,
+		ChannelKeyID:     entry.ChannelKeyID,
 		Model:            entry.Model,
 		UpstreamModel:    entry.UpstreamModel,
 		PromptTokens:     entry.Usage.PromptTokens,

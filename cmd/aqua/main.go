@@ -211,6 +211,8 @@ func run() error {
 	quotaReservations := store.NewQuotaRepository(st.DB())
 	// 敏感词表：内容合规过滤的词条来源（匹配器由 server 中间件按需编译并缓存）。
 	sensitiveWords := store.NewSensitiveWordRepository(st.DB())
+	// 上游进价（渠道 × 模型）：密钥余额核算与毛利的基础数据。
+	channelModelCosts := store.NewChannelModelCostRepository(st.DB())
 
 	// 启动时清理过期会话：会话表随登录次数持续增长，不清理会无限膨胀。
 	// 清理失败不阻断启动（这只是维护动作，不影响核心功能）。
@@ -412,6 +414,8 @@ func run() error {
 		Referrals:     referrals,
 		// 敏感词表：/v1 入口的内容合规过滤
 		SensitiveWords: sensitiveWords,
+		// 上游进价：按密钥核算消耗、计算余额剩余与毛利
+		ChannelModelCosts: channelModelCosts,
 		// 订阅账号：OAuth 提供方配置（后台维护）
 		OAuthProviders: oauthProviders,
 		// 异步任务：仓储（查询）+ 编排服务（提交/轮询/取消）

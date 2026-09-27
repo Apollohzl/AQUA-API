@@ -656,6 +656,12 @@ func (s *Server) handleDeleteChannel(c *gin.Context) {
 		_ = s.deps.ChannelKeys.DeleteByChannel(ctx, id)
 	}
 
+	// 级联清理上游进价：成本规则以渠道为归属，留下只会成为永远不会被读到的孤儿数据
+	//（它的模型名还可能与其他渠道重名，将来排查成本问题时极易误导）。
+	if s.deps.ChannelModelCosts != nil {
+		_ = s.deps.ChannelModelCosts.DeleteByChannel(ctx, id)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 

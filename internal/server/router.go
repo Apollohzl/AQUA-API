@@ -145,6 +145,15 @@ func (s *Server) registerRoutes() {
 	// 让"哪个账号快满了"与"何时恢复"在后台可见，而不是等被限流才发现。
 	admin.POST("/channels/:id/keys/:keyId/quota", s.handleProbeChannelKeyQuota)
 
+	// 上游计费（渠道 × 模型进价）：站长核算成本与毛利的唯一录入入口。
+	//
+	// 放在渠道之下而不是与 /prices 并列，原因是它的归属维度是"渠道"：
+	// 同一模型在不同渠道的成本可能相差数倍，两者是不同维度、各管一个方向。
+	admin.GET("/channels/:id/costs", s.handleListChannelCosts)
+	admin.PUT("/channels/:id/costs", s.handleReplaceChannelCosts)
+	// 密钥余额核算：按密钥聚合用量 × 进价 = 已消耗，与录入余额相减得剩余。
+	admin.GET("/channels/:id/key-usage", s.handleChannelKeyUsage)
+
 	// 凭据调度策略目录：后台渠道表单据此渲染「调度策略」下拉与帮助文案，
 	// 因此新增策略不需要改前端代码。
 	admin.GET("/key-strategies", s.handleListKeyStrategies)

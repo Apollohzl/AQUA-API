@@ -53,15 +53,6 @@ var ErrModelPriceNotFound = errors.New("model: 计价规则不存在")
 // ErrModelPriceDuplicated 表示同分组下已存在同名规则。
 var ErrModelPriceDuplicated = errors.New("model: 该分组下已存在同名计价规则")
 
-// quotaScale 是价格口径的换算基数：价格字段为"每 100 万 token"。
-//
-// 单独定义成常量而不是在公式里写 1_000_000，是为了让"口径"这件事在代码里
-// 有一个可被检索的名字——将来若改成"每千 token"，只需改这一处并同步注释。
-const quotaScale int64 = 1_000_000
-
-// wildcardAll 是"匹配全部模型"的通配规则。
-const wildcardAll = "*"
-
 // ModelPrice 表示一条模型计价规则。
 type ModelPrice struct {
 	ID              uint64    // 主键
@@ -93,64 +84,24 @@ func (p *ModelPrice) Validate() error {
 	return nil
 }
 
-// PatternKind 描述规则模式的类型，用于匹配优先级判定。
-type PatternKind int
-
-const (
-	// PatternExact 精确匹配（如 "gpt-4o"）
-	PatternExact PatternKind = iota
-	// PatternPrefix 前缀通配（如 "gpt-4*"）
-	PatternPrefix
-	// PatternAll 全局通配（"*"）
-	PatternAll
-)
-
 // PatternKind 返回该规则的模式类型。
+//
+// 实现委托给 PricePattern（见 price_pattern.go）：售价与上游进价必须用同一套
+// 匹配语义，否则会出现"两条规则各自命中不同模式"的错账。
 func (p *ModelPrice) PatternKind() PatternKind {
-	pattern := strings.TrimSpace(p.Model)
-	if pattern == wildcardAll {
-		return PatternAll
-	}
-	if strings.HasSuffix(pattern, "*") {
-		return PatternPrefix
-	}
-	return PatternExact
+	return PricePattern(p.Model).Kind()
 }
 
 // Matches 判断该规则是否适用于给定模型名。
 //
-// 匹配规则：
-//   - 精确：完全相等；
-//   - 前缀通配："gpt-4*" 匹配 "gpt-4o"、"gpt-4-turbo"；
-//   - 全局通配："*" 匹配一切。
-//
-// 匹配是大小写敏感的：模型名是上游定义的标识符，
-// 大小写不同通常代表不同模型（如 "GPT-4" 与 "gpt-4" 在部分上游是两个条目）。
+// 匹配规则见 PricePattern.Matches（精确 / 前缀通配 / 全局通配）。
 func (p *ModelPrice) Matches(modelName string) bool {
-	pattern := strings.TrimSpace(p.Model)
-	switch p.PatternKind() {
-	case PatternAll:
-		return true
-	case PatternPrefix:
-		return strings.HasPrefix(modelName, strings.TrimSuffix(pattern, "*"))
-	default:
-		return pattern == modelName
-	}
+	return PricePattern(p.Model).Matches(modelName)
 }
 
-// specificity 返回模式的具体程度（数值越大越优先）。
-//
-// 这样排序后即可实现"精确 > 长前缀 > 短前缀 > 全局"的优先级，
-// 而不需要写一串嵌套判断。
+// specificity 返回模式的具体程度（数值越大越优先），用于"精确 > 长前缀 > 全局"排序。
 func (p *ModelPrice) specificity() int {
-	switch p.PatternKind() {
-	case PatternExact:
-		return 10000 + len(p.Model)
-	case PatternPrefix:
-		return 1000 + len(p.Model)
-	default:
-		return 0
-	}
+	return PricePattern(p.Model).Specificity()
 }
 
 // ComputeQuota 按用量计算应扣额度（不含缓存维度，等价于 cachedTokens=0）。
@@ -171,56 +122,27 @@ func (p *ModelPrice) ComputeQuota(promptTokens, completionTokens int64) int64 {
 //     强制传 0 会让调用点噪声变大；
 //   - 缓存计价是本文件里唯一"分两段算输入"的地方，单独命名便于检索与测试。
 //
-// 口径：
+// 口径（唯一实现见 price_formula.go 的 ComputeTokenQuota，与上游进价共用）：
 //
-//	未命中输入 = promptTokens − cachedTokens（按 promptPrice）
-//	命中输入   = cachedTokens（按 cachePrice，未配置时回退 promptPrice）
-//	输出       = completionTokens（按 completionPrice）
-//
-// cachedTokens 会被夹到 [0, promptTokens]：上游偶发上报超出 prompt 的缓存数
-// （或我们自己把 cache_read 与 cached 两类字段合并时重复计数），
-// 不夹住会出现"输入被算两次"的隐性多扣。
+//	未命中输入 = promptTokens − cachedTokens（按 PromptPrice）
+//	命中输入   = cachedTokens（按 CachePrice，未配置时回退 PromptPrice）
+//	输出       = completionTokens（按 CompletionPrice）
 func (p *ModelPrice) ComputeQuotaWithCache(promptTokens, completionTokens, cachedTokens int64) int64 {
 	if p == nil {
 		return 0
 	}
-	if promptTokens < 0 {
-		promptTokens = 0
-	}
-	if completionTokens < 0 {
-		completionTokens = 0
-	}
-	if cachedTokens < 0 {
-		cachedTokens = 0
-	}
-	if cachedTokens > promptTokens {
-		cachedTokens = promptTokens
-	}
-
-	cachePrice := p.CachePrice
-	if cachePrice <= 0 {
-		// 未配置缓存价：命中部分仍按输入价，与引入该维度前的账目完全一致。
-		cachePrice = p.PromptPrice
-	}
-
-	uncached := promptTokens - cachedTokens
-	return (uncached*p.PromptPrice + cachedTokens*cachePrice + completionTokens*p.CompletionPrice) / quotaScale
+	return ComputeTokenQuota(p.PromptPrice, p.CachePrice, p.CompletionPrice,
+		promptTokens, completionTokens, cachedTokens)
 }
 
 // ComputePerCallQuota 按"次数"计算应扣额度（异步任务 / 图像视频类）。
 //
-// 公式：quota = perCallPrice × count
-//
-// count <= 0 时按 1 次处理：缺省即"一次调用"，
-// 若按 0 次计算会变成免费，属于让站长白白亏钱的默认值。
+// 公式：quota = perCallPrice × count；count <= 0 时按 1 次处理。
 func (p *ModelPrice) ComputePerCallQuota(count int64) int64 {
 	if p == nil {
 		return 0
 	}
-	if count <= 0 {
-		count = 1
-	}
-	return p.PerCallPrice * count
+	return ComputePerCallAmount(p.PerCallPrice, count)
 }
 
 // MatchModelPrice 从一组规则中挑出最适用的那一条。
@@ -243,7 +165,7 @@ func MatchModelPrice(prices []*ModelPrice, modelName string) *ModelPrice {
 		}
 		score := price.specificity()
 		// 同分时取 ID 更小的，保证同一份数据每次匹配结果一致
-		if score > bestScore || (score == bestScore && best != nil && price.ID < best.ID) {
+		if best == nil || betterThan(price.ID, best.ID, score, bestScore) {
 			best = price
 			bestScore = score
 		}
