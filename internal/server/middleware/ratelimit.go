@@ -135,21 +135,54 @@ func (l *RateLimiter) Middleware(keyFunc func(*gin.Context) string) gin.HandlerF
 // 取值顺序（重要，关系到限流是否有效）：
 //  1. X-Real-IP：由我们的 nginx 显式设置，最可信；
 //  2. X-Forwarded-For 的第一个地址：多级代理场景，取最左侧（即最初的客户端）；
-//  3. gin 的 ClientIP()：直连场景或未配置代理头时的兜底。
+//  3. 直连对端地址（RemoteAddr）：没有任何代理头时的兜底。
 //
-// 安全提示：这些头可被客户端伪造。生产环境必须由 nginx 用 proxy_set_header
-// 覆盖写入（而不是追加），否则攻击者可通过伪造头绕过限流。
+// 安全提示（关键改动）：这些头【只在直连对端是我们自己的反向代理时才采信】。
+// 原因是它们本质上都是请求头，任何人都能自带；若不加这道门，攻击者只要每次
+// 换一个 X-Real-IP 就能让限流器每次都落进新桶，登录爆破与验证码轰炸的限流形同虚设。
+// 判定方式是看 TCP 对端地址：nginx 与我们同机（127.0.0.1）或同内网时才算"可信代理"，
+// 此时 nginx 的 proxy_set_header 会覆盖/追加这些头，客户端伪造的部分不生效。
+//
+// 注意不能用 gin 的 c.ClientIP() 兜底：它默认信任所有代理，同样会被伪造的
+// X-Forwarded-For 带偏，所以兜底一律取 RemoteAddr 里的对端 IP。
 func ClientIP(c *gin.Context) string {
-	if ip := strings.TrimSpace(c.GetHeader("X-Real-IP")); ip != "" {
-		return ip
-	}
-	if forwarded := c.GetHeader("X-Forwarded-For"); forwarded != "" {
-		if first, _, found := strings.Cut(forwarded, ","); found {
-			return strings.TrimSpace(first)
+	if isTrustedProxyPeer(c.Request.RemoteAddr) {
+		if ip := strings.TrimSpace(c.GetHeader("X-Real-IP")); ip != "" {
+			return NormalizeIP(ip)
 		}
-		return strings.TrimSpace(forwarded)
+		if forwarded := c.GetHeader("X-Forwarded-For"); forwarded != "" {
+			if first, _, found := strings.Cut(forwarded, ","); found {
+				return NormalizeIP(first)
+			}
+			return NormalizeIP(forwarded)
+		}
 	}
-	return NormalizeIP(c.ClientIP())
+	return NormalizeIP(peerIP(c.Request.RemoteAddr))
+}
+
+// peerIP 从 "host:port" 形式的对端地址里取出 IP 部分。
+//
+// 兼容 IPv6 的 "[::1]:1234" 写法（net.SplitHostPort 会去掉方括号）。
+// 解析不了时原样返回，交给 NormalizeIP 处理。
+func peerIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(remoteAddr))
+	if err != nil {
+		return strings.TrimSpace(remoteAddr)
+	}
+	return host
+}
+
+// isTrustedProxyPeer 判断直连对端是否是我们自己的反向代理。
+//
+// 判据：环回地址（同机 nginx）或私网地址（内网代理）。
+// 公网来源一律不采信代理头——它可能是攻击者直连到本进程，也可能只是
+// 别人的代理，两种情况下请求头里的 IP 都不可信。
+func isTrustedProxyPeer(remoteAddr string) bool {
+	ip := net.ParseIP(peerIP(remoteAddr))
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
 }
 
 // NormalizeIP 规整 IP 字符串。

@@ -792,8 +792,10 @@ func (s *Server) recordSecretReveal(c *gin.Context, channelID uint64, count int)
 		Target:     fmt.Sprintf("channel_id=%d", channelID),
 		Detail:     fmt.Sprintf("reveal=1，返回 %d 条凭据原文", count),
 		StatusCode: http.StatusOK,
-		ClientIP:   c.ClientIP(),
-		UserAgent:  c.Request.UserAgent(),
+		// 用 middleware.ClientIP 而非 gin 的 c.ClientIP()：审计记录里的来源 IP
+		// 只有在"直连对端是自家反向代理"时才采信代理头，否则取 TCP 对端地址。
+		ClientIP:  middleware.ClientIP(c),
+		UserAgent: c.Request.UserAgent(),
 	}
 	if user, ok := middleware.CurrentUser(c); ok {
 		entry.AdminID = user.ID

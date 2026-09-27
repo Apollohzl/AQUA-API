@@ -100,6 +100,9 @@ func TestAdminAudit_写操作_记录且脱敏且不影响业务读取(t *testing
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/channels/12", strings.NewReader(payload))
 	req.Header.Set("User-Agent", "audit-test-agent")
 	req.Header.Set("X-Real-IP", "10.0.0.9")
+	// 对端必须是"自家反向代理"（生产即同机 nginx），代理头才会被采信。
+	// httptest 默认的对端是 192.0.2.1（公网测试网段），会被当作不可信来源。
+	req.RemoteAddr = "127.0.0.1:54321"
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
