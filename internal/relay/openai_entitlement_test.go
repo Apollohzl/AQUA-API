@@ -167,7 +167,7 @@ func TestForward_账号无此模型_不换密钥且返回本站脱敏错误(t *t
 		t.Fatalf("导入密钥池失败: %v", err)
 	}
 
-	r := New(channels, Options{Keys: keys, MaxAttempts: 3})
+	r := New(channels, Options{Keys: keys})
 	gateway := newGateway(t, r)
 
 	resp := postChat(t, gateway.URL, `{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`)
@@ -216,7 +216,7 @@ func TestForward_凭据被限流_仍会换密钥重试(t *testing.T) {
 		t.Fatalf("导入密钥池失败: %v", err)
 	}
 
-	r := New(channels, Options{Keys: keys, MaxAttempts: 3})
+	r := New(channels, Options{Keys: keys})
 	gateway := newGateway(t, r)
 
 	// 反复请求：随机挑选必然多次先撞上限流密钥，但换一把就能成功
@@ -316,7 +316,7 @@ func TestForward_全池均无该模型_返回本站脱敏错误(t *testing.T) {
 		t.Fatalf("导入密钥池失败: %v", err)
 	}
 
-	r := New(channels, Options{Keys: keys, MaxAttempts: 1})
+	r := New(channels, Options{Keys: keys})
 	gateway := newGateway(t, r)
 
 	resp := postChat(t, gateway.URL, `{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`)

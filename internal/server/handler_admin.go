@@ -211,6 +211,21 @@ type channelUpsertRequest struct {
 	// 站长把自定义时长改回 0 是一个合法且常见的操作，若用零值表示"不修改"，
 	// 这个操作就永远做不成。
 	KeyCooldownSeconds *int `json:"key_cooldown_seconds"`
+	// RetryEnabled 是上游错误重试的总开关。
+	//
+	// 用指针区分"未提交"（nil，不修改）与"显式提交 false"（关闭重试）：
+	// 关闭重试是一个明确诉求（如按次计费的上游怕重复扣费），
+	// 若用零值表示"不修改"，这个操作就永远做不成。
+	RetryEnabled *bool `json:"retry_enabled"`
+	// RetryMaxAttempts 是渠道级重试次数上限（含首次尝试）。
+	//
+	// 同样用指针：显式提交 0 表示"恢复内置默认次数"（3 次），
+	// 这与"未提交、保持原值"是两件事。
+	RetryMaxAttempts *int `json:"retry_max_attempts"`
+	// ModelRetryRules 是模型级重试覆盖规则。
+	//
+	// nil（字段缺失）表示"不修改"；显式提交 [] 表示"清空所有模型级规则"。
+	ModelRetryRules []model.ModelRetryRule `json:"model_retry_rules"`
 	// KeysText 是"批量密钥"文本框内容：每行一把密钥，行内可用空格或逗号附加备注。
 	//
 	// 为什么用文本而不是 []string：
@@ -365,6 +380,8 @@ func (s *Server) handleCreateChannel(c *gin.Context) {
 	}
 	// 分组：多选清单为准，主分组恒等于清单第一项（避免两个字段互相矛盾）。
 	channel.Groups, channel.Group = resolveChannelGroups(req.Groups, req.Group)
+	// 重试策略：创建时未提交的字段保持零值（未配置 = 启用重试，与旧行为一致）。
+	applyRetryPolicy(channel, req)
 	if req.APIKey != nil {
 		channel.APIKey = *req.APIKey
 	}
@@ -601,6 +618,8 @@ func (s *Server) handleUpdateChannel(c *gin.Context) {
 		}
 		channel.KeyCooldownSeconds = *req.KeyCooldownSeconds
 	}
+	// 重试策略：nil / 字段缺失一律表示"不修改"，保持该渠道已有的配置。
+	applyRetryPolicy(channel, req)
 	if req.APIKey != nil {
 		channel.APIKey = *req.APIKey
 	}
@@ -1196,6 +1215,29 @@ func validateKeyCooldownSeconds(seconds int) error {
 			model.MaxKeyCooldownSeconds)
 	}
 	return nil
+}
+
+// applyRetryPolicy 把请求里的重试配置应用到渠道实体（创建与更新共用）。
+//
+// 抽成一个函数的原因：两条写路径对同一组字段的解析口径必须完全一致，
+// 否则会出现"创建时归一、更新时没归一"这种不对称——同一份输入在两条路径上
+// 落库结果不同，排查起来极为费劲。
+//
+// 只做归一化（去空白/去重/去空项）；取值是否合法交给 model.Channel.Validate——
+// 领域校验是唯一权威，在这里再写一套判断只会多出一处可能走偏的规则。
+func applyRetryPolicy(channel *model.Channel, req channelUpsertRequest) {
+	if req.RetryEnabled != nil {
+		channel.RetryMode = model.RetryModeOn
+		if !*req.RetryEnabled {
+			channel.RetryMode = model.RetryModeOff
+		}
+	}
+	if req.RetryMaxAttempts != nil {
+		channel.RetryMaxAttempts = *req.RetryMaxAttempts
+	}
+	if req.ModelRetryRules != nil {
+		channel.ModelRetryRules = model.NormalizeModelRetryRules(req.ModelRetryRules)
+	}
 }
 
 // resolveChannelGroups 解析渠道的分组清单，并给出主分组（清单第一项）。

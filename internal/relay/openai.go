@@ -189,7 +189,12 @@ type forwardTarget struct {
 //     单渠道也能靠池子消化掉失效密钥，不会因一把钥匙坏掉就整体不可用）；
 //   - 渠道级失败（连接失败、500/502/503/504/529）：说明"这个上游有问题"，
 //     换下一个渠道；
-//   - 其他 4xx（400/404 等）：请求本身有问题，换谁都无法成功，直接透传上游响应。
+//   - 其他 4xx（400/404 等）：请求本身有问题，换谁都无法成功，
+//     【不重试】，按本站语义化错误码脱敏后回给下游（见 sanitizeUpstreamError）。
+//
+// 预算可配置（迁移 0037）：是否重试与重试几次由【渠道】决定，
+// 模型级可单独覆盖（见 model.Channel.RetryPolicyFor）。关闭时对上游只尝试一次，
+// 既不换密钥也不换渠道——适合"重复请求会产生重复扣费"的上游。
 //
 // 重试的硬约束：只有在【尚未向客户端写出任何内容】时才允许重试，
 // 因此判定必须发生在 WriteHeader 之前——状态码一旦发出就无法撤回。
@@ -254,7 +259,7 @@ func (r *Relay) forwardWithFallback(w http.ResponseWriter, req *http.Request, mo
 
 	// 两套独立的尝试预算（重要，别合并成一个）：
 	//
-	//   · channelAttempts：渠道级失败（连不上、5xx）的预算 = maxAttempts。
+	//   · channelAttempts：渠道级失败（连不上、5xx）的预算 = 本次请求重试策略里的次数。
 	//     渠道级失败每次都要重新建连，代价高，必须严格限制，否则故障时延迟被放大。
 	//   · 密钥级失败不走渠道预算，而是由 keyAttempts 单独计量，上限 maxKeyLevelAttempts。
 	//
@@ -264,7 +269,23 @@ func (r *Relay) forwardWithFallback(w http.ResponseWriter, req *http.Request, mo
 	// 此时"换一把密钥"的成本极低（同一上游、复用连接、上游是立即拒绝的），
 	// 所以值得多试几把；若沿用 3 次的渠道预算，绝大多数请求会白跑一趟。
 	channelAttempts := 0
-	// lastFailure 记录"最后一次上游失败"，用于所有重试耗尽后透传真实原因
+	// 重试策略在请求开始时【一次性定下】：由候选清单里优先级最高的那个渠道
+	// （即路由的首选渠道，见 listCandidates 的排序约定）代表本次请求，
+	// 结合请求的模型名解析出"是否重试 + 最多尝试几个渠道"。
+	//
+	// 为什么不在每轮按当前渠道重算：那样每换一个渠道数字就会变，
+	// 站长配的"重试 2 次"可能实际打出 3 次，行为不可预期、事后也无法解释。
+	// 让首选渠道代表本次请求，语义稳定且与"优先级越高越先被选中"的直觉一致。
+	//
+	// 注意：策略关闭时预算压到 1，同时禁用"换密钥/换渠道"两条重试路径——
+	// 后者是 keyFailureCredential / keyFailureEntitlement 分支判断是否重试的依据，
+	// 只把预算改成 1 是不够的（那是渠道级预算，密钥级分支不看它）。
+	retryPolicy := candidates[0].RetryPolicyFor(modelName)
+	channelBudget := retryPolicy.MaxAttempts
+	if !retryPolicy.Enabled {
+		channelBudget = 1
+	}
+	// lastFailure 记录"最后一次上游失败"，用于所有重试耗尽后写入本站调用日志
 	var lastFailure upstreamFailure
 retryLoop:
 	for keyAttempts := 1; keyAttempts <= maxKeyLevelAttempts; keyAttempts++ {
@@ -291,8 +312,8 @@ retryLoop:
 			keyID:           cred.KeyID,
 			keyFailCount:    cred.FailCount,
 			keyMeta:         cred.Meta,
-			hasSpareKey:     hasSpareKey,
-			hasSpareChannel: r.hasOtherChannel(candidates, excludedChannels, ch.ID),
+			hasSpareKey:     retryPolicy.Enabled && hasSpareKey,
+			hasSpareChannel: retryPolicy.Enabled && r.hasOtherChannel(candidates, excludedChannels, ch.ID),
 		}
 
 		// 占用在途计数（供 least_in_flight 使用）：与下方的 releaseKey 成对，
@@ -314,8 +335,8 @@ retryLoop:
 		case forwardRetryChannel:
 			excludedChannels[ch.ID] = struct{}{}
 			channelAttempts++
-			if channelAttempts >= r.maxAttempts {
-				// 渠道预算耗尽：上游整体故障时不该无限试下去
+			if channelAttempts >= channelBudget {
+				// 预算耗尽：或按渠道/模型策略已用完次数，或上游整体故障时不该无限试下去
 				break retryLoop
 			}
 			continue
@@ -499,7 +520,8 @@ const maxCredentialAttempts = 3
 // 注意它【不适用于"该账号没有这个模型"】这类失败：实测本部署的
 // 500 把免费密钥授权完全一致（3 把取样密钥对 8 个模型结论逐一相同），
 // 所以"某模型在 A 账号没有"就等于"在整池都没有"，换密钥毫无意义，
-// 只会白白多花几秒。这类失败由 keyFailureEntitlement 单独处理：直接透传上游原因。
+// 只会白白多花几秒。这类失败由 keyFailureEntitlement 单独处理：
+// 只在"还有别的渠道"时换渠道，否则立刻按本站语义化错误码脱敏回下游。
 const maxKeyLevelAttempts = 8
 
 // keyFailureKind 表示一次上游失败与"凭据"的关系，决定是否可以换密钥重试。
@@ -507,14 +529,15 @@ type keyFailureKind int
 
 const (
 	// keyFailureNone 与凭据无关（如请求体有误、上游 5xx）：
-	// 换密钥与换渠道都没用，应直接透传上游响应。
+	// 换密钥没用；上游 5xx 可换渠道重试（见 isRetryableStatus），
+	// 请求体有误则按本站语义化错误码脱敏回下游。
 	keyFailureNone keyFailureKind = iota
 	// keyFailureCredential 凭据本身不可用（失效 / 受限 / 被限流）：
 	// 池内换一把很可能成功，值得重试。
 	keyFailureCredential
 	// keyFailureEntitlement 该凭据所在账号没有这个模型 / 无权访问：
-	// 池内账号同质时换密钥无意义，应直接透传上游原因，
-	// 让使用者一眼看出"模型不在可用范围内"（而不是等几秒后拿到含糊的 502）。
+	// 池内账号同质时换密钥无意义，只在还有别的渠道时才换渠道重试，
+	// 否则立刻收手、按本站语义化错误码脱敏回下游（不再等几秒拿一个含糊的失败）。
 	keyFailureEntitlement
 )
 
@@ -560,7 +583,7 @@ var keyLevelRejectionMarkers = []string{
 // bodyWithPrefix 把"已读走的前缀"与"剩余部分"重新组合为 ReadCloser。
 //
 // 用途：判断错误类型时需要读一小段响应体，读完之后必须把响应体还原，
-// 否则后续"把上游错误透传给客户端"的路径会读到残缺内容。
+// 否则后续读取（如取错误原因写日志）会读到残缺内容。
 type bodyWithPrefix struct {
 	io.Reader
 	closer io.Closer
@@ -629,8 +652,8 @@ func extractUpstreamErrorMessage(raw []byte) string {
 //     → 属于授权范围问题，同质账号池里换密钥无意义；
 //  3. 其余（请求体有误、5xx 等）→ 与凭据无关。
 //
-// 返回 snippet 供"所有重试都用尽"时透传上游真实原因，以及供失败处置
-// （冷却 / 摘除）判断响应体是否明确表示凭据永久无效。
+// 返回 snippet 供"所有重试都用尽"时写入本站调用日志（不回流给下游），
+// 以及供失败处置（冷却 / 摘除）判断响应体是否明确表示凭据永久无效。
 func (r *Relay) classifyKeyFailure(resp *http.Response) (keyFailureKind, string, []byte) {
 	if resp == nil {
 		return keyFailureNone, "", nil
@@ -664,13 +687,17 @@ func (r *Relay) classifyKeyFailure(resp *http.Response) (keyFailureKind, string,
 
 // saveFailure 记录一次上游失败响应，供后续"所有重试都用尽"时写入本站日志。
 //
-// snippet 是已读出的响应体片段（由调用方通过 peekBody 取得并还原响应体）。
+// snippet 是已读出的响应体片段（由调用方通过 peekBody 取得并还原响应体）；
+// 允许为空：状态码本身才是决定"回给下游哪个语义化错误码"的关键，
+// 响应体只是排障证据——上游返回空体时不能因此丢掉状态码。
 func saveFailure(lastFailure *upstreamFailure, resp *http.Response, snippet []byte) {
-	if lastFailure == nil || resp == nil || len(snippet) == 0 {
+	if lastFailure == nil || resp == nil {
 		return
 	}
 	lastFailure.status = resp.StatusCode
-	lastFailure.body = snippet
+	if len(snippet) > 0 {
+		lastFailure.body = snippet
+	}
 }
 
 // truncateReason 截断失败原因，避免超长错误信息撑大数据库字段。
@@ -685,9 +712,9 @@ func truncateReason(reason string) string {
 // hasOtherChannel 判断"放弃当前渠道后"是否还有其他候选渠道。
 //
 // 实现方式：临时把当前渠道加入排除集后再挑一次（仅探测，不真正使用结果）。
-// 之所以需要它：客户端可收到的错误信息质量取决于此——
-// 若已无退路，应当把上游的真实错误（如 401 密钥无效）透传给客户端，
-// 而不是丢弃它返回含糊的 502。
+// 之所以需要它：它决定"这次失败还值不值得换渠道再试"——
+// 若已无退路（或该渠道/模型关了重试），就直接收手，把上游错误按本站
+// 语义化错误码脱敏回下游，而不是白白多花几秒再失败。
 func (r *Relay) hasOtherChannel(candidates []*model.Channel, excluded map[uint64]struct{}, currentID uint64) bool {
 	probe := make(map[uint64]struct{}, len(excluded)+1)
 	for id := range excluded {
@@ -746,7 +773,7 @@ const (
 // 返回值表示结局，供上层决定重试方向（见 forwardOutcome）。
 //
 // 参数 lastFailure 非 nil 时，会把"凭据级失败"的上游响应原样记进去，
-// 供上层在重试全部用尽后透传真实原因（而不是含糊的 502）。
+// 供上层在重试全部用尽后写入本站调用日志（上游真实原因只留给站长排障）。
 //
 // 参数 group 是本次请求的分组，由 forwardWithFallback 解析一次后透传：
 // 本函数只用它来记录用量（计费按同一分组进行），不再自行解析，避免串组。
@@ -809,7 +836,7 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// ── 失败分流（关键：决定"换密钥"、"换渠道"还是直接透传）────
+	// ── 失败分流（关键：决定"换密钥"、"换渠道"还是就此收手）────
 	switch kind, _, snippet := r.classifyKeyFailure(resp); kind {
 	case keyFailureCredential:
 		// 凭据不可用（失效/受限/被限流）：按失败类型决定"冷却"还是"摘除"。
@@ -817,7 +844,7 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 		//   - 仅当上游明确表示凭据永久无效（如已吊销）才摘除。
 		// 注意：升级为 channel_keys 的临时状态，绝不因一次 429 把好凭据移出池子。
 		r.applyCredentialFailure(req.Context(), ch, target.keyID, target.keyFailCount, resp.StatusCode, snippet)
-		// 留存响应，供后续所有重试都失败时透传真实原因
+		// 留存响应，供所有重试用尽后写入本站调用日志（不再透传给下游）
 		saveFailure(lastFailure, resp, snippet)
 
 		if target.hasSpareKey {
@@ -829,14 +856,14 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 			drainAndClose(resp)
 			return forwardRetryChannel
 		}
-		// 已无退路：把上游错误原样透传，客户端据此知道"密钥是失效的"
+		// 已无退路（或该渠道/模型已关闭重试）：落到下方统一脱敏出口
 
 	case keyFailureEntitlement:
 		// 该账号没有这个模型 / 无权访问：不是密钥坏了，而是"这个模型不在可用范围内"。
 		//
 		// 为什么不换密钥重试：实测本部署的密钥池来自同质的免费账号，
 		// 授权集合完全一致，换多少把结果都一样，只会白白多花几秒。
-		// 直接透传上游原因，使用者能立刻判断"该模型不可用"。
+		// 因此只在"还有别的渠道"时才继续；否则落到下方统一脱敏出口。
 		saveFailure(lastFailure, resp, snippet)
 
 		if target.hasSpareChannel {
@@ -844,13 +871,21 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 			drainAndClose(resp)
 			return forwardRetryChannel
 		}
-		// 无退路：透传（保持上游原文，含它的 status 与 detail）
+		// 无退路（或该渠道/模型已关闭重试）：落到下方统一脱敏出口
 
 	default:
 		if isRetryableStatus(resp.StatusCode) {
 			// 上游 5xx / 超时属渠道级故障，但也给本次使用的凭据一个短冷却：
 			// 故障期间不要反复把同一把凭据推到上游。冷却会自动到期，不改变凭据状态。
 			r.applyCredentialFailure(req.Context(), ch, target.keyID, target.keyFailCount, resp.StatusCode, nil)
+			// 留存本次失败：重试预算耗尽时用它决定回给下游的语义化错误码
+			// （上游 5xx → 本站 503），否则只能退化成含义模糊的 502。
+			//
+			// 这里才补读响应体：classifyKeyFailure 对 5xx 不读体（它与凭据无关），
+			// 但 5xx 恰是最需要留下证据的一类（"上游整体挂了"还是"该模型不存在"）。
+			// 读取上限 4KiB，且本响应随后就会被 drainAndClose 或整段读走，不会多占内存。
+			peek, _ := peekBody(resp, keyLevelPeekBytes)
+			saveFailure(lastFailure, resp, peek)
 		}
 		if isRetryableStatus(resp.StatusCode) && target.hasSpareChannel {
 			// 上游故障/过载，且还有别的渠道可试

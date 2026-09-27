@@ -138,8 +138,22 @@ type Channel struct {
 	// 上限见 MaxKeyCooldownSeconds：过长的冷却等价于"事实摘除"，
 	// 会让站长以为自己没设摘除策略却观察到密钥不回来。
 	KeyCooldownSeconds int
-	CreatedAt          time.Time // 创建时间
-	UpdatedAt          time.Time // 更新时间
+	// RetryMode 是本渠道的上游错误重试总开关（落库 channels.retry_enabled）。
+	//
+	// 零值 RetryModeUnset 表示"未配置"，按开启处理——与迁移前的硬编码行为一致，
+	// 因此旧数据与未显式赋值的渠道都不会因缺省而改变行为（详见 channel_retry.go）。
+	RetryMode RetryMode
+	// RetryMaxAttempts 是本渠道的渠道级重试次数上限；0 表示使用默认值（3 次）。
+	//
+	// 注意它约束的是"换渠道/换密钥"的总预算，不是单把密钥的尝试次数——
+	// 具体语义见 relay.forwardWithFallback 的注释。
+	RetryMaxAttempts int
+	// ModelRetryRules 是模型级重试覆盖规则（对外模型名，支持尾部通配符 *）。
+	//
+	// 为空表示所有模型都沿用渠道级配置。解析次序见 RetryPolicyFor。
+	ModelRetryRules []ModelRetryRule
+	CreatedAt       time.Time // 创建时间
+	UpdatedAt       time.Time // 更新时间
 
 	// LastTestAt 是最近一次测活时间；零值表示从未测活。
 	LastTestAt time.Time
@@ -261,6 +275,10 @@ func (c *Channel) Validate() error {
 	if c.KeyCooldownSeconds < 0 || c.KeyCooldownSeconds > MaxKeyCooldownSeconds {
 		return fmt.Errorf("密钥冷却时长必须在 0 ~ %d 秒之间（当前 %d；0 表示使用系统默认的分级退避）",
 			MaxKeyCooldownSeconds, c.KeyCooldownSeconds)
+	}
+	// 重试策略（迁移 0037）：开关取值、次数区间与模型级规则
+	if err := c.validateRetryPolicy(); err != nil {
+		return err
 	}
 	return nil
 }

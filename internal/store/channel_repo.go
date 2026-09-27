@@ -46,7 +46,7 @@ const (
 // channelColumns 集中定义查询列，避免各处手写列名导致顺序错乱。
 //
 // 注意：列顺序必须与 scanChannel 的 Scan 参数顺序严格一致。
-const channelColumns = `id, name, type, type_key, extra_config, base_url, api_key_enc, models, group_name, group_names, priority, weight, status, created_at, updated_at, last_test_at, last_test_ok, key_strategy, key_failure_policy, key_cooldown_seconds`
+const channelColumns = `id, name, type, type_key, extra_config, base_url, api_key_enc, models, group_name, group_names, priority, weight, status, created_at, updated_at, last_test_at, last_test_ok, key_strategy, key_failure_policy, key_cooldown_seconds, retry_enabled, retry_max_attempts, model_retry_rules`
 
 // channelRepository 是 model.ChannelRepository 的 SQL 实现。
 //
@@ -82,8 +82,8 @@ func (r *channelRepository) Create(ctx context.Context, ch *model.Channel) error
 
 	res, err := r.db.ExecContext(ctx, `
 		INSERT INTO channels
-			(name, type, type_key, extra_config, base_url, api_key_enc, models, group_name, group_names, priority, weight, status, created_at, updated_at, key_strategy, key_failure_policy, key_cooldown_seconds)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(name, type, type_key, extra_config, base_url, api_key_enc, models, group_name, group_names, priority, weight, status, created_at, updated_at, key_strategy, key_failure_policy, key_cooldown_seconds, retry_enabled, retry_max_attempts, model_retry_rules)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ch.Name, ch.Type, ch.TypeKey, encodeExtraConfig(ch.ExtraConfig), ch.BaseURL, encryptedKey, encodeModels(ch.Models),
 		// 主分组与分组清单一并写入：group_name 用于展示与统计，group_names 是路由匹配依据。
 		// encodeModels 的行为（去空白、去重、CSV）与分组清单所需完全一致，故直接复用。
@@ -92,6 +92,9 @@ func (r *channelRepository) Create(ctx context.Context, ch *model.Channel) error
 		string(model.NormalizeKeyStrategy(string(ch.KeyStrategy))),
 		string(model.NormalizeKeyFailurePolicy(string(ch.KeyFailurePolicy))),
 		model.NormalizeKeyCooldownSeconds(ch.KeyCooldownSeconds),
+		encodeRetryMode(ch.RetryMode),
+		encodeRetryMaxAttempts(ch.RetryMaxAttempts),
+		encodeModelRetryRules(ch.ModelRetryRules),
 	)
 	if err != nil {
 		return fmt.Errorf("store: 新增渠道失败: %w", err)
@@ -193,13 +196,17 @@ func (r *channelRepository) Update(ctx context.Context, ch *model.Channel) error
 		UPDATE channels SET
 			name = ?, type = ?, type_key = ?, extra_config = ?, base_url = ?, api_key_enc = ?, models = ?,
 			group_name = ?, group_names = ?, priority = ?, weight = ?, status = ?, updated_at = ?, key_strategy = ?,
-			key_failure_policy = ?, key_cooldown_seconds = ?
+			key_failure_policy = ?, key_cooldown_seconds = ?,
+			retry_enabled = ?, retry_max_attempts = ?, model_retry_rules = ?
 		WHERE id = ?`,
 		ch.Name, ch.Type, ch.TypeKey, encodeExtraConfig(ch.ExtraConfig), ch.BaseURL, encryptedKey, encodeModels(ch.Models),
 		ch.Group, encodeModels(ch.Groups), ch.Priority, ch.Weight, int(ch.Status),
 		ch.UpdatedAt.Unix(), string(model.NormalizeKeyStrategy(string(ch.KeyStrategy))),
 		string(model.NormalizeKeyFailurePolicy(string(ch.KeyFailurePolicy))),
 		model.NormalizeKeyCooldownSeconds(ch.KeyCooldownSeconds),
+		encodeRetryMode(ch.RetryMode),
+		encodeRetryMaxAttempts(ch.RetryMaxAttempts),
+		encodeModelRetryRules(ch.ModelRetryRules),
 		ch.ID,
 	)
 	if err != nil {
@@ -363,12 +370,17 @@ func (r *channelRepository) scanChannel(sc rowScanner) (*model.Channel, error) {
 		// 密钥失败策略（迁移 0024）：策略标识 + 统一冷却秒数
 		keyFailurePolicy   string
 		keyCooldownSeconds int
+		// 重试策略（迁移 0037）：总开关 + 次数上限 + 模型级规则（JSON）
+		retryEnabled     int
+		retryMaxAttempts int
+		modelRetryRules  string
 	)
 
 	if err := sc.Scan(&id, &name, &channelTy, &typeKey, &extraJSON, &baseURL, &encoded, &modelsCSV,
 		&group, &groupNames, &priority, &weight, &status, &createdAt, &updatedAt,
 		&lastTestAt, &lastTestOK, &keyStrategy,
-		&keyFailurePolicy, &keyCooldownSeconds); err != nil {
+		&keyFailurePolicy, &keyCooldownSeconds,
+		&retryEnabled, &retryMaxAttempts, &modelRetryRules); err != nil {
 		// sql.ErrNoRows 属于正常控制流，不额外包装，便于调用方用 errors.Is 判断
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
@@ -404,7 +416,84 @@ func (r *channelRepository) scanChannel(sc rowScanner) (*model.Channel, error) {
 
 		KeyFailurePolicy:   model.NormalizeKeyFailurePolicy(keyFailurePolicy),
 		KeyCooldownSeconds: model.NormalizeKeyCooldownSeconds(keyCooldownSeconds),
+
+		RetryMode:        decodeRetryMode(retryEnabled),
+		RetryMaxAttempts: model.NormalizeRetryMaxAttempts(retryMaxAttempts),
+		ModelRetryRules:  decodeModelRetryRules(modelRetryRules),
 	}, nil
+}
+
+// encodeRetryMode 把重试总开关编码为落库整数。
+//
+// 约定：关闭写 2，其余（未配置/明确开启）一律写 1。
+// 为什么"未配置"要落成 1 而不是 0：列上只有 1/2 两种有意义的取值，
+// 把语义在写入时定死，读出来就不必再猜——历史行由列默认值 1 覆盖，行为与旧版一致。
+func encodeRetryMode(mode model.RetryMode) int {
+	if mode == model.RetryModeOff {
+		return int(model.RetryModeOff)
+	}
+	return int(model.RetryModeOn)
+}
+
+// decodeRetryMode 把落库整数还原为领域取值。
+//
+// 容错：0（列默认值被手工写成 0）或任何非法值一律按"未配置"处理，
+// 由 RetryMode.Enabled() 得出"允许重试"——宁可多试一次，也不因脏数据静默关掉重试。
+func decodeRetryMode(value int) model.RetryMode {
+	mode := model.RetryMode(value)
+	if !mode.IsValid() {
+		return model.RetryModeUnset
+	}
+	return mode
+}
+
+// encodeRetryMaxAttempts 归一化重试次数后落库（0 保留为 0，表示"用默认值"）。
+//
+// 刻意不把 0 直接写成默认值 3：这样"站长把次数改回默认"与"从未配置过"
+// 在库里是同一个值，将来若调整默认次数，所有未显式配置的渠道会一起受益。
+func encodeRetryMaxAttempts(attempts int) int {
+	if attempts <= 0 {
+		return 0
+	}
+	if attempts > model.MaxRetryMaxAttempts {
+		return model.MaxRetryMaxAttempts
+	}
+	return attempts
+}
+
+// encodeModelRetryRules 把模型级重试规则序列化为 JSON 数组字符串。
+//
+// 归一化后再序列化：保证落库的 model 字段无空白、无空项、无重复（读写一致，
+// 不会出现"存进去两条一样、显示成两条"的困惑）。
+func encodeModelRetryRules(rules []model.ModelRetryRule) string {
+	normalized := model.NormalizeModelRetryRules(rules)
+	if len(normalized) == 0 {
+		// 与迁移默认值保持一致，避免 NULL 与 '[]' 两种空值并存
+		return "[]"
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		// 不可达：结构体字段均为可序列化的基础类型。
+		// 真出现时返回空数组而不是 panic——配置读不出来不该让整个渠道列表挂掉。
+		return "[]"
+	}
+	return string(encoded)
+}
+
+// decodeModelRetryRules 解析模型级重试规则 JSON。
+//
+// 容错：字段为空串/非法 JSON/类型不符时一律返回 nil（= 无模型级规则），
+// 调用方据此自然回退到渠道级策略；不因一行脏数据阻塞转发。
+func decodeModelRetryRules(raw string) []model.ModelRetryRule {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed == "[]" {
+		return nil
+	}
+	var rules []model.ModelRetryRule
+	if err := json.Unmarshal([]byte(trimmed), &rules); err != nil {
+		return nil
+	}
+	return model.NormalizeModelRetryRules(rules)
 }
 
 // encodeModels 把模型列表编码为逗号分隔字符串（落库格式）。

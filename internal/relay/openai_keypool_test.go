@@ -190,7 +190,7 @@ func TestForward_密钥池自动换密钥_请求最终成功(t *testing.T) {
 		t.Fatalf("导入密钥池失败: %v", err)
 	}
 
-	r := New(channels, Options{Keys: keys, MaxAttempts: 3})
+	r := New(channels, Options{Keys: keys})
 	gateway := newGateway(t, r)
 
 	// 反复请求：随机挑选意味着必然会撞上失效密钥，
@@ -219,7 +219,7 @@ func TestForward_密钥池全部失效_返回本站脱敏错误并累计失败(t
 		t.Fatalf("导入密钥池失败: %v", err)
 	}
 
-	r := New(channels, Options{Keys: keys, MaxAttempts: 2})
+	r := New(channels, Options{Keys: keys})
 	gateway := newGateway(t, r)
 
 	resp := postChat(t, gateway.URL, `{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`)
@@ -274,7 +274,7 @@ func TestForward_密钥反复失败_默认只冷却不摘除(t *testing.T) {
 		t.Fatalf("新建渠道的默认策略应为只冷却不摘除，实际 %s", got)
 	}
 
-	r := New(channels, Options{Keys: keys, MaxAttempts: 1})
+	r := New(channels, Options{Keys: keys})
 	gateway := newGateway(t, r)
 
 	for i := 0; i < model.KeyAutoRemoveThreshold+1; i++ {
@@ -314,7 +314,7 @@ func TestForward_密钥反复失败_选择自动摘除时摘除(t *testing.T) {
 		t.Fatalf("更新渠道策略失败: %v", err)
 	}
 
-	r := New(channels, Options{Keys: keys, MaxAttempts: 1})
+	r := New(channels, Options{Keys: keys})
 	gateway := newGateway(t, r)
 
 	for i := 0; i < model.KeyAutoRemoveThreshold+1; i++ {
@@ -363,7 +363,7 @@ func TestForward_单渠道多密钥_分布到不同密钥(t *testing.T) {
 		t.Fatalf("导入失败: %v", err)
 	}
 
-	r := New(channels, Options{Keys: keys, MaxAttempts: 1})
+	r := New(channels, Options{Keys: keys})
 	gateway := newGateway(t, r)
 
 	const rounds = 40

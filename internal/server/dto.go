@@ -134,13 +134,21 @@ type channelDTO struct {
 	// 后端保证恒为合法值（空值已归一为默认的「只冷却不摘除」）。
 	KeyFailurePolicy string `json:"key_failure_policy"`
 	// KeyCooldownSeconds 是密钥失败后的统一冷却时长（秒）；0 表示使用内置分级退避。
-	KeyCooldownSeconds int    `json:"key_cooldown_seconds"`
-	Status             int    `json:"status"`
-	StatusText         string `json:"status_text"`
-	LastTestAt         int64  `json:"last_test_at"`
-	LastTestOK         bool   `json:"last_test_ok"`
-	CreatedAt          int64  `json:"created_at"`
-	UpdatedAt          int64  `json:"updated_at"`
+	KeyCooldownSeconds int `json:"key_cooldown_seconds"`
+	// RetryEnabled 表示是否对该渠道的上游错误做站内重试（总开关）。
+	//
+	// 后端已归一：未配置的渠道下发 true，前端只需按普通开关渲染。
+	RetryEnabled bool `json:"retry_enabled"`
+	// RetryMaxAttempts 是渠道级重试次数上限（含首次尝试），后端保证已归一为 1..10。
+	RetryMaxAttempts int `json:"retry_max_attempts"`
+	// ModelRetryRules 是模型级重试覆盖规则；空数组表示全部沿用渠道级配置。
+	ModelRetryRules []model.ModelRetryRule `json:"model_retry_rules"`
+	Status          int                    `json:"status"`
+	StatusText      string                 `json:"status_text"`
+	LastTestAt      int64                  `json:"last_test_at"`
+	LastTestOK      bool                   `json:"last_test_ok"`
+	CreatedAt       int64                  `json:"created_at"`
+	UpdatedAt       int64                  `json:"updated_at"`
 	// KeyPool 是密钥池概览（渠道可挂多把上游密钥并轮询使用）。
 	// 零值表示该渠道没有配置密钥池，走"单密钥"模式。
 	KeyPool keyPoolDTO `json:"key_pool"`
@@ -324,13 +332,28 @@ func toChannelDTO(ch *model.Channel) channelDTO {
 		KeyFailurePolicy: string(model.NormalizeKeyFailurePolicy(string(ch.KeyFailurePolicy))),
 		// 冷却时长同样归一（越界值会被夹到合法区间），避免前端拿到非法值。
 		KeyCooldownSeconds: model.NormalizeKeyCooldownSeconds(ch.KeyCooldownSeconds),
-		Status:             int(ch.Status),
-		StatusText:         ch.Status.String(),
-		LastTestAt:         unixOrZero(ch.LastTestAt),
-		LastTestOK:         ch.LastTestOK,
-		CreatedAt:          unixOrZero(ch.CreatedAt),
-		UpdatedAt:          unixOrZero(ch.UpdatedAt),
+		// 重试策略同样归一后下发：开关给出明确布尔值，次数给出 1..10 的合法值。
+		RetryEnabled:     ch.RetryMode.Enabled(),
+		RetryMaxAttempts: model.NormalizeRetryMaxAttempts(ch.RetryMaxAttempts),
+		ModelRetryRules:  retryRulesOrEmpty(ch.ModelRetryRules),
+		Status:           int(ch.Status),
+		StatusText:       ch.Status.String(),
+		LastTestAt:       unixOrZero(ch.LastTestAt),
+		LastTestOK:       ch.LastTestOK,
+		CreatedAt:        unixOrZero(ch.CreatedAt),
+		UpdatedAt:        unixOrZero(ch.UpdatedAt),
 	}
+}
+
+// retryRulesOrEmpty 保证模型级重试规则以非 nil 下发。
+//
+// 与 Models/ExtraConfig 的处理一致：让前端直接读取即可，
+// 不必为"字段可能是 null"写额外的兜底分支。
+func retryRulesOrEmpty(rules []model.ModelRetryRule) []model.ModelRetryRule {
+	if rules == nil {
+		return make([]model.ModelRetryRule, 0)
+	}
+	return rules
 }
 
 // toChannelDTOList 批量转换渠道。

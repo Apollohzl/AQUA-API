@@ -73,13 +73,6 @@ const (
 	defaultTLSHandshakeTimeout = 10 * time.Second // TLS 握手超时
 	defaultIdleConnTimeout     = 90 * time.Second // 空闲连接回收时间
 	defaultMaxIdleConnsPerHost = 20               // 每个上游主机的空闲连接上限
-
-	// defaultMaxAttempts 是单次请求最多尝试的渠道数。
-	//
-	// 取 3 的权衡：过小则故障转移能力弱（一个渠道抖动就直接报错），
-	// 过大则故障时延迟被放大（每次重试都要重新建连），且会加剧上游压力。
-	// 3 次足以覆盖"个别渠道故障"，同时把最坏延迟控制在可接受范围。
-	defaultMaxAttempts = 3
 )
 
 // Options 是 Relay 的可选参数。
@@ -90,13 +83,6 @@ type Options struct {
 	// 注意它与"整个请求超时"不同：流式响应可能持续数分钟，
 	// 我们只限制"上游多久没开始响应"，而不是"响应多久必须结束"。
 	ResponseHeaderTimeout time.Duration
-	// MaxAttempts 是单次请求最多尝试的次数（含首次）。
-	//
-	// 说明：这里计的是"总尝试预算"，密钥级重试与渠道级重试共用同一预算——
-	// 这样最坏延迟可预期（不会因为"渠道内换密钥 × 渠道间切换"而相乘放大）。
-	// 池内失效密钥由自动摘除机制在数次请求后逐步清理，无需靠单次请求穷举。
-	// <=0 时使用 defaultMaxAttempts。
-	MaxAttempts int
 	// UsageLogs 为调用日志仓储；为 nil 时不记录用量（便于单元测试）。
 	UsageLogs model.UsageLogRepository
 	// Tokens 为访问令牌仓储，用于更新令牌的最近使用时间；可为 nil。
@@ -116,10 +102,9 @@ type Options struct {
 //
 // 并发安全：所有字段在构造后不再修改，可被多 goroutine 共享。
 type Relay struct {
-	channels    model.ChannelRepository
-	client      *http.Client
-	group       string
-	maxAttempts int
+	channels model.ChannelRepository
+	client   *http.Client
+	group    string
 
 	// usageLogs / tokens 用于转发后记录用量与令牌使用时间，两者均可为 nil。
 	usageLogs model.UsageLogRepository
@@ -155,10 +140,6 @@ func New(channels model.ChannelRepository, opts Options) *Relay {
 	if headerTimeout <= 0 {
 		headerTimeout = defaultResponseHeaderWait
 	}
-	maxAttempts := opts.MaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = defaultMaxAttempts
-	}
 
 	// 仅在启用映射仓储时才建缓存：仓储为 nil 意味着该部署不使用映射，
 	// 此时留空缓存可让 modelMappingsForChannel 直接短路，避免无谓开销。
@@ -185,7 +166,6 @@ func New(channels model.ChannelRepository, opts Options) *Relay {
 	return &Relay{
 		channels:        channels,
 		group:           group,
-		maxAttempts:     maxAttempts,
 		usageLogs:       opts.UsageLogs,
 		tokens:          opts.Tokens,
 		keys:            opts.Keys,
