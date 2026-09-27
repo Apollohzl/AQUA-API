@@ -203,6 +203,30 @@ func (s *TaskService) findProvider(req *TaskRequest) (TaskProvider, error) {
 // 这里会按失败处理并退还额度——用户白得一次生成。
 // 之所以接受：这类情况极罕见，而"宁可少收，不可错收"是计费系统的原则。
 func (s *TaskService) Submit(ctx context.Context, userID, tokenID uint64, req *TaskRequest) (*model.Task, error) {
+	// 释放中间件为本请求做的额度预留（异步任务特有，必须做）。
+	//
+	// 背景：TokenAuth 中间件对所有 /v1 路由（含 POST /v1/tasks）都会先
+	// EstimateReserve→Reserve —— 这是一次【真实扣减】并向 quota_reservations
+	// 写入"在途"台账。同步链路转发结束后由 settleQuota 做 Settle/Release 闭环；
+	// 而任务链路不经过 recordUsage，预留会一直挂在在途，直到 15 分钟 TTL 才被
+	// CleanupExpired 回收 —— 期间用户可用额度被【多占用一份】，额度紧张时会误报 429。
+	//
+	// 为什么直接 Release 而不是 Settle：任务链路的真实扣费由下方 ChargeOnce 独立
+	// 完成，预留只为"进门前"拦住超额调用；进门后它的使命即结束。三条路径的净值
+	// （预留 +R、按次扣 Q、释放 −R）都对得平：
+	//   成功 +Q；扣费后失败又退还 0；扣费前失败 0。
+	//
+	// 放在最开头，是为了覆盖 parseTaskRequest 失败、模块未启用等所有早退路径；
+	// requestID 为空（未做预留 / 免费模型 / 信任额度旁路）时跳过，Release 本身幂等。
+	if s.relay != nil && s.relay.billing != nil {
+		if requestID := identityFromRequest(ctx).RequestID; requestID != "" {
+			if err := s.relay.billing.Release(ctx, requestID); err != nil {
+				slog.Warn("释放任务提交的预留额度失败（额度可能滞留在途，将被 TTL 兜底回收）",
+					"error", err, "request_id", requestID, "user_id", userID)
+			}
+		}
+	}
+
 	if s.tasks == nil {
 		return nil, errors.New("relay: 异步任务模块未启用")
 	}
