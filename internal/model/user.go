@@ -46,6 +46,12 @@ var (
 	ErrUserNotFound = errors.New("model: 用户不存在")
 	// ErrUsernameTaken 表示用户名已被占用。
 	ErrUsernameTaken = errors.New("model: 用户名已被占用")
+	// ErrEmailTaken 表示邮箱已被占用（一个邮箱只能绑定一个账号）。
+	//
+	// 为什么要有它而不是复用 ErrUsernameTaken：两者对使用者的可操作性不同——
+	// 用户名冲突提示"换个名字"，邮箱冲突提示"该邮箱已注册，请直接登录或找回密码"。
+	// 合并成一个错误会让界面只能给出笼统提示，用户无从判断该改哪一项。
+	ErrEmailTaken = errors.New("model: 邮箱已被占用")
 	// ErrSessionNotFound 表示会话不存在或已失效。
 	ErrSessionNotFound = errors.New("model: 会话不存在")
 )
@@ -244,7 +250,7 @@ type UserQuery struct {
 // UserRepository 定义用户的持久化操作。
 type UserRepository interface {
 	// Create 新增用户，成功后回填 ID 与时间戳。
-	// 用户名重复时返回 ErrUsernameTaken。
+	// 用户名重复时返回 ErrUsernameTaken；邮箱（非空时）重复返回 ErrEmailTaken。
 	Create(ctx context.Context, u *User) error
 
 	// GetByID 按主键查询，不存在时返回 ErrUserNotFound。
@@ -252,6 +258,13 @@ type UserRepository interface {
 
 	// GetByUsername 按登录名查询，不存在时返回 ErrUserNotFound。
 	GetByUsername(ctx context.Context, username string) (*User, error)
+
+	// GetByEmail 按邮箱查询，不存在时返回 ErrUserNotFound。
+	//
+	// 用途：注册与后台建号前的"邮箱占用预检"，以及按邮箱定位用户。
+	// 约定：邮箱会先经 NormalizeEmail 归一化；空邮箱一律返回 ErrUserNotFound
+	// （未绑定邮箱的用户在库中大量共存，按空串查询得到的"第一个"毫无意义）。
+	GetByEmail(ctx context.Context, email string) (*User, error)
 
 	// List 按条件查询用户列表，按 ID 升序返回。
 	List(ctx context.Context, q UserQuery) ([]*User, error)

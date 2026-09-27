@@ -85,7 +85,7 @@ func TestMigrate_CreatesExpectedTables(t *testing.T) {
 	}
 
 	// 索引存在性（路由热路径依赖它）
-	for _, idx := range []string{"idx_channels_group_status", "idx_channels_type"} {
+	for _, idx := range []string{"idx_channels_group_status", "idx_channels_type", "idx_users_email"} {
 		var count int
 		err := st.DB().QueryRowContext(ctx,
 			"SELECT COUNT(1) FROM sqlite_master WHERE type='index' AND name = ?", idx).Scan(&count)

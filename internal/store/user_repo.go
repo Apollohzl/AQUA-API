@@ -4,7 +4,8 @@
 //
 //	把用户与会话落到数据库。此层承担两项职责：
 //	  1) 把数据库错误翻译成领域错误（重复用户名 → ErrUsernameTaken；
-//	     查不到 → ErrUserNotFound / ErrSessionNotFound），让上层无需识别驱动错误；
+//	     重复邮箱 → ErrEmailTaken；查不到 → ErrUserNotFound / ErrSessionNotFound），
+//	     让上层无需识别驱动错误；
 //	  2) 保证口令哈希与会话摘要"只进不出"——本层不返回明文口令，
 //	     会话查询也只按摘要匹配，不对摘要做任何反解。
 //
@@ -86,17 +87,25 @@ func (r *userRepository) Create(ctx context.Context, u *model.User) error {
 			u.Quota, u.UsedQuota, u.InviteCode, u.InviterID, u.CreatedAt.Unix(), u.UpdatedAt.Unix(),
 		)
 		if err != nil {
-			// 唯一索引冲突有两种来源，必须区分：用户名重复是【业务错误】，直接上抛；
+			// 唯一索引冲突有三种来源，必须区分：用户名与邮箱重复是【业务错误】，直接上抛；
 			// 邀请码撞码是【极小概率的随机冲突】，清空后重新生成再试一次。
-			if strings.Contains(strings.ToUpper(err.Error()), "UNIQUE") {
-				if strings.Contains(strings.ToUpper(err.Error()), "INVITE_CODE") {
+			//
+			// 判定依据是错误文本里的索引列名（SQLite 形如
+			// "UNIQUE constraint failed: users.email"），因此必须逐列精确匹配，
+			// 不能"见到 UNIQUE 就当用户名冲突"——那会把邮箱冲突误报成用户名冲突。
+			if upper := strings.ToUpper(err.Error()); strings.Contains(upper, "UNIQUE") {
+				switch {
+				case strings.Contains(upper, "INVITE_CODE"):
 					u.InviteCode = ""
 					if attempt+1 >= maxInviteCodeAttempts {
 						return fmt.Errorf("store: 连续 %d 次生成到重复邀请码，请重试: %w", maxInviteCodeAttempts, err)
 					}
 					continue
+				case strings.Contains(upper, "EMAIL"):
+					return model.ErrEmailTaken
+				default:
+					return model.ErrUsernameTaken
 				}
-				return model.ErrUsernameTaken
 			}
 			return fmt.Errorf("store: 新增用户失败: %w", err)
 		}
@@ -127,6 +136,30 @@ func (r *userRepository) GetByID(ctx context.Context, id uint64) (*model.User, e
 // GetByUsername 按登录名查询用户。
 func (r *userRepository) GetByUsername(ctx context.Context, username string) (*model.User, error) {
 	row := r.db.QueryRowContext(ctx, "SELECT "+userColumns+" FROM users WHERE username = ?", username)
+
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, model.ErrUserNotFound
+		}
+		return nil, err
+	}
+	return u, nil
+}
+
+// GetByEmail 按邮箱查询用户。
+//
+// 邮箱在库中已归一化（见迁移 0036：先 TRIM+LOWER 再建部分唯一索引），
+// 这里仍再归一化一次，让调用方无需关心"该传原文还是小写"。
+// 空邮箱直接返回 ErrUserNotFound：未绑定邮箱的用户在库中大量共存，
+// 按空串查询只会随机命中其中一个，没有任何业务含义。
+func (r *userRepository) GetByEmail(ctx context.Context, email string) (*model.User, error) {
+	email = model.NormalizeEmail(email)
+	if email == "" {
+		return nil, model.ErrUserNotFound
+	}
+
+	row := r.db.QueryRowContext(ctx, "SELECT "+userColumns+" FROM users WHERE email = ?", email)
 
 	u, err := scanUser(row)
 	if err != nil {
@@ -215,7 +248,12 @@ func (r *userRepository) Update(ctx context.Context, u *model.User) error {
 		u.Quota, u.UsedQuota, u.UpdatedAt.Unix(), u.ID,
 	)
 	if err != nil {
-		if strings.Contains(strings.ToUpper(err.Error()), "UNIQUE") {
+		// 唯一索引冲突须区分用户名与邮箱：两者对使用者的可操作性不同
+		// （改名字 vs. 该邮箱已注册），不能一律报成用户名冲突。
+		if upper := strings.ToUpper(err.Error()); strings.Contains(upper, "UNIQUE") {
+			if strings.Contains(upper, "EMAIL") {
+				return model.ErrEmailTaken
+			}
 			return model.ErrUsernameTaken
 		}
 		return fmt.Errorf("store: 更新用户 %d 失败: %w", u.ID, err)
