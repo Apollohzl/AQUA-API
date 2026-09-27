@@ -14,7 +14,7 @@
 // 扩展（Extend）：
 //   新增代理前缀：在 server.proxy 里追加一项。
 //   调整产物路径：改 build.outDir，同时需同步后端 go:embed 的路径指令。
-//   联调远端后端：设置环境变量 AQUA_BACKEND（如 https://aqua.ltzy.top）再 npm run dev，
+//   联调远端后端：设置环境变量 AQUA_BACKEND（如 https://api.example.com）再 npm run dev，
 //   代理目标随之切换 —— 本地不跑后端也能看到真实数据，便于界面自查。
 import { fileURLToPath, URL } from 'node:url'
 

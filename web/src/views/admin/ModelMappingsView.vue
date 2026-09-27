@@ -130,8 +130,8 @@ function goEditChannel(channelId: number): void {
         <span class="chip">上游服务</span>
       </div>
       <p class="hint mt-2">
-        例：客户端请求 <code>AQUA/GLM-5.3-Flash</code>，上游实际收到
-        <code>GLM-5.3-Flash</code>；上游回包里的模型名会被改回平台名再返回给客户端。
+        例：客户端请求 <code>vendor/model-a</code>，上游实际收到
+        <code>model-a</code>；上游回包里的模型名会被改回平台名再返回给客户端。
         <strong>没有配置映射的渠道，两个名字相同（原样透传）</strong>。
         映射在「渠道管理」的编辑表单里配置。
       </p>
@@ -239,8 +239,8 @@ function goEditChannel(channelId: number): void {
       <h3 class="mb-1 text-sm font-medium text-ink-100">未配置映射的渠道</h3>
       <p class="mb-2 text-xs text-ink-400">
         这些渠道不做任何改名：用户请求的模型名会原样发给上游。
-        若上游的模型名与平台展示名不一致（例如上游叫 <code>GLM-5.3-Flash</code>、平台想展示为
-        <code>AQUA/GLM-5.3-Flash</code>），需要为该渠道添加映射，否则上游会返回「模型不存在」。
+        若上游的模型名与平台展示名不一致（例如上游叫 <code>model-a</code>、平台想展示为
+        <code>vendor/model-a</code>），需要为该渠道添加映射，否则上游会返回「模型不存在」。
       </p>
 
       <div class="table-wrap table-cards">

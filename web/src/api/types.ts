@@ -721,7 +721,7 @@ export interface DashboardStats {
  * 并据此生成 sitemap.xml / robots.txt；前端的职责只是采集与展示，不做任何拼接。
  */
 export interface SeoSettings {
-  /** 站点公开访问地址（如 https://aqua.ltzy.top）；留空时后端按访问请求推导 */
+  /** 站点公开访问地址（如 https://api.example.com）；留空时后端按访问请求推导 */
   site_url: string
   /** SEO 关键词 */
   keywords: string[]

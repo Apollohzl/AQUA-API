@@ -1071,7 +1071,7 @@ onMounted(() => {
                 v-model="seoSiteURL"
                 class="input input-mono"
                 type="url"
-                placeholder="https://aqua.ltzy.top"
+                placeholder="https://api.example.com"
               />
               <p class="hint" :class="seoSiteURLInvalid ? 'text-red-600' : ''">
                 sitemap、robots 与 canonical 都用它生成绝对地址。留空时按访问请求自动推导；

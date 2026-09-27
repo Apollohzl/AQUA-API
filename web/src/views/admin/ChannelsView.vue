@@ -105,7 +105,7 @@ const upstreamError = ref('')
  *   publicModel —— 平台模型 ID（对外）：客户端/SDK 调用时使用的名字，
  *                  也是模型广场与 /v1/models 里展示的名字；
  *   upstreamModel —— 上游模型 ID：网关转发时【真正发给上游】的名字。
- * 例：用户调 AQUA/GLM-5.3-Flash，上游 tierflow 收到 GLM-5.3-Flash。
+ * 例：用户调 vendor/model-a，上游收到 model-a。
  *
  * 不配置任何映射时，两个名字相同（原样透传），行为与没有本功能时完全一致。
  */
@@ -1692,8 +1692,8 @@ sk-yyyyyyyyyyyy</pre>
 
           <p class="hint">
             网关转发时把左边的<strong>平台模型 ID</strong>换成右边的<strong>上游模型 ID</strong>再发给上游；
-            上游回包里的模型名也会改回平台名。例：用户调用 <code>AQUA/GLM-5.3-Flash</code>，
-            上游实际收到 <code>GLM-5.3-Flash</code>。
+            上游回包里的模型名也会改回平台名。例：用户调用 <code>vendor/model-a</code>，
+            上游实际收到 <code>model-a</code>。
             <strong>不配映射时两个名字相同（原样透传）</strong>，与没有本功能时完全一致。
           </p>
 
@@ -1741,7 +1741,7 @@ sk-yyyyyyyyyyyy</pre>
               <tbody>
                 <tr v-for="(row, index) in mappingRows" :key="index">
                   <td class="py-1 pe-2">
-                    <input v-model="row.publicModel" class="input input-mono" type="text" placeholder="如 AQUA/GLM-5.3-Flash" />
+                    <input v-model="row.publicModel" class="input input-mono" type="text" placeholder="如 vendor/model-a" />
                   </td>
                   <td class="py-1 text-center text-ink-500">→</td>
                   <td class="py-1">
@@ -1750,7 +1750,7 @@ sk-yyyyyyyyyyyy</pre>
                       class="input input-mono"
                       type="text"
                       list="upstream-model-options"
-                      placeholder="如 GLM-5.3-Flash"
+                      placeholder="如 model-a"
                     />
                   </td>
                   <td class="py-1 text-center">
