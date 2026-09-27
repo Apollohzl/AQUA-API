@@ -112,6 +112,37 @@ onMounted(() => {
           提示：点击任意模型卡片可以就地查看分组价格与可直接粘贴运行的调用命令。
         </p>
       </section>
+
+      <!-- ── 计费说明 ───────────────────────────────────── -->
+      <!--
+        为什么要有这一段（doc 14 T8）：
+          本站一律按上游返回的 usage 计费（唯一准确口径）。部分分组的通道由第三方中转提供，
+          其网关会在请求前注入一段系统提示，这部分同样计入输入用量 —— 若不在站内讲清楚，
+          用户很容易因为"我只发了几个字，怎么扣了几十 token"发起投诉。把口径公开，
+          既减少争议，也让用户能对照「调用日志」里的输入/输出明细自行核对。
+      -->
+      <section class="mt-6 card card-pad">
+        <h2 class="section-title flex items-center gap-2">
+          <AppIcon name="info" :size="16" class="text-brand-700" />
+          计费说明
+        </h2>
+        <ul class="mt-3 space-y-2 text-sm leading-relaxed text-ink-300">
+          <li>
+            · 一律按上游服务端返回的实际用量结算：输入与输出分别计价，每笔都能在
+            <RouterLink v-if="auth.isLoggedIn" :to="consoleTarget" class="text-brand-700 underline underline-offset-2">调用日志</RouterLink>
+            <span v-else>「调用日志」</span>里查到输入 / 输出 token 与扣费金额。
+          </li>
+          <li>
+            · 部分分组的通道由第三方中转服务提供，其网关可能在请求前注入一段系统提示，
+            <strong class="text-ink-200">这部分会一并计入输入用量</strong>；
+            因此即使只发送很少的内容，输入 token 也可能有几十的基数。具体单价以本页各模型卡片公示为准。
+          </li>
+          <li>
+            · 提示词缓存命中以上游实际回报为准：上游未回报缓存用量时，该次输入一律按输入价计费，
+            不享缓存折扣。
+          </li>
+        </ul>
+      </section>
     </main>
 
     <!-- 统一合规页脚（主体 / 备案号 / 协议入口 / 服务性质声明） -->

@@ -538,6 +538,11 @@ onBeforeUnmount(stopPolling)
               <template v-if="rateText">（{{ rateText }}，即 {{ rawQuotaText(quotaPerYuan) }} = ¥1.00）</template>
               ，仅用于换算模型单价，不影响你的实际扣费金额。
             </li>
+            <li>
+              · 计费一律以上游返回的实际用量结算：部分通道由第三方中转提供，上游网关可能注入一段
+              系统提示并计入输入用量（故输入 token 会有一定基数）；缓存是否命中以上游实际回报为准。
+              明细可在「调用日志」逐笔核对。
+            </li>
           </ul>
         </div>
       </section>
