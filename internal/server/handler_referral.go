@@ -3,9 +3,10 @@
 // 意图（Why）：
 //
 //	把邀请与签到的"对外表现"收在一处：
-//	  1) GET  /api/user/referral —— 邀请码、邀请链接、邀请人数、累计返利、签到概况；
-//	  2) GET  /api/user/checkin  —— 今日是否已签、连续天数、累计天数与累计额度；
-//	  3) POST /api/user/checkin  —— 执行签到（北京时间当天仅一次）。
+//	  1) GET  /api/user/referral         —— 邀请码、邀请链接、邀请人数、累计返利、签到概况；
+//	  2) GET  /api/user/referral/rewards —— 返利明细（财务板块的"返利明细"列表，分页）；
+//	  3) GET  /api/user/checkin          —— 今日是否已签、连续天数、累计天数与累计额度；
+//	  4) POST /api/user/checkin          —— 执行签到（北京时间当天仅一次）。
 //	另外向支付侧暴露一个私有方法 rewardReferralOnRecharge，
 //	供"入账成功"的两处调用点（管理员人工确认、支付回调）统一挂载充值返利，
 //	避免两条路径各写一份返利逻辑而漏掉幂等。
@@ -13,6 +14,7 @@
 // 流转（Flow）：
 //
 //	门户页 ReferralView.vue → GET /api/user/referral → 本文件 handleReferralInfo
+//	门户页 FinanceView.vue  → GET /api/user/referral/rewards → handleMyReferralRewards
 //	                        → POST /api/user/checkin → handleCheckin
 //	充值入账成功 → handler_payment 两处调用点 → rewardReferralOnRecharge(order)
 //
@@ -28,6 +30,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -105,6 +108,88 @@ func (s *Server) handleReferralInfo(c *gin.Context) {
 		"total_reward_quota":   rewarded,
 		"checkin":              checkin,
 	})
+}
+
+// referralRewardDTO 是返利明细的对外表示（财务板块的"返利明细"列表用）。
+type referralRewardDTO struct {
+	ID uint64 `json:"id"`
+	// Kind / KindText 是奖励类型代码与中文名（如 recharge / 充值返利）。
+	Kind     string `json:"kind"`
+	KindText string `json:"kind_text"`
+	// Quota 是本次奖励额度（额度是站内计费单位，前端按配置折算成人民币展示）。
+	Quota int64 `json:"quota"`
+	// Invitee 是触发奖励的用户名，已脱敏（见 maskUsername）。
+	Invitee string `json:"invitee"`
+	// OrderTradeNo 是充值返利对应的订单号；注册奖为空串。
+	OrderTradeNo string `json:"order_trade_no"`
+	CreatedAt    int64  `json:"created_at"`
+}
+
+// handleMyReferralRewards 处理 GET /api/user/referral/rewards（我的返利明细）。
+//
+// 为什么要单独开放明细而不再只给"累计返利"一个数字：
+// 累计值只能告诉用户"拿了多少"，无法回答"哪一笔、什么时候、谁带来的"，
+// 而这三件事正是用户对账时想问的。台账（referral_rewards）本就记录了这些字段，
+// 开放列表只是把已有数据读出来，不引入新的写入路径。
+func (s *Server) handleMyReferralRewards(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok {
+		writeUserError(c, http.StatusUnauthorized,
+			"auth.not_logged_in", oai.TypeAuthentication, oai.CodeMissingAPIKey)
+		return
+	}
+	ctx := c.Request.Context()
+
+	page, size, offset := parsePagination(c)
+	total, err := s.deps.Referrals.CountRewards(ctx, user.ID)
+	if err != nil {
+		s.respondInternalError(c, "统计返利记录失败")
+		return
+	}
+	rewards, err := s.deps.Referrals.ListRewards(ctx, user.ID, size, offset)
+	if err != nil {
+		s.respondInternalError(c, "查询返利明细失败")
+		return
+	}
+
+	items := make([]referralRewardDTO, 0, len(rewards))
+	for _, reward := range rewards {
+		items = append(items, referralRewardDTO{
+			ID:           reward.ID,
+			Kind:         string(reward.Kind),
+			KindText:     reward.Kind.String(),
+			Quota:        reward.Quota,
+			Invitee:      maskUsername(reward.InviteeName),
+			OrderTradeNo: reward.OrderTradeNo,
+			CreatedAt:    reward.CreatedAt.Unix(),
+		})
+	}
+	c.JSON(http.StatusOK, newPagedResponse(items, int(total), page, size))
+}
+
+// maskUsername 对用户名做展示脱敏。
+//
+// 为什么脱敏：返利明细会出现在邀请人自己的页面上，而用户名可能是邮箱或手机号。
+// 邀请人知道自己邀请了谁，脱敏后的形态（如前两位 + 域名）足以让他对上号，
+// 同时避免把被邀请人的完整联系方式长期暴露在别人的账号里。
+func maskUsername(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	runes := []rune(name)
+	// 邮箱：保留前两位 + *** + @域名，域名是辨识度最高又最不敏感的部分
+	if at := strings.LastIndex(name, "@"); at > 0 {
+		domain := name[at:]
+		if len(runes) > 2 {
+			return string(runes[:2]) + "***" + domain
+		}
+		return "***" + domain
+	}
+	if len(runes) <= 2 {
+		return string(runes[:1]) + "***"
+	}
+	return string(runes[:2]) + "***"
 }
 
 // handleGetCheckin 处理 GET /api/user/checkin。

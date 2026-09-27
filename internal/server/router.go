@@ -115,8 +115,13 @@ func (s *Server) registerRoutes() {
 
 	// 邀请返利与每日签到（用户自己的邀请码/关系与签到记录）
 	portal.GET("/referral", s.handleReferralInfo)
+	portal.GET("/referral/rewards", s.handleMyReferralRewards)
 	portal.GET("/checkin", s.handleGetCheckin)
 	portal.POST("/checkin", s.handleCheckin)
+
+	// 财务记录：把钱相关的四个数字（余额/累计充值/累计返利/累计消费）一次给全，
+	// 明细列表复用上面的订单 / 返利明细 / 调用日志接口。
+	portal.GET("/finance", s.handleFinanceSummary)
 
 	// ── 管理后台（需管理员）──────────────────────────────────────
 	admin := authed.Group("/admin")

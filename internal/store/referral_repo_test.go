@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"gitee.com/xiaosu4610/aqua-api/internal/model"
 )
@@ -264,5 +265,95 @@ func TestReferralRepository_发奖幂等(t *testing.T) {
 		InviterID: inviter.ID, InviteeID: invitee.ID, Kind: model.ReferralKindRegister, Quota: 0,
 	}); err != nil || granted {
 		t.Fatalf("0 额度不应发放，granted=%v err=%v", granted, err)
+	}
+}
+
+// TestReferralRepository_返利明细列表 校验明细查询的归属过滤、倒序与用户名带出。
+//
+// 这条不变量防的是两类问题：
+//   - 归属过滤写错（例如漏了 WHERE inviter_id）→ 用户会看到别人的返利记录，属越权；
+//   - 排序写错 → 财务页最新的返利看不到（用户以为返利没到账）；
+//   - 未 JOIN 用户名 → 页面只能显示一串用户 id，"谁带来的返利"无法回答。
+func TestReferralRepository_返利明细列表(t *testing.T) {
+	_, repo, users := newTestReferralRepo(t)
+	ctx := context.Background()
+
+	inviter := newActiveUser(t, "明细邀请人")
+	other := newActiveUser(t, "另一个邀请人")
+	invitee := newActiveUser(t, "明细被邀请人")
+	for _, u := range []*model.User{inviter, other, invitee} {
+		if err := users.Create(ctx, u); err != nil {
+			t.Fatalf("创建用户失败: %v", err)
+		}
+	}
+
+	base := time.Now().Add(-time.Hour)
+	rewards := []*model.ReferralReward{
+		{
+			InviterID: inviter.ID, InviteeID: invitee.ID, Kind: model.ReferralKindRegister,
+			Quota: 100, CreatedAt: base,
+		},
+		{
+			InviterID: inviter.ID, InviteeID: invitee.ID, Kind: model.ReferralKindRecharge,
+			Quota: 30, OrderTradeNo: "pay20260927000001aaaaaa", CreatedAt: base.Add(time.Minute),
+		},
+		{
+			// 属于另一个邀请人：绝不能被查出来
+			InviterID: other.ID, InviteeID: invitee.ID, Kind: model.ReferralKindRegister,
+			Quota: 999, CreatedAt: base.Add(2 * time.Minute),
+		},
+	}
+	for _, reward := range rewards {
+		if _, err := repo.GrantReward(ctx, reward); err != nil {
+			t.Fatalf("写入奖励台账失败: %v", err)
+		}
+	}
+
+	total, err := repo.CountRewards(ctx, inviter.ID)
+	if err != nil {
+		t.Fatalf("统计返利条数失败: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("应只统计到本邀请人的 2 条奖励，实际 %d", total)
+	}
+
+	items, err := repo.ListRewards(ctx, inviter.ID, 10, 0)
+	if err != nil {
+		t.Fatalf("查询返利明细失败: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("应返回 2 条明细，实际 %d", len(items))
+	}
+	// 倒序：后发放的（充值返利 30）在前
+	if items[0].Kind != model.ReferralKindRecharge || items[0].Quota != 30 {
+		t.Fatalf("第一条应是最新的充值返利 30，实际 %s/%d", items[0].Kind, items[0].Quota)
+	}
+	if items[1].Kind != model.ReferralKindRegister || items[1].Quota != 100 {
+		t.Fatalf("第二条应是最早的注册奖 100，实际 %s/%d", items[1].Kind, items[1].Quota)
+	}
+	// 用户名必须被带出（否则前端只能显示用户 id）
+	if items[0].InviteeName != invitee.Username {
+		t.Fatalf("应带出被邀请人用户名 %q，实际 %q", invitee.Username, items[0].InviteeName)
+	}
+	if items[0].OrderTradeNo != "pay20260927000001aaaaaa" {
+		t.Fatalf("应带出关联订单号，实际 %q", items[0].OrderTradeNo)
+	}
+
+	// 分页：offset 跳过最新一条后应只剩注册奖
+	page, err := repo.ListRewards(ctx, inviter.ID, 10, 1)
+	if err != nil {
+		t.Fatalf("分页查询失败: %v", err)
+	}
+	if len(page) != 1 || page[0].Kind != model.ReferralKindRegister {
+		t.Fatalf("offset=1 应只剩注册奖一条，实际 %d 条", len(page))
+	}
+
+	// 无返利的用户：返回空列表而不是报错（前端空态依赖这一点）
+	empty, err := repo.ListRewards(ctx, invitee.ID, 10, 0)
+	if err != nil {
+		t.Fatalf("无返利用户查询不应报错: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("无返利用户应返回空列表，实际 %d 条", len(empty))
 	}
 }

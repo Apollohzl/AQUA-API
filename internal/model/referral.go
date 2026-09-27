@@ -125,6 +125,13 @@ type ReferralReward struct {
 	Quota        int64        // 本次奖励额度（正整数）
 	OrderTradeNo string       // 充值返利对应订单号；注册奖为空串
 	CreatedAt    time.Time    // 发放时间
+
+	// InviteeName 是触发奖励的用户名，仅由 ListRewards 填充（JOIN users 得到）。
+	//
+	// 单独说明的原因：它不是 referral_rewards 表的列，写入路径不涉及它。
+	// 财务板块要回答"这笔返利是谁带来的"，而这个信息只存在于 users 表，
+	// 若放到上层再逐条反查会产生 N+1 查询。
+	InviteeName string
 }
 
 // CheckinRecord 表示一条签到记录。
@@ -185,6 +192,15 @@ type ReferralRepository interface {
 
 	// TotalRewardQuota 统计某邀请人累计已获得的邀请奖励额度。
 	TotalRewardQuota(ctx context.Context, inviterID uint64) (int64, error)
+
+	// ListRewards 分页查询某邀请人获得的奖励明细（按发放时间倒序）。
+	//
+	// 用途：财务板块的"返利明细"列表。返回项的 InviteeName 会被填充，
+	// 便于页面直接展示"这笔返利来自谁"，无需上层再查一次用户表。
+	ListRewards(ctx context.Context, inviterID uint64, limit, offset int) ([]*ReferralReward, error)
+
+	// CountRewards 统计某邀请人的奖励条数（分页总数用）。
+	CountRewards(ctx context.Context, inviterID uint64) (int64, error)
 
 	// Checkin 记录一次签到并发放额度（同一事务），返回是否签到成功。
 	//

@@ -15,7 +15,7 @@
 //	  ├─ 注册：handler_auth → UserIDByInviteCode / BindInviter / GrantReward(register)
 //	  ├─ 充值：handler_payment 入账成功 → InviterID / GrantReward(recharge)
 //	  └─ 门户：handler_referral → EnsureInviteCode / CountInvitees / TotalRewardQuota
-//	                          / Checkin / CheckinSummary
+//	                          / ListRewards / CountRewards / Checkin / CheckinSummary
 //
 // 扩展（Extend）：
 //
@@ -40,6 +40,12 @@ import (
 // 回看 400 条已足以覆盖任何现实中的连续天数（一年也才 365 条），
 // 同时避免每次查询都把全表历史拉进内存。
 const checkinStreakLookback = 400
+
+// maxReferralRewardPageSize 是返利明细分页的单页上限。
+//
+// 与 handler 层的分页参数同口径：即使调用方传入更大的 limit 也会被夹到这里，
+// 避免一次查询把整张台账表拉进内存（台账只增不减）。
+const maxReferralRewardPageSize = 200
 
 // referralRepository 是 model.ReferralRepository 的 SQL 实现，并发安全。
 type referralRepository struct {
@@ -265,6 +271,61 @@ func (r *referralRepository) TotalRewardQuota(ctx context.Context, inviterID uin
 		return 0, fmt.Errorf("store: 统计邀请奖励额度失败: %w", err)
 	}
 	return total, nil
+}
+
+// ListRewards 分页查询某邀请人获得的奖励明细（按发放时间倒序）。
+//
+// 为什么在这里 JOIN users：列表要显示"这笔返利来自谁"，
+// 而用户名只存在于 users 表；在 SQL 里一次带出，避免上层逐条反查（N+1）。
+// 用户名可能为空（账号已删除），此时用 COALESCE 兜底为空串，由展示层决定怎么显示。
+func (r *referralRepository) ListRewards(ctx context.Context, inviterID uint64, limit, offset int) ([]*model.ReferralReward, error) {
+	if limit <= 0 || limit > maxReferralRewardPageSize {
+		limit = maxReferralRewardPageSize
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT rw.id, rw.inviter_id, rw.invitee_id, rw.kind, rw.quota,
+		       rw.order_trade_no, rw.created_at, COALESCE(u.username, '')
+		  FROM referral_rewards rw
+		  LEFT JOIN users u ON u.id = rw.invitee_id
+		 WHERE rw.inviter_id = ?
+		 ORDER BY rw.created_at DESC, rw.id DESC
+		 LIMIT ? OFFSET ?`, inviterID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("store: 查询返利明细失败: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	rewards := make([]*model.ReferralReward, 0, limit)
+	for rows.Next() {
+		var (
+			item      model.ReferralReward
+			createdAt int64
+		)
+		if err := rows.Scan(&item.ID, &item.InviterID, &item.InviteeID, &item.Kind,
+			&item.Quota, &item.OrderTradeNo, &createdAt, &item.InviteeName); err != nil {
+			return nil, fmt.Errorf("store: 解析返利明细失败: %w", err)
+		}
+		item.CreatedAt = time.Unix(createdAt, 0)
+		rewards = append(rewards, &item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: 遍历返利明细失败: %w", err)
+	}
+	return rewards, nil
+}
+
+// CountRewards 统计某邀请人的奖励条数。
+func (r *referralRepository) CountRewards(ctx context.Context, inviterID uint64) (int64, error) {
+	var count int64
+	if err := r.db.QueryRowContext(ctx,
+		"SELECT COUNT(1) FROM referral_rewards WHERE inviter_id = ?", inviterID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("store: 统计返利条数失败: %w", err)
+	}
+	return count, nil
 }
 
 // Checkin 记录一次签到并发放额度，返回是否签到成功。
