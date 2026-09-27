@@ -115,7 +115,11 @@ func callJSON(t *testing.T, srv *Server, method, path string, payload any, token
 // registerUser 通过注册接口创建账号并返回会话令牌与用户信息。
 func registerUser(t *testing.T, srv *Server, username, inviteCode string) (string, map[string]any) {
 	t.Helper()
-	payload := map[string]any{"username": username, "password": "pass-" + username}
+	// agreed_terms 是注册的硬性前置条件（个人信息保护的"告知—同意"），
+	// 所有走注册接口的用例都必须带上，否则会被 400 拦下。
+	payload := map[string]any{
+		"username": username, "password": "pass-" + username, "agreed_terms": true,
+	}
 	if inviteCode != "" {
 		payload["invite_code"] = inviteCode
 	}

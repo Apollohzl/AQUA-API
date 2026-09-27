@@ -255,7 +255,7 @@ func TestInjectSEOMeta_标签齐全(t *testing.T) {
 	for _, want := range []string{
 		// 默认内置的必应收录码
 		`<meta name="msvalidate.01" content="1B0EEE739DC3DB2ACD026924B711EC01" />`,
-		`<meta name="keywords" content="LLM API 网关,大模型中转,OpenAI 兼容,Anthropic,自托管" />`,
+		`<meta name="keywords" content="LLM API 网关,大模型 API,OpenAI 兼容接口,开发者工具,自托管" />`,
 		`<meta name="google-site-verification" content="google-verify" />`,
 		`<meta name="baidu-site-verification" content="baidu-verify" />`,
 		`<meta name="geo.region" content="CN-44" />`,

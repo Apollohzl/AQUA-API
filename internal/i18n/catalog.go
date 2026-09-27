@@ -185,6 +185,16 @@ var catalog = Catalog{
 		Es:   "Los datos de registro no son válidos",
 		Ar:   "بيانات التسجيل غير مقبولة",
 	},
+	// 注册前的协议同意校验：个人信息保护要求"先告知同意、再收集信息"，
+	// 因此这是注册链路的第一步校验，文案需明确指向两份文件。
+	"auth.terms_required": {
+		ZhCN: "请先阅读并同意《服务协议》与《隐私政策》",
+		En:   "Please read and accept the Terms of Service and Privacy Policy first",
+		Fr:   "Veuillez d'abord lire et accepter les Conditions d'utilisation et la Politique de confidentialité",
+		Ru:   "Сначала прочитайте и примите Условия использования и Политику конфиденциальности",
+		Es:   "Lee y acepta primero los Términos del servicio y la Política de privacidad",
+		Ar:   "يرجى قراءة شروط الخدمة وسياسة الخصوصية والموافقة عليهما أولاً",
+	},
 	"auth.register_disabled": {
 		ZhCN: "本站当前未开放注册，请联系管理员开通账号",
 		En:   "Registration is currently closed. Please contact the administrator to get an account.",

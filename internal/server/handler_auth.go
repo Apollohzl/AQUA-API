@@ -103,6 +103,21 @@ type siteStatusResponse struct {
 	// 一律折算成 ¥ 展示，用户才不会看到"充了 1 元、余额显示 100"而困惑。
 	// 这是纯粹的展示换算，与计费口径无关，因此不涉及任何敏感信息。
 	QuotaPerYuan int64 `json:"quota_per_yuan"`
+
+	// ── 合规信息（对用户公示）────────────────────────────────
+	//
+	// 这些信息本来就要公开展示（页脚、协议页），因此放在公开接口一并下发，
+	// 前端无需登录即可渲染页脚 —— 未登录用户同样应当能看到"服务由谁提供"。
+	// 各字段为空时前端不展示该项（例如站长尚未填备案号）。
+
+	// OperatorName 是经营主体名称。
+	OperatorName string `json:"operator_name"`
+	// ICPLicense 是 ICP 备案号。
+	ICPLicense string `json:"icp_license"`
+	// PoliceLicense 是公安联网备案号。
+	PoliceLicense string `json:"police_license"`
+	// ContactEmail 是客服与举报邮箱。
+	ContactEmail string `json:"contact_email"`
 }
 
 // handleSiteStatus 返回站点信息与可用模型列表。
@@ -133,6 +148,10 @@ func (s *Server) handleSiteStatus(c *gin.Context) {
 		EmailCodeRequired:   settings.RegistrationRequireEmailCode,
 		EmailServiceReady:   s.deps.Mailer != nil && s.deps.Mailer.Configured(),
 		QuotaPerYuan:        settings.Payment.ExchangeRate,
+		OperatorName:        settings.Compliance.OperatorName,
+		ICPLicense:          settings.Compliance.ICPLicense,
+		PoliceLicense:       settings.Compliance.PoliceLicense,
+		ContactEmail:        settings.Compliance.ContactEmail,
 	})
 }
 
@@ -175,6 +194,12 @@ type registerRequest struct {
 	//
 	// 语义：非法邀请码一律【忽略】并照常注册成功（取舍理由见 applyInviteOnRegister）。
 	InviteCode string `json:"invite_code"`
+	// AgreedTerms 表示用户已阅读并同意《服务协议》与《隐私政策》。
+	//
+	// 这是个人信息保护的硬要求：收集邮箱等个人信息前必须取得同意。
+	// 必须由后端强制校验，不能只靠前端把按钮置灰——否则直接调接口就能绕过，
+	// 一旦被核查，"未取得同意即收集个人信息"这一条是无法解释的。
+	AgreedTerms bool `json:"agreed_terms"`
 }
 
 // handleRegister 处理用户注册。
@@ -200,6 +225,14 @@ func (s *Server) handleRegister(c *gin.Context) {
 
 	username := strings.TrimSpace(req.Username)
 	email := model.NormalizeEmail(req.Email)
+
+	// 先校验"是否已同意协议"：它排在所有校验之前，因为这是收集任何个人信息
+	// （用户名、邮箱）的前置条件——没有同意就不该继续处理这些数据。
+	if !req.AgreedTerms {
+		writeUserError(c, http.StatusBadRequest,
+			"auth.terms_required", oai.TypeInvalidRequest, "terms_required")
+		return
+	}
 
 	// 先做"不需要消耗外部资源"的校验（口令强度），
 	// 再去校验验证码——顺序反了会导致"口令不合规却已浪费一个验证码"。

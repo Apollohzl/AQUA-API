@@ -1846,6 +1846,15 @@ func (s *Server) handleGetSettings(c *gin.Context) {
 		"safeguard": gin.H{
 			"sensitive_filter_enabled": settings.Safeguard.SensitiveFilterEnabled,
 		},
+
+		// 合规信息（对用户公示）：页脚、协议页、举报入口都用这一组。
+		// 单独成块便于后台表单集中维护，也让"哪些是必须公示的信息"一目了然。
+		"compliance": gin.H{
+			"operator_name":  settings.Compliance.OperatorName,
+			"icp_license":    settings.Compliance.ICPLicense,
+			"police_license": settings.Compliance.PoliceLicense,
+			"contact_email":  settings.Compliance.ContactEmail,
+		},
 	})
 }
 
@@ -2032,6 +2041,9 @@ type settingsUpdateRequest struct {
 
 	// 内容安全参数（逐项覆盖，见 mergeSafeguardSettings）
 	Safeguard *safeguardSettingsDTO `json:"safeguard"`
+
+	// 合规信息（逐项覆盖，见 mergeComplianceSettings）
+	Compliance *complianceSettingsDTO `json:"compliance"`
 }
 
 // safeguardSettingsDTO 是内容安全（合规过滤）设置的可写入参。
@@ -2039,6 +2051,37 @@ type settingsUpdateRequest struct {
 // 字段用指针：未提交的项保持原值，避免前端只改一项却把其他项清空。
 type safeguardSettingsDTO struct {
 	SensitiveFilterEnabled *bool `json:"sensitive_filter_enabled"`
+}
+
+// complianceSettingsDTO 是合规信息（对用户公示）的可写入参。
+//
+// 字段用指针：未提交的项保持原值。这里允许提交空串以"清空某一项"
+// （例如备案号填错了要删掉），因此不能像站点名那样把空值当作"未提供"。
+type complianceSettingsDTO struct {
+	OperatorName  *string `json:"operator_name"`
+	ICPLicense    *string `json:"icp_license"`
+	PoliceLicense *string `json:"police_license"`
+	ContactEmail  *string `json:"contact_email"`
+}
+
+// mergeComplianceSettings 把提交的合规信息并入当前设置。
+//
+// 只做裁剪空白与长度限制（与 model.loadComplianceSettings 同一口径），
+// 不做"必填"校验：站点可能正在准备备案材料，允许先留空。
+func mergeComplianceSettings(target *model.ComplianceSettings, req *complianceSettingsDTO) {
+	if target == nil || req == nil {
+		return
+	}
+	apply := func(dst *string, src *string) {
+		if src == nil {
+			return
+		}
+		*dst = model.TruncateComplianceField(*src)
+	}
+	apply(&target.OperatorName, req.OperatorName)
+	apply(&target.ICPLicense, req.ICPLicense)
+	apply(&target.PoliceLicense, req.PoliceLicense)
+	apply(&target.ContactEmail, req.ContactEmail)
 }
 
 // mergeSafeguardSettings 把提交的内容安全参数并入当前设置。
@@ -2151,6 +2194,9 @@ func (s *Server) handleUpdateSettings(c *gin.Context) {
 	}
 	if req.Safeguard != nil {
 		mergeSafeguardSettings(&current.Safeguard, req.Safeguard)
+	}
+	if req.Compliance != nil {
+		mergeComplianceSettings(&current.Compliance, req.Compliance)
 	}
 
 	if err := s.deps.Settings.SetMany(ctx, current.ToMap()); err != nil {

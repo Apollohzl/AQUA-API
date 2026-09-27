@@ -173,6 +173,25 @@ const (
 	//
 	// 关闭时中间件直接放行，连词表都不加载，不产生任何额外开销。
 	SettingKeySensitiveFilterEnabled = "sensitive_filter_enabled"
+
+	// ── 合规信息（对外公示）──────────────────────────────────────
+	//
+	// 这一组是"必须对用户公示"的主体与联系方式信息，展示在页脚与协议页：
+	//   - 经营主体与备案号：浏览器、微信/QQ、支付通道都会核验；
+	//     未展示备案号是境内站点被拦截/被要求整改的常见原因。
+	//   - 客服与举报邮箱：电子商务与生成式 AI 服务都要求提供可用的联系渠道。
+	//
+	// 为什么做成设置而不是写死在页面里：主体改名、换客服邮箱、备案号变更都很常见，
+	// 写死就意味着每次都要改代码重新发版；做成设置后站长在后台自助维护即可。
+
+	// SettingKeySiteOperatorName 经营主体名称（个人姓名或公司全称）。
+	SettingKeySiteOperatorName = "site_operator_name"
+	// SettingKeySiteICPLicense ICP 备案号（如 京ICP备00000000号-1）。
+	SettingKeySiteICPLicense = "site_icp_license"
+	// SettingKeySitePoliceLicense 公安联网备案号（如 京公网安备 00000000000000号）。
+	SettingKeySitePoliceLicense = "site_police_license"
+	// SettingKeySiteContactEmail 客服与举报邮箱（页脚、联系方式页、举报页共用）。
+	SettingKeySiteContactEmail = "site_contact_email"
 )
 
 // SiteSettings 是站点设置的强类型视图。
@@ -200,6 +219,27 @@ type SiteSettings struct {
 
 	// Safeguard 是内容安全相关的运营参数（敏感词过滤等）。
 	Safeguard SafeguardSettings
+
+	// Compliance 是需对用户公示的主体与联系方式信息（页脚、协议页、举报入口用）。
+	Compliance ComplianceSettings
+}
+
+// ComplianceSettings 是对外公示的合规信息。
+//
+// 单独成块的原因：它们同属"监管与平台核验要看的那一组信息"，
+// 后续若增加（例如增值电信业务许可证号、投诉电话）也归在这里，
+// 前台只需一处读取、后台只需一块表单。
+type ComplianceSettings struct {
+	// OperatorName 是经营主体名称（个人姓名或公司全称）。
+	//
+	// 页脚与协议页展示"服务由谁提供"，是用户与监管识别服务提供者的第一依据。
+	OperatorName string
+	// ICPLicense 是 ICP 备案号（如 京ICP备00000000号-1）。
+	ICPLicense string
+	// PoliceLicense 是公安联网备案号（如 京公网安备 00000000000000号）。
+	PoliceLicense string
+	// ContactEmail 是客服与举报共用邮箱；为空时前台不展示联系入口并给出提示。
+	ContactEmail string
 }
 
 // SafeguardSettings 是内容安全（合规过滤）的运营参数。
@@ -241,7 +281,26 @@ const (
 	maxReferralQuota int64 = 1_000_000_000
 	// maxRechargeRatio 是充值返利比例上限（100%）。
 	maxRechargeRatio = 100
+	// maxComplianceFieldLen 是合规信息（主体名称/备案号/邮箱）单字段的长度上限（按字符计）。
+	//
+	// 这些值会展示在页脚与协议页，超长会把版式撑破；同时它们来自后台表单，
+	// 设上限也是防止有人在设置里塞入异常内容（例如一整段 HTML）。
+	maxComplianceFieldLen = 200
 )
+
+// TruncateComplianceField 归一化一个合规信息字段：裁剪空白并按字符数截断。
+//
+// 导出给 server 层复用，保证"后台保存"与"从库加载"用的是同一套清洗规则 ——
+// 两处各写一份必然有一天不一致，而这类不一致会表现为"保存后回显与展示不同"。
+// 按字符（rune）而非字节截断：中文一字三字节，按字节截会把最后一个字切成乱码。
+func TruncateComplianceField(raw string) string {
+	value := strings.TrimSpace(raw)
+	runes := []rune(value)
+	if len(runes) > maxComplianceFieldLen {
+		return string(runes[:maxComplianceFieldLen])
+	}
+	return value
+}
 
 // ValidateReferralQuota 校验一笔"邀请/签到"奖励额度是否在允许区间 [0, maxReferralQuota]。
 //
@@ -383,8 +442,11 @@ func (p PaymentSettings) CurrencyOrDefault() string {
 // 设计意图：任何一项未配置时都应回退到合理默认，保证"零配置可用"。
 func DefaultSiteSettings() SiteSettings {
 	return SiteSettings{
-		SiteName:            "AQUA-API",
-		SiteDescription:     "新一代 AI 资产网关",
+		SiteName: "AQUA-API",
+		// 站点描述的默认值刻意避免"资产""金融"这类联想词：
+		// 它同时出现在搜索引擎摘要与社交平台分享卡片上，
+		// 金融类表述会让支付通道与浏览器风控对站点产生错误归类。
+		SiteDescription:     "面向开发者的 AI 模型接口网关",
 		RegistrationEnabled: true,
 		// 默认要求邮箱验证码：这是"防批量注册"的第一道闸门，
 		// 安全默认值应当偏严（需要放宽时由管理员在后台关闭）。
@@ -421,8 +483,11 @@ func DefaultSiteSettings() SiteSettings {
 			// SiteURL 默认留空：留空时按请求推导（见 server.publicBaseURL）。
 			// 反向代理后建议在后台显式配置为公开域名，否则推导出的可能是内网地址。
 			SiteURL: "",
-			// Keywords 默认给一组贴合本站定位的中文关键词。
-			Keywords: []string{"LLM API 网关", "大模型中转", "OpenAI 兼容", "Anthropic", "自托管"},
+			// Keywords 默认给一组合规的中文关键词。
+			//
+			// 刻意不含"转"/"低价"/"免费"这类词：它们在内容平台与浏览器风控里
+			// 属于高危表述，容易把站点归入"违规接入服务"一类。
+			Keywords: []string{"LLM API 网关", "大模型 API", "OpenAI 兼容接口", "开发者工具", "自托管"},
 			// BingVerification 默认填项目官方站点的必应收录码。
 			//
 			// 说明：这是项目官方站点的默认收录码，自建用户可在后台改成自己的。
@@ -450,6 +515,9 @@ func DefaultSiteSettings() SiteSettings {
 		Safeguard: SafeguardSettings{
 			SensitiveFilterEnabled: false,
 		},
+		// 合规信息默认全空：备案号与主体名称只能由站长填入（我们无从得知），
+		// 前台在各字段为空时优雅降级（不展示该项），后台表单会提示"必填以符合公示要求"。
+		Compliance: ComplianceSettings{},
 	}
 }
 
@@ -495,6 +563,11 @@ func (s SiteSettings) ToMap() map[string]string {
 		SettingKeyCheckinDailyQuota:     strconv.FormatInt(s.Referral.CheckinDailyQuota, 10),
 
 		SettingKeySensitiveFilterEnabled: strconv.FormatBool(s.Safeguard.SensitiveFilterEnabled),
+
+		SettingKeySiteOperatorName:  s.Compliance.OperatorName,
+		SettingKeySiteICPLicense:    s.Compliance.ICPLicense,
+		SettingKeySitePoliceLicense: s.Compliance.PoliceLicense,
+		SettingKeySiteContactEmail:  s.Compliance.ContactEmail,
 	}
 }
 
@@ -539,6 +612,7 @@ func LoadSiteSettings(ctx context.Context, repo SettingRepository) (SiteSettings
 	loadSEOSettings(&settings.SEO, values)
 	loadReferralSettings(&settings.Referral, values)
 	loadSafeguardSettings(&settings.Safeguard, values)
+	loadComplianceSettings(&settings.Compliance, values)
 
 	return settings, nil
 }
@@ -553,6 +627,22 @@ func loadSafeguardSettings(target *SafeguardSettings, values map[string]string) 
 			target.SensitiveFilterEnabled = parsed
 		}
 	}
+}
+
+// loadComplianceSettings 把 KV 中的合规信息合并进强类型结构。
+//
+// 全部按"原样透传 + 裁剪空白与长度"处理：这些是公示信息，取值正确性由站长负责，
+// 这里只做与后台保存完全一致的清洗（同一个 TruncateComplianceField）。
+func loadComplianceSettings(target *ComplianceSettings, values map[string]string) {
+	set := func(dst *string, key string) {
+		if v, ok := values[key]; ok {
+			*dst = TruncateComplianceField(v)
+		}
+	}
+	set(&target.OperatorName, SettingKeySiteOperatorName)
+	set(&target.ICPLicense, SettingKeySiteICPLicense)
+	set(&target.PoliceLicense, SettingKeySitePoliceLicense)
+	set(&target.ContactEmail, SettingKeySiteContactEmail)
 }
 
 // loadReferralSettings 把 KV 中的邀请/签到参数合并进强类型结构。
