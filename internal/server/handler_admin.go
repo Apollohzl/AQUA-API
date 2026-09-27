@@ -19,12 +19,9 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -39,6 +36,7 @@ import (
 	"gitee.com/xiaosu4610/aqua-api/internal/oai"
 	"gitee.com/xiaosu4610/aqua-api/internal/payment"
 	"gitee.com/xiaosu4610/aqua-api/internal/relay"
+	"gitee.com/xiaosu4610/aqua-api/internal/server/middleware"
 )
 
 // 分页默认值。
@@ -597,6 +595,22 @@ type channelTestResponse struct {
 	Model      string `json:"model"`
 	Message    string `json:"message"`
 	StatusCode int    `json:"status_code"`
+	// UpstreamBody 是上游响应片段（已截断）。
+	//
+	// 透出它是为了让管理员看到上游的原话："model not found" 与
+	// "insufficient permissions" 指向完全不同的处置动作。
+	UpstreamBody string `json:"upstream_body"`
+
+	// 以下字段回答"这次测活用了什么、池里还剩多少"——
+	// 没有它们，测活结论无法解释：测活用的是哪把凭据？池是不是已经空了？
+	KeyMasked     string `json:"key_masked"`
+	KeySource     string `json:"key_source"`
+	PoolTotal     int    `json:"pool_total"`
+	PoolAvailable int    `json:"pool_available"`
+	PoolCooling   int    `json:"pool_cooling"`
+	PoolDisabled  int    `json:"pool_disabled"`
+	PoolRemoved   int    `json:"pool_removed"`
+	PoolExhausted int    `json:"pool_exhausted"`
 }
 
 // handleTestChannel 对渠道发起一次真实请求以验证连通性。
@@ -622,13 +636,7 @@ func (s *Server) handleTestChannel(c *gin.Context) {
 	// 为什么必须这样做：密钥池渠道通常【不填】单密钥（api_key 为空），
 	// 若测活仍用 channel.APIKey，这类渠道会永远显示"测活失败"，
 	// 管理员会误以为渠道配错了。
-	if s.deps.ChannelKeys != nil {
-		if pool, err := s.deps.ChannelKeys.ListUsable(ctx, channel.ID); err == nil && len(pool) > 0 {
-			channel.APIKey = model.PickKey(pool).Key
-		}
-	}
-
-	result := probeChannel(ctx, channel)
+	result := s.probeChannel(ctx, channel)
 
 	// 记录测活结果（失败不影响本次响应：测活结果本身就是"可能失败"的信息）
 	_ = s.deps.Channels.RecordTestResult(ctx, channel.ID, time.Now(), result.OK)
@@ -733,14 +741,51 @@ func (s *Server) handleListChannelKeys(c *gin.Context) {
 		return
 	}
 
+	// reveal=1 表示管理员显式要求查看凭据原文（后台「显示明文」开关）。
+	//
+	// 为什么不默认返回原文：一个渠道可能有几百把密钥，默认返回等于
+	// 把整池凭据明文灌进浏览器内存、前端日志与可能的截图里。
+	// 默认只给掩码，需要原文时必须显式请求——并且这次读取会被记入操作审计。
+	reveal := c.Query("reveal") == "1"
+
 	keys, err := s.deps.ChannelKeys.ListByChannel(c.Request.Context(), id)
 	if err != nil {
 		s.respondInternalError(c, "查询渠道密钥失败")
 		return
 	}
 
-	items := toChannelKeyDTOList(keys)
-	c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items)})
+	items := toChannelKeyDTOList(keys, reveal)
+	if reveal {
+		s.recordSecretReveal(c, id, len(items))
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items), "revealed": reveal})
+}
+
+// recordSecretReveal 记录一次"查看凭据原文"的操作审计。
+//
+// 为什么读取也要审计：这是唯一会把上游密钥明文带出服务端的接口，
+// 一旦发生泄露（或站长怀疑泄露），审计是唯一能回答"谁在什么时候看过"的依据。
+// AdminAudit 中间件只记录写操作，因此这里显式补一条。
+func (s *Server) recordSecretReveal(c *gin.Context, channelID uint64, count int) {
+	if s.deps.Audit == nil {
+		return
+	}
+	entry := &model.AuditLog{
+		Method:     http.MethodGet,
+		Path:       c.Request.URL.Path,
+		Action:     "查看渠道密钥原文",
+		Target:     fmt.Sprintf("channel_id=%d", channelID),
+		Detail:     fmt.Sprintf("reveal=1，返回 %d 条凭据原文", count),
+		StatusCode: http.StatusOK,
+		ClientIP:   c.ClientIP(),
+		UserAgent:  c.Request.UserAgent(),
+	}
+	if user, ok := middleware.CurrentUser(c); ok {
+		entry.AdminID = user.ID
+		entry.AdminUsername = user.Username
+	}
+	// 审计失败不阻断本次读取：审计是旁路能力，不应影响管理员的正常操作。
+	_ = s.deps.Audit.Create(c.Request.Context(), entry)
 }
 
 // channelKeyUpdateRequest 是修改单把凭据的请求体。
@@ -978,16 +1023,25 @@ func resolveChannelGroups(groups []string, single string) (list []string, primar
 	return normalized, normalized[0]
 }
 
-// probeChannel 向渠道发起一次最小请求，用于验证连通与凭据有效性。
+// probeChannel 向渠道发起一次最小请求，用于验证连通、协议与凭据有效性。
 //
-// 实现要点：
-//   - 只发 max_tokens=1 的最小请求，尽量少消耗上游额度；
-//   - 独立超时（15 秒），避免慢上游把管理后台拖住；
-//   - 不把上游返回的原始报错全文透给前端（可能含地址等内部信息），只给简短结论。
-func probeChannel(ctx context.Context, channel *model.Channel) channelTestResponse {
+// 实现要点（本次全面重做，前三条是修复项）：
+//  1. 【按渠道类型构造请求】由 relay.ProbeChannel 完成，与真实转发复用同一套
+//     路径模板与鉴权逻辑，因此 Azure / Anthropic / Gemini / Bedrock / Vertex
+//     等非 OpenAI 协议渠道也能被正确测活（旧实现硬编码 OpenAI 协议，这些渠道必然误报失败）；
+//  2. 【从密钥池挑可用凭据】跳过正在冷却与余额已耗尽的密钥，且按 ID 取第一把可用的，
+//     保证同一状态下的测活结论可复现、可解释（旧实现随机挑，还可能挑到冷却中的密钥）；
+//  3. 【上游原话透出】返回响应片段，让管理员看到 "model not found" 还是
+//     "insufficient permissions"，而不是一个无法行动的"测活失败"；
+//  4. 只发 max_tokens=1 的最小请求，尽量少消耗上游额度；
+//  5. 超时与转发链路一致（relay.UpstreamTimeout）：部分平台排队本身就久，
+//     短超时会给出"渠道坏了"的错误结论；
+//  6. 测活【不】修改凭据的失败计数与冷却状态——它是只读探测，不能因为一次
+//     后台点击就把正在服务的密钥打进冷却。
+func (s *Server) probeChannel(ctx context.Context, channel *model.Channel) channelTestResponse {
 	probeModel := ""
 	if len(channel.Models) > 0 {
-		probeModel = channel.Models[0]
+		probeModel = strings.TrimSpace(channel.Models[0])
 	}
 	if probeModel == "" {
 		// 未声明模型时无法构造有效请求：明确告知管理员先补模型列表，
@@ -999,84 +1053,184 @@ func probeChannel(ctx context.Context, channel *model.Channel) channelTestRespon
 		}
 	}
 
-	payload, err := json.Marshal(map[string]any{
-		"model":      probeModel,
-		"messages":   []map[string]string{{"role": "user", "content": "ping"}},
-		"max_tokens": 1,
-	})
-	if err != nil {
-		return channelTestResponse{OK: false, Model: probeModel, Message: "构造测活请求失败"}
+	// ── 选本次探测使用的凭据（池优先，与转发链路的取用顺序一致）──────────
+	apiKey, cred, credErr := s.pickProbeCredential(ctx, channel)
+	result := channelTestResponse{Model: probeModel, KeyMasked: cred.masked, KeySource: cred.source}
+	result.PoolTotal = cred.poolTotal
+	result.PoolAvailable = cred.poolAvailable
+	result.PoolCooling = cred.poolCooling
+	result.PoolDisabled = cred.poolDisabled
+	result.PoolRemoved = cred.poolRemoved
+	result.PoolExhausted = cred.poolExhausted
+	if credErr != "" {
+		result.Message = credErr
+		return result
 	}
 
-	// 超时与转发链路保持一致（relay.UpstreamTimeout = 300 秒）。
-	//
-	// 为什么不能像以前那样用 15 秒：NVIDIA NIM 这类平台的排队时间本身就长，
-	// 15 秒几乎必然超时，管理员会看到"测活失败"从而误删一个其实完全可用的渠道。
-	// 宁可让管理员多等一会儿，也不要给出一条误导性的结论。
+	if s.deps.Relay == nil {
+		result.Message = "转发引擎未就绪，无法测活"
+		return result
+	}
+
+	// 超时与转发链路保持一致（见本函数说明第 5 条）。
 	probeCtx, cancel := context.WithTimeout(ctx, relay.UpstreamTimeout)
 	defer cancel()
 
-	url := strings.TrimRight(channel.BaseURL, "/") + oai.ChatCompletionsPath
-	req, err := http.NewRequestWithContext(probeCtx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return channelTestResponse{OK: false, Model: probeModel, Message: "构造测活请求失败"}
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+channel.APIKey)
+	probe := s.deps.Relay.ProbeChannel(probeCtx, channel, apiKey, probeModel)
+	result.LatencyMS = probe.LatencyMS
+	result.StatusCode = probe.StatusCode
+	result.UpstreamBody = probe.Body
 
-	start := time.Now()
-	resp, err := http.DefaultClient.Do(req)
-	latency := int(time.Since(start).Milliseconds())
-
-	if err != nil {
+	if probe.Err != nil {
 		// 区分"超时"与"连不上"：两者的处置方式完全不同——
 		// 超时往往只是上游慢（尤其 NVIDIA），换个时间或换个模型可能就正常；
 		// 连不上才是地址/网络配错。混在一起报会让管理员改错地方。
-		if errors.Is(err, context.DeadlineExceeded) {
-			return channelTestResponse{
-				OK:        false,
-				LatencyMS: latency,
-				Model:     probeModel,
-				Message: fmt.Sprintf("等待上游响应超过 %d 秒仍未开始返回。"+
-					"这不代表渠道不可用（部分平台排队时间很长），建议换一个模型再测，"+
-					"或直接交给实际调用验证。", int(relay.UpstreamTimeout.Seconds())),
-			}
+		if probe.TimedOut() {
+			result.Message = fmt.Sprintf("等待上游响应超过 %d 秒仍未返回。"+
+				"这不代表渠道不可用（部分平台排队时间很长），建议换一个模型再测，"+
+				"或直接交给实际调用验证。", int(relay.UpstreamTimeout.Seconds()))
+			return result
 		}
-		return channelTestResponse{
-			OK:        false,
-			LatencyMS: latency,
-			Model:     probeModel,
-			Message:   "无法连接到上游（网络不通或地址有误）",
+		result.Message = "无法连接到上游（网络不通或地址有误）：" + probe.Err.Error()
+		return result
+	}
+
+	ok := probe.StatusCode >= 200 && probe.StatusCode < 300
+	result.OK = ok
+	result.Message = describeProbeStatus(probe.StatusCode, probe.Body, keySourceText(cred))
+	return result
+}
+
+// probeCredential 描述本次探测所用凭据的来路与池内状况。
+type probeCredential struct {
+	masked        string
+	source        string // pool / single
+	poolTotal     int
+	poolAvailable int
+	poolCooling   int
+	poolDisabled  int
+	poolRemoved   int
+	poolExhausted int
+}
+
+// keySourceText 返回凭据来源的中文说明，用于拼进测活结论。
+func keySourceText(cred probeCredential) string {
+	if cred.poolTotal == 0 {
+		return "渠道单密钥"
+	}
+	if cred.masked == "" {
+		return ""
+	}
+	return fmt.Sprintf("密钥池（池内可用 %d/%d，本次使用 %s）", cred.poolAvailable, cred.poolTotal, cred.masked)
+}
+
+// pickProbeCredential 选出一把用于测活的凭据，并给出池内统计。
+//
+// 选择规则（确定性，便于解释与复现）：
+//   - 渠道配了密钥池 → 只从池里挑：跳过"非启用 / 冷却中 / 余额已耗尽"，
+//     在剩下的里取 ID 最小的一把；
+//   - 没有池 → 用渠道的单密钥；
+//   - 都没有 → 返回可操作的错误说明（区分"池空了"与"从未配置"）。
+//
+// 池内没有可用凭据时【不】退回到单密钥：那会让"池已耗尽"这一关键事实被掩盖，
+// 管理员会以为渠道还能用，实际流量早已无处可去。
+func (s *Server) pickProbeCredential(ctx context.Context, channel *model.Channel) (string, probeCredential, string) {
+	var cred probeCredential
+
+	if s.deps.ChannelKeys == nil {
+		cred.source = "single"
+		return strings.TrimSpace(channel.APIKey), cred, probeEmptySingleKey(channel)
+	}
+
+	keys, err := s.deps.ChannelKeys.ListByChannel(ctx, channel.ID)
+	if err != nil {
+		// 读池失败时退回单密钥：至少还能给一个结论，而不是直接把测活判为失败。
+		cred.source = "single"
+		return strings.TrimSpace(channel.APIKey), cred, probeEmptySingleKey(channel)
+	}
+	if len(keys) == 0 {
+		cred.source = "single"
+		return strings.TrimSpace(channel.APIKey), cred, probeEmptySingleKey(channel)
+	}
+
+	cred.source = "pool"
+	cred.poolTotal = len(keys)
+	now := time.Now()
+	var picked *model.ChannelKey
+	for _, key := range keys {
+		switch {
+		case key.Status == model.ChannelKeyStatusDisabled:
+			cred.poolDisabled++
+			continue
+		case key.Status == model.ChannelKeyStatusAutoRemoved:
+			cred.poolRemoved++
+			continue
+		case key.CoolingDown(now):
+			// 冷却中的密钥此刻本就不可用：选它只会得到"限流/鉴权失败"这类
+			// 与渠道无关的结论，是对管理员最有误导性的一种结果。
+			cred.poolCooling++
+			continue
+		case key.BalanceExhausted():
+			cred.poolExhausted++
+			continue
+		}
+		cred.poolAvailable++
+		if picked == nil { // ListByChannel 已按 ID 升序，故第一把即 ID 最小
+			picked = key
 		}
 	}
-	defer func() { _ = resp.Body.Close() }()
-	// 丢弃响应体前先读一小段：不读会导致连接无法复用
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 
-	ok := resp.StatusCode >= 200 && resp.StatusCode < 300
-	message := "连通正常"
+	if picked == nil {
+		return "", cred, fmt.Sprintf(
+			"密钥池当前没有可用密钥（共 %d 把：冷却中 %d、已禁用 %d、已摘除 %d、余额已耗尽 %d）。"+
+				"请到「密钥池明细」查看，或等待冷却到期后重试。",
+			cred.poolTotal, cred.poolCooling, cred.poolDisabled, cred.poolRemoved, cred.poolExhausted)
+	}
+	cred.masked = picked.Masked()
+	return picked.CredentialValue(), cred, ""
+}
+
+// probeEmptySingleKey 在"没有可用单密钥"时给出可操作的提示。
+func probeEmptySingleKey(channel *model.Channel) string {
+	if strings.TrimSpace(channel.APIKey) != "" {
+		return ""
+	}
+	return "该渠道没有任何可用凭据：既未配置密钥池，单密钥也是空的。请填写密钥或导入批量密钥。"
+}
+
+// describeProbeStatus 把上游状态码与响应片段翻译成管理员能直接行动的结论。
+//
+// 参数 body 是上游原话（可能为空）；把它拼进结论里，管理员无需再去抓包。
+func describeProbeStatus(status int, body, source string) string {
+	suffix := ""
+	if trimmed := strings.TrimSpace(body); trimmed != "" {
+		suffix = "　上游返回：" + trimmed
+	}
+	where := ""
+	if source != "" {
+		where = "（" + source + "）"
+	}
+
 	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		message = "上游鉴权失败：渠道密钥可能无效或无权限"
-	case resp.StatusCode == http.StatusTooManyRequests:
-		message = "上游返回限流（密钥有效但当前受限）"
-	case resp.StatusCode == http.StatusNotFound:
-		// 404 有两种成因，必须区分开，否则管理员会一直去改 BaseURL：
-		//   1) 地址配错 —— 但若此前能拉到模型列表，基本可排除；
-		//   2) 该密钥/账号无权访问这个模型 —— NVIDIA 等平台按模型逐个授权，
-		//      账号只拿了部分模型的权限。把两种可能都写出来，管理员才不会误判。
-		message = "上游返回 404：可能是该渠道的密钥无权访问此模型（部分平台按模型逐个授权），" +
-			"也可能是 BaseURL 填错（注意不要带 /v1）"
-	case !ok:
-		message = fmt.Sprintf("上游返回异常状态码 %d", resp.StatusCode)
-	}
-
-	return channelTestResponse{
-		OK:         ok,
-		LatencyMS:  latency,
-		Model:      probeModel,
-		Message:    message,
-		StatusCode: resp.StatusCode,
+	case status >= 200 && status < 300:
+		return "连通正常，上游已正常应答" + where + suffix
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return "上游鉴权失败：该凭据可能无效、无权限，或类型/鉴权方式选错" + where + suffix
+	case status == http.StatusTooManyRequests:
+		return "上游返回限流：凭据有效但当前受限（可降低并发或等待冷却）" + where + suffix
+	case status == http.StatusNotFound:
+		// 404 有三种成因，必须区分开，否则管理员会一直去改 BaseURL：
+		//   1) 该密钥/账号无权访问这个模型（NVIDIA 等平台按模型逐个授权）；
+		//   2) 模型名在上游不存在（映射配错或上游改名）；
+		//   3) BaseURL 填错（注意不要带 /v1）。
+		return "上游返回 404：可能是该凭据无权访问此模型、模型名在上游不存在，也可能是 BaseURL 填错（不要带 /v1）" +
+			where + suffix
+	case status == http.StatusPaymentRequired:
+		return "上游返回 402：该账号额度/账单异常" + where + suffix
+	case status >= 500:
+		return fmt.Sprintf("上游返回 %d：上游服务端异常（通常是上游临时故障，可稍后重试）", status) + where + suffix
+	default:
+		return fmt.Sprintf("上游返回异常状态码 %d", status) + where + suffix
 	}
 }
 

@@ -160,7 +160,8 @@ type keyPoolDTO struct {
 
 // channelKeyDTO 是凭据池中单条凭据的对外表示。
 //
-// 安全约束：只输出掩码（masked_key），明文永不返回给前端。
+// 安全约束：默认只输出掩码（masked_key）。明文（secret）只在管理员显式
+// 要求查看原文时（?reveal=1）才填充，且该次读取会被写入操作审计。
 type channelKeyDTO struct {
 	ID         uint64 `json:"id"`
 	Kind       string `json:"kind"`
@@ -173,6 +174,11 @@ type channelKeyDTO struct {
 	LastUsedAt int64  `json:"last_used_at"`
 	LastError  string `json:"last_error"`
 	CreatedAt  int64  `json:"created_at"`
+	// Secret 是凭据原文，仅在显式查看原文时填充（omitempty 保证平时不出现该字段）。
+	//
+	// 为什么不复用 masked_key：两者语义完全不同——掩码可随手展示，
+	// 原文只能在管理员明确要求时返回。用不同字段能避免"某处误用掩码字段返回了原文"。
+	Secret string `json:"secret,omitempty"`
 
 	// 调度维度字段（只读透出 + 可编辑参数）。
 	//
@@ -199,7 +205,9 @@ type channelKeyDTO struct {
 }
 
 // toChannelKeyDTO 把凭据模型转为对外 DTO。
-func toChannelKeyDTO(key *model.ChannelKey) channelKeyDTO {
+//
+// 参数 reveal 为真时额外填充凭据原文（仅超管显式查看原文时使用）。
+func toChannelKeyDTO(key *model.ChannelKey, reveal bool) channelKeyDTO {
 	if key == nil {
 		return channelKeyDTO{}
 	}
@@ -207,12 +215,17 @@ func toChannelKeyDTO(key *model.ChannelKey) channelKeyDTO {
 	if key.IsOAuth() {
 		kindText = "订阅账号"
 	}
+	secret := ""
+	if reveal {
+		secret = key.RevealSecret()
+	}
 	return channelKeyDTO{
 		ID:         key.ID,
 		Kind:       string(key.Kind),
 		KindText:   kindText,
 		Label:      key.Label,
 		MaskedKey:  key.Masked(),
+		Secret:     secret,
 		Status:     int(key.Status),
 		StatusText: key.Status.String(),
 		FailCount:  key.FailCount,
@@ -233,11 +246,11 @@ func toChannelKeyDTO(key *model.ChannelKey) channelKeyDTO {
 	}
 }
 
-// toChannelKeyDTOList 批量转换密钥。
-func toChannelKeyDTOList(keys []*model.ChannelKey) []channelKeyDTO {
+// toChannelKeyDTOList 批量转换密钥；reveal 为真时一并填充原文。
+func toChannelKeyDTOList(keys []*model.ChannelKey, reveal bool) []channelKeyDTO {
 	result := make([]channelKeyDTO, 0, len(keys))
 	for _, key := range keys {
-		result = append(result, toChannelKeyDTO(key))
+		result = append(result, toChannelKeyDTO(key, reveal))
 	}
 	return result
 }

@@ -28,7 +28,7 @@ import DataState from '@/components/DataState.vue'
 import { ApiError } from '@/api/client'
 import { fetchModelMappingOverview } from '@/api/admin'
 import type { ModelMappingOverviewItem, ModelMappingPlainChannel } from '@/api/types'
-import { statusBadgeClass } from '@/utils/display'
+import { channelStatusBadgeClass, channelStatusLabel } from '@/utils/display'
 
 const router = useRouter()
 
@@ -97,25 +97,6 @@ const filteredEmpty = computed(
 /** 跳转到渠道管理并请求自动打开该渠道的编辑抽屉 */
 function goEditChannel(channelId: number): void {
   void router.push({ name: 'admin-channels', query: { edit: String(channelId) } })
-}
-
-/**
- * 渠道状态文案（1 启用 / 2 停用 / 3 自动停用）。
- *
- * 与「渠道管理」页口径保持一致：这里刻意不复用通用的两态 statusLabel，
- * 因为渠道有第三个状态（自动停用），显示成"停用"会让站长误以为是自己关的。
- */
-function channelStatusText(status: number): string {
-  switch (status) {
-    case 1:
-      return '启用'
-    case 2:
-      return '停用'
-    case 3:
-      return '自动停用'
-    default:
-      return `未知(${status})`
-  }
 }
 </script>
 
@@ -233,8 +214,8 @@ function channelStatusText(status: number): string {
               <td data-label="分组"><span class="chip">{{ item.group }}</span></td>
 
               <td data-label="状态">
-                <span :class="statusBadgeClass(item.channel_status)">
-                  {{ channelStatusText(item.channel_status) }}
+                <span :class="channelStatusBadgeClass(item.channel_status)">
+                  {{ channelStatusLabel(item.channel_status) }}
                 </span>
                 <span v-if="item.channel_status !== 1" class="ms-1 text-[11px] text-amber-700">
                   渠道未启用，请求不会走这条映射
@@ -278,8 +259,8 @@ function channelStatusText(status: number): string {
               <td class="text-ink-100" data-label="渠道">{{ channel.channel_name }}</td>
               <td data-label="分组"><span class="chip">{{ channel.group }}</span></td>
               <td data-label="状态">
-                <span :class="statusBadgeClass(channel.channel_status)">
-                  {{ channelStatusText(channel.channel_status) }}
+                <span :class="channelStatusBadgeClass(channel.channel_status)">
+                  {{ channelStatusLabel(channel.channel_status) }}
                 </span>
               </td>
               <td class="cell-num text-ink-300" data-label="声明的模型数">

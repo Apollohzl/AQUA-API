@@ -68,7 +68,7 @@ import {
 import { confirmDialog } from '@/composables/useConfirm'
 import { toastError, toastSuccess } from '@/composables/useToast'
 import { useSiteStore } from '@/stores/site'
-import { channelTypeLabel, statusBadgeClass } from '@/utils/display'
+import { channelStatusBadgeClass, channelStatusLabel, channelTypeLabel } from '@/utils/display'
 import { formatDateTime, joinModelList, parseModelList } from '@/utils/format'
 
 const site = useSiteStore()
@@ -86,6 +86,8 @@ const busyId = ref<number | null>(null)
 /** 测活结果：按渠道 id 缓存，用于在表格内展示延迟与结论 */
 const testResults = ref<Record<number, ChannelTestResult>>({})
 const testingId = ref<number | null>(null)
+/** 展开查看测活详情的渠道 id（同一时刻只展开一个，避免表格被撑乱） */
+const testDetailId = ref<number | null>(null)
 
 /* ── 上游模型拉取状态 ─────────────────────────────────── */
 /** 是否正在拉取模型清单 */
@@ -235,6 +237,13 @@ const keyBusyId = ref<number | null>(null)
 const savingKeyId = ref<number | null>(null)
 /** 正在保存余额的密钥 id */
 const savingBalanceId = ref<number | null>(null)
+/**
+ * 是否显示凭据原文。
+ *
+ * 默认关闭：一个渠道可能有几百把密钥，默认下发等于把整池明文灌进浏览器内存、
+ * 前端日志与截图里。开启时后端会写一条操作审计（谁在什么时候看过密钥原文）。
+ */
+const keysReveal = ref(false)
 /** 每把密钥的调度参数草稿（id → {weight, priority, rpm_limit, balance}），支持内联编辑 */
 const keyDrafts = ref<Record<number, KeySchedulingDraft>>({})
 /** 冷却剩余时间的参照时刻：每秒刷新，让"剩余 xx 分 xx 秒"实时递减 */
@@ -750,15 +759,37 @@ function clearModels(): void {
 async function openKeys(channel: Channel): Promise<void> {
   keysOfChannel.value = channel
   keysDrawerOpen.value = true
+  // 每次打开都回到"只显示掩码"的安全默认，避免上一次的明文状态被带进来
+  keysReveal.value = false
   await loadChannelKeys(channel.id)
 }
 
-/** 读取密钥池明细（只含掩码），并重置每把密钥的调度参数草稿 */
+/** 切换"显示明文"：开启前二次确认，避免误触把整池明文摊在屏幕上 */
+async function toggleReveal(): Promise<void> {
+  if (keysReveal.value) {
+    keysReveal.value = false
+    if (keysOfChannel.value) await loadChannelKeys(keysOfChannel.value.id)
+    return
+  }
+  const ok = await confirmDialog({
+    title: '显示密钥原文',
+    message:
+      '将在页面上显示该渠道全部凭据的原文（包含订阅账号的 refresh token）。' +
+      '请确认当前没有第三方在旁观看或录屏。本次查看会被记入「操作审计」。',
+    confirmText: '显示明文',
+    danger: true,
+  })
+  if (!ok) return
+  keysReveal.value = true
+  if (keysOfChannel.value) await loadChannelKeys(keysOfChannel.value.id)
+}
+
+/** 读取密钥池明细（默认只含掩码，开启显示明文时含原文），并重置每把密钥的调度参数草稿 */
 async function loadChannelKeys(channelId: number): Promise<void> {
   keysLoading.value = true
   keysError.value = ''
   try {
-    const result = await listChannelKeysWithBalance(channelId)
+    const result = await listChannelKeysWithBalance(channelId, keysReveal.value)
     channelKeys.value = result.items ?? []
     syncKeyDrafts(channelKeys.value)
   } catch (err) {
@@ -871,23 +902,46 @@ async function setKeyStatus(key: ChannelKeyWithBalance, status: number): Promise
   }
 }
 
-/** 密钥状态样式 */
-function keyStatusClass(status: number): string {
-  if (status === KEY_STATUS_ENABLED) return 'badge badge-ok'
-  if (status === KEY_STATUS_AUTO_REMOVED) return 'badge badge-warn'
-  return 'badge badge-off'
-}
-
 /** 密钥池按状态统计（抽屉顶部概览用） */
 const keyStats = computed(() => {
-  const stats = { enabled: 0, disabled: 0, removed: 0 }
+  const stats = { enabled: 0, disabled: 0, removed: 0, cooling: 0, exhausted: 0 }
   for (const key of channelKeys.value) {
-    if (key.status === KEY_STATUS_ENABLED) stats.enabled += 1
-    else if (key.status === KEY_STATUS_AUTO_REMOVED) stats.removed += 1
-    else stats.disabled += 1
+    if (key.status === KEY_STATUS_AUTO_REMOVED) stats.removed += 1
+    else if (key.status === KEY_STATUS_DISABLED) stats.disabled += 1
+    else stats.enabled += 1
+    // 冷却与余额耗尽是"运行态"，与持久状态无关：
+    // 一把"启用"的密钥此刻也可能因冷却/余额耗尽而完全不参与调度，
+    // 分开统计才能解释"池里显示可用很多把，实际却总失败"。
+    if (key.cooldown_until * 1000 > now.value) stats.cooling += 1
+    if (key.balance_exhausted) stats.exhausted += 1
   }
   return stats
 })
+
+/**
+ * 单把密钥的【综合可用性】。
+ *
+ * 为什么不能只看持久状态：一把 status=启用 的密钥可能正在冷却或余额已耗尽，
+ * 此刻完全不参与调度。只看 status 会得到"池里可用 500 把"这种与实际不符的结论，
+ * 站长据此排查必然找错方向。
+ */
+function keyUsabilityText(key: ChannelKeyWithBalance): string {
+  if (key.status === KEY_STATUS_DISABLED) return '已禁用'
+  if (key.status === KEY_STATUS_AUTO_REMOVED) return '已摘除'
+  if (key.balance_exhausted) return '余额耗尽'
+  if (key.cooldown_until * 1000 > now.value) return '冷却中'
+  return '可用'
+}
+
+/** 综合可用性对应的徽标样式 */
+function keyUsabilityClass(key: ChannelKeyWithBalance): string {
+  const text = keyUsabilityText(key)
+  if (text === '可用') return 'badge badge-ok'
+  if (text === '冷却中') return 'badge badge-warn'
+  if (text === '余额耗尽') return 'badge badge-warn'
+  if (text === '已摘除') return 'badge badge-err'
+  return 'badge badge-off'
+}
 
 /** 渠道在表格"密钥"列展示的文案 */
 function keyColumnText(channel: Channel): string {
@@ -987,6 +1041,9 @@ async function runTest(channel: Channel): Promise<void> {
   try {
     const result = await testChannel(channel.id)
     testResults.value = { ...testResults.value, [channel.id]: result }
+    // 无论成功失败都自动展开详情：成功时能核对"用的哪把密钥、池里还剩多少"，
+    // 失败时能立刻看到上游原话，省掉"再点一次看原因"。
+    testDetailId.value = channel.id
     if (result.ok) {
       toastSuccess(`「${channel.name}」连通正常，延迟 ${result.latency_ms} ms`)
     } else {
@@ -1111,7 +1168,8 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
           </DataState>
 
           <template v-if="!loading && !error && channels.length">
-            <tr v-for="channel in channels" :key="channel.id">
+            <template v-for="channel in channels" :key="channel.id">
+              <tr>
               <td class="font-medium text-ink-100" data-label="名称">
                 <span class="flex items-center gap-2">
                   {{ channel.name }}
@@ -1162,20 +1220,29 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
               <td class="cell-num" data-label="权重">{{ channel.weight }}</td>
 
               <td data-label="状态">
-                <span :class="statusBadgeClass(channel.status)">
+                <!-- 用共享的三态口径（启用 / 手动停用 / 自动停用），
+                     不再各页自写文案：同一个渠道在不同页面显示不同状态会让站长找错原因 -->
+                <span :class="channelStatusBadgeClass(channel.status)">
                   <span class="dot" />
-                  {{ channel.status_text || (channel.status === STATUS_ENABLED ? '启用' : '停用') }}
+                  {{ channelStatusLabel(channel.status) }}
                 </span>
               </td>
 
               <td class="whitespace-nowrap" data-label="最近测活">
-                <!-- 测活完成后即时展示延迟与结论，无需去日志里找 -->
-                <span v-if="testResults[channel.id]" class="flex items-center gap-1.5">
+                <!-- 测活完成后即时展示延迟与结论，并可点开看详情（失败原因/用的哪把密钥） -->
+                <button
+                  v-if="testResults[channel.id]"
+                  type="button"
+                  class="flex items-center gap-1.5"
+                  :title="testResults[channel.id].message"
+                  @click="testDetailId = testDetailId === channel.id ? null : channel.id"
+                >
                   <span :class="testResults[channel.id].ok ? 'badge badge-ok' : 'badge badge-err'">
                     {{ testResults[channel.id].ok ? '通过' : '失败' }}
                   </span>
                   <span class="font-mono text-[11px] text-ink-300">{{ testResults[channel.id].latency_ms }} ms</span>
-                </span>
+                  <span class="text-[11px] text-brand-700">{{ testDetailId === channel.id ? '收起' : '详情' }}</span>
+                </button>
                 <span v-else-if="channel.last_test_at" class="cell-muted">
                   {{ channel.last_test_ok === false ? '上次失败' : '上次通过' }}
                 </span>
@@ -1221,6 +1288,38 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
                   >
                     <AppIcon name="trash" :size="14" />
                   </button>
+                </div>
+              </td>
+            </tr>
+
+            <!-- 测活详情：结论、上游原话、本次使用的凭据与池内状况。
+                 单看"通过/失败"无法行动，这些细节才是排查依据。 -->
+            <tr v-if="testDetailId === channel.id && testResults[channel.id]" class="bg-ink-950/60">
+              <td :colspan="11" class="text-xs leading-relaxed">
+                <div class="space-y-1.5 py-1">
+                  <p class="text-ink-200">
+                    <span class="font-medium">测活结论：</span>{{ testResults[channel.id].message }}
+                  </p>
+                  <p v-if="testResults[channel.id].model" class="text-ink-400">
+                    探测模型：<code>{{ testResults[channel.id].model }}</code>
+                    <span v-if="testResults[channel.id].status_code">
+                      　HTTP 状态：<code>{{ testResults[channel.id].status_code }}</code>
+                    </span>
+                    　耗时 {{ testResults[channel.id].latency_ms }} ms
+                  </p>
+                  <p v-if="testResults[channel.id].key_source === 'pool'" class="text-ink-400">
+                    本次凭据：<code>{{ testResults[channel.id].key_masked || '无' }}</code>
+                    　池内可用 {{ testResults[channel.id].pool_available }}/{{ testResults[channel.id].pool_total }}
+                    <span v-if="testResults[channel.id].pool_cooling">　冷却中 {{ testResults[channel.id].pool_cooling }}</span>
+                    <span v-if="testResults[channel.id].pool_exhausted">　余额耗尽 {{ testResults[channel.id].pool_exhausted }}</span>
+                  </p>
+                  <p v-else-if="testResults[channel.id].key_source === 'single'" class="text-ink-400">
+                    本次凭据：渠道单密钥 <code>{{ testResults[channel.id].key_masked || '未配置' }}</code>
+                  </p>
+                  <p v-if="testResults[channel.id].upstream_body" class="text-ink-400">
+                    <span class="font-medium">上游返回：</span>
+                    <code class="break-all">{{ testResults[channel.id].upstream_body }}</code>
+                  </p>
                 </div>
               </td>
             </tr>
@@ -1796,7 +1895,11 @@ sk-yyyyyyyyyyyy</pre>
     <Drawer
       :open="keysDrawerOpen"
       :title="`密钥池 · ${keysOfChannel?.name ?? ''}`"
-      subtitle="仅显示掩码。连续失败达阈值的密钥会被自动摘除，可在此手动恢复。"
+      :subtitle="
+        keysReveal
+          ? '正在显示凭据原文，请勿录屏或截图；本次查看已记入操作审计。'
+          : '默认只显示掩码；需要原文时点「显示明文」（会记入操作审计）。'
+      "
       @close="keysDrawerOpen = false"
     >
       <DataState
@@ -1810,20 +1913,28 @@ sk-yyyyyyyyyyyy</pre>
       />
 
       <div v-if="!keysLoading && !keysError && channelKeys.length" class="space-y-3">
-        <p class="text-xs text-ink-400">
-          共 {{ channelKeys.length }} 把 ·
-          <span class="text-emerald-700">可用 {{ keyStats.enabled }}</span> ·
-          已禁用 {{ keyStats.disabled }} ·
-          <span class="text-amber-700">已自动摘除 {{ keyStats.removed }}</span>
-        </p>
+        <!-- 池内概览：把"持久状态"与"此刻是否真的可用"分开呈现。
+             只看持久状态会得出"可用 500 把"的错觉，而其中可能一大半正在冷却。 -->
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-400">
+          <span>共 <strong class="text-ink-100">{{ channelKeys.length }}</strong> 把</span>
+          <span class="text-emerald-700">启用 {{ keyStats.enabled }}</span>
+          <span v-if="keyStats.cooling" class="text-amber-700">冷却中 {{ keyStats.cooling }}</span>
+          <span v-if="keyStats.exhausted" class="text-amber-700">余额耗尽 {{ keyStats.exhausted }}</span>
+          <span v-if="keyStats.disabled">已禁用 {{ keyStats.disabled }}</span>
+          <span v-if="keyStats.removed" class="text-amber-700">已摘除 {{ keyStats.removed }}</span>
+          <button type="button" class="btn btn-secondary btn-sm ms-auto" @click="toggleReveal">
+            <AppIcon :name="keysReveal ? 'eye' : 'key'" :size="14" />
+            {{ keysReveal ? '隐藏明文' : '显示明文' }}
+          </button>
+        </div>
 
         <div class="table-wrap table-cards">
           <table class="data-table">
             <thead>
               <tr>
-                <th>密钥</th>
+                <th>{{ keysReveal ? '密钥原文' : '密钥（掩码）' }}</th>
                 <th>备注</th>
-                <th>状态</th>
+                <th>可用性</th>
                 <th>余额</th>
                 <th class="text-right">连续失败</th>
                 <th class="text-right">权重</th>
@@ -1837,11 +1948,22 @@ sk-yyyyyyyyyyyy</pre>
             </thead>
             <tbody>
               <tr v-for="key in channelKeys" :key="key.id">
-                <td data-label="密钥"><code class="chip">{{ key.masked_key }}</code></td>
+                <td data-label="密钥">
+                  <!-- 明文只在管理员显式开启时展示；平时一律掩码 -->
+                  <code v-if="keysReveal && key.secret" class="chip max-w-[22rem] truncate" :title="key.secret">
+                    {{ key.secret }}
+                  </code>
+                  <code v-else class="chip">{{ key.masked_key }}</code>
+                </td>
                 <td class="cell-muted" data-label="备注">{{ key.label || '—' }}</td>
-                <td data-label="状态">
-                  <span :class="keyStatusClass(key.status)" :title="key.last_error || undefined">
-                    {{ key.status_text }}
+                <td data-label="可用性">
+                  <!-- 综合可用性：启用但正在冷却 / 余额耗尽也如实反映，
+                       这样"池里有 500 把却总失败"就有了解释 -->
+                  <span
+                    :class="keyUsabilityClass(key)"
+                    :title="`持久状态：${key.status_text}${key.last_error ? '；最近错误：' + key.last_error : ''}`"
+                  >
+                    {{ keyUsabilityText(key) }}
                   </span>
                 </td>
 

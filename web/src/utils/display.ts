@@ -26,6 +26,44 @@ export function statusBadgeClass(status: number | undefined): string {
   return status === STATUS_ENABLED ? 'badge badge-ok' : 'badge badge-off'
 }
 
+/** 渠道状态编号（与后端 model.ChannelStatus 一一对应） */
+export const CHANNEL_STATUS_ENABLED = 1
+export const CHANNEL_STATUS_DISABLED = 2
+export const CHANNEL_STATUS_AUTO_DISABLED = 3
+
+/**
+ * 渠道状态 → 中文文案（三态）。
+ *
+ * 为什么必须集中在这里：渠道有三个状态（启用 / 手动停用 / 自动停用），
+ * 而通用的 statusLabel 只有两态。此前各页各写一份，导致同一个渠道
+ * 在渠道管理页显示"自动停用"、在模型映射页显示"停用"——
+ * 后者会让站长以为是自己关的，从而找错原因。
+ */
+export function channelStatusLabel(status: number | undefined): string {
+  switch (status) {
+    case CHANNEL_STATUS_ENABLED:
+      return '启用'
+    case CHANNEL_STATUS_DISABLED:
+      return '手动停用'
+    case CHANNEL_STATUS_AUTO_DISABLED:
+      return '自动停用'
+    default:
+      return status ? `未知状态(${status})` : '未知状态'
+  }
+}
+
+/** 渠道状态 → 徽标样式类：启用绿、自动停用黄（系统判定）、手动停用灰 */
+export function channelStatusBadgeClass(status: number | undefined): string {
+  switch (status) {
+    case CHANNEL_STATUS_ENABLED:
+      return 'badge badge-ok'
+    case CHANNEL_STATUS_AUTO_DISABLED:
+      return 'badge badge-warn'
+    default:
+      return 'badge badge-off'
+  }
+}
+
 /** HTTP 状态码 → 徽标样式类：2xx 绿、4xx 黄、5xx 红、其它灰 */
 export function httpStatusBadgeClass(code: number | undefined): string {
   if (!code) return 'badge badge-off'

@@ -473,6 +473,25 @@ func (k *ChannelKey) CredentialValue() string {
 	return k.Key
 }
 
+// RevealSecret 返回该凭据的敏感原文，供超管在后台显式查看（如复制到另一台实例）。
+//
+// 为什么单独开一个方法而不是直接暴露字段：
+//   - 两类凭据的"秘密"不是同一个字段：API Key 是 Key，订阅账号是 RefreshToken
+//     （AccessToken 是短期票据，没有搬运价值）；
+//   - 把"取原文"这件事集中在一个可被搜索到、可被审计的方法里，
+//     比让各处随手读 k.Key 更容易发现误用。
+//
+// 调用方必须保证：只在管理员显式要求查看原文时使用，且不得写入日志。
+func (k *ChannelKey) RevealSecret() string {
+	if k == nil {
+		return ""
+	}
+	if k.IsOAuth() {
+		return k.RefreshToken
+	}
+	return k.Key
+}
+
 // Masked 返回脱敏后的凭据，供界面与日志展示。
 //
 // 脱敏规则：保留前 8 位与后 4 位。相比渠道密钥多留 2 位前缀，

@@ -32,17 +32,35 @@ export interface ChannelKeyWithBalance extends ChannelKey {
   balance_unknown: boolean
   balance_exhausted: boolean
   balance_updated_at: number
+  /**
+   * 凭据原文，仅在 reveal=true 请求时返回。
+   *
+   * 默认不返回：一个渠道可能有几百把密钥，默认下发等于把整池明文
+   * 灌进浏览器内存与前端日志。需要原文时由界面显式开启「显示明文」。
+   */
+  secret?: string
 }
 
 /** GET /api/admin/channels/{id}/keys 的响应 */
 export interface ChannelKeyListResponse {
   items: ChannelKeyWithBalance[]
   total: number
+  /** 本次响应是否包含凭据原文 */
+  revealed?: boolean
 }
 
-/** 读取某渠道的密钥池明细（只含掩码）。返回的项带余额字段。 */
-export function listChannelKeysWithBalance(channelId: number): Promise<ChannelKeyListResponse> {
-  return api.get<ChannelKeyListResponse>(`/admin/channels/${channelId}/keys`)
+/**
+ * 读取某渠道的密钥池明细。
+ *
+ * 参数 reveal 为 true 时请求凭据原文（后端会为此写一条操作审计）。
+ */
+export function listChannelKeysWithBalance(
+  channelId: number,
+  reveal = false,
+): Promise<ChannelKeyListResponse> {
+  return api.get<ChannelKeyListResponse>(
+    `/admin/channels/${channelId}/keys${reveal ? '?reveal=1' : ''}`,
+  )
 }
 
 /**
