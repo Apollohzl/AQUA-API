@@ -169,6 +169,14 @@ var catalog = Catalog{
 		Es:   "El nombre de usuario ya está en uso",
 		Ar:   "اسم المستخدم مستخدم بالفعل",
 	},
+	"auth.email_taken": {
+		ZhCN: "该邮箱已被其他账号绑定（一个邮箱只能绑定一个账号）",
+		En:   "This email is already bound to another account (one email per account)",
+		Fr:   "Cet e-mail est déjà associé à un autre compte (un e-mail par compte)",
+		Ru:   "Этот адрес электронной почты уже привязан к другому аккаунту (один адрес — один аккаунт)",
+		Es:   "Este correo ya está vinculado a otra cuenta (un correo por cuenta)",
+		Ar:   "هذا البريد الإلكتروني مرتبط بالفعل بحساب آخر (بريد واحد لكل حساب)",
+	},
 	"auth.invalid_email": {
 		ZhCN: "邮箱格式不正确",
 		En:   "Invalid email format",

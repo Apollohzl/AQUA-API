@@ -259,6 +259,12 @@ func (s *Server) handleRegister(c *gin.Context) {
 			return
 		}
 
+		// 邮箱占用预检：一个邮箱只能绑定一个账号。
+		// 同样放在消费验证码之前，理由与用户名预检一致——否则邮箱冲突会白白吃掉一个验证码。
+		if !s.ensureEmailAvailable(c, email) {
+			return
+		}
+
 		if !s.verifyAndConsumeRegisterEmailCode(c, email, req.Code) {
 			return
 		}
@@ -268,6 +274,10 @@ func (s *Server) handleRegister(c *gin.Context) {
 		if err := model.ValidateEmailFormat(email); err != nil {
 			writeUserError(c, http.StatusBadRequest,
 				"auth.invalid_email", oai.TypeInvalidRequest, "invalid_email")
+			return
+		}
+		// 邮箱唯一性同样要管：注册不校验验证码并不代表可以一个邮箱绑多个账号。
+		if !s.ensureEmailAvailable(c, email) {
 			return
 		}
 	}
@@ -295,6 +305,12 @@ func (s *Server) handleRegister(c *gin.Context) {
 				"auth.username_taken", oai.TypeInvalidRequest, "username_taken")
 			return
 		}
+		// 邮箱冲突兜底：预检与写入之间存在时间差，并发下唯一索引才是最终裁决者。
+		if errors.Is(err, model.ErrEmailTaken) {
+			writeUserError(c, http.StatusConflict,
+				"auth.email_taken", oai.TypeInvalidRequest, "email_taken")
+			return
+		}
 		// 用户名/口令规则不满足时，领域校验的错误信息对使用者是有帮助的，
 		// 但它可能包含内部描述，因此这里只回笼统提示，详细原因记录在服务端。
 		// TODO(server): 接入结构化日志后记录 err
@@ -307,6 +323,35 @@ func (s *Server) handleRegister(c *gin.Context) {
 	s.applyInviteOnRegister(ctx, user, req.InviteCode, settings)
 
 	s.issueSession(c, user, http.StatusOK)
+}
+
+// ensureEmailAvailable 校验邮箱当前是否可被绑定（一个邮箱只能绑定一个账号）。
+//
+// 返回 true 表示可以继续；返回 false 表示已写入错误响应，调用方须立即 return。
+// 邮箱为空视为"不绑定邮箱"，直接放行 —— 邮箱是可选字段。
+//
+// 为什么预检与数据库唯一索引两道都要有：
+//   - 预检是为了体验（在消耗邮箱验证码之前就把冲突挡掉，并给出精确原因）；
+//   - 唯一索引是为了正确性（并发下两个请求可能同时通过预检，第二个会在写库时
+//     拿到 ErrEmailTaken）。预检不是并发安全的"预留"，永远不能替代唯一约束。
+func (s *Server) ensureEmailAvailable(c *gin.Context, email string) bool {
+	if email == "" {
+		return true
+	}
+
+	_, err := s.deps.Users.GetByEmail(c.Request.Context(), email)
+	switch {
+	case err == nil:
+		writeUserError(c, http.StatusConflict,
+			"auth.email_taken", oai.TypeInvalidRequest, "email_taken")
+		return false
+	case errors.Is(err, model.ErrUserNotFound):
+		return true
+	default:
+		oai.WriteError(c.Writer, http.StatusInternalServerError,
+			"网关内部错误", oai.TypeServer, oai.CodeInternal)
+		return false
+	}
 }
 
 // applyInviteOnRegister 在注册成功后建立邀请关系并（按配置）给邀请人发注册奖。

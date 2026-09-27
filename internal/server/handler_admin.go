@@ -1613,14 +1613,20 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 	user := &model.User{
 		Username:     strings.TrimSpace(req.Username),
 		PasswordHash: hash,
-		Email:        strings.TrimSpace(req.Email),
-		Role:         model.UserRole(defaultIfZero(req.Role, int(model.UserRoleUser))),
-		Status:       model.UserStatus(defaultIfZero(req.Status, int(model.UserStatusEnabled))),
-		Quota:        quota,
+		// 邮箱统一走 NormalizeEmail（去空白 + 转小写）：唯一索引是按原文匹配的，
+		// 若这里存入大小写不一的写法，就会绕过"一个邮箱只能绑定一个账号"的约束。
+		Email:  model.NormalizeEmail(req.Email),
+		Role:   model.UserRole(defaultIfZero(req.Role, int(model.UserRoleUser))),
+		Status: model.UserStatus(defaultIfZero(req.Status, int(model.UserStatusEnabled))),
+		Quota:  quota,
 	}
 	if err := s.deps.Users.Create(c.Request.Context(), user); err != nil {
 		if errors.Is(err, model.ErrUsernameTaken) {
 			oai.WriteError(c.Writer, http.StatusConflict, "用户名已被占用", oai.TypeInvalidRequest, "username_taken")
+			return
+		}
+		if errors.Is(err, model.ErrEmailTaken) {
+			oai.WriteError(c.Writer, http.StatusConflict, "邮箱已被占用（一个邮箱只能绑定一个账号）", oai.TypeInvalidRequest, "email_taken")
 			return
 		}
 		oai.WriteError(c.Writer, http.StatusBadRequest, "创建用户失败："+err.Error(), oai.TypeInvalidRequest, "invalid_user")
@@ -1673,7 +1679,9 @@ func (s *Server) handleUpdateUser(c *gin.Context) {
 	}
 
 	user.Username = strings.TrimSpace(defaultIfEmpty(req.Username, user.Username))
-	user.Email = strings.TrimSpace(req.Email)
+	// 邮箱同样归一化，保证唯一索引能真正拦住"大小写变体绕过"（见 handleCreateUser 说明）。
+	// 注意这里是【全量覆盖】语义：传空字符串即清空邮箱（清空后不参与唯一约束）。
+	user.Email = model.NormalizeEmail(req.Email)
 	user.Role = newRole
 	user.Status = newStatus
 	if req.Quota != nil {
@@ -1696,6 +1704,10 @@ func (s *Server) handleUpdateUser(c *gin.Context) {
 	if err := s.deps.Users.Update(ctx, user); err != nil {
 		if errors.Is(err, model.ErrUsernameTaken) {
 			oai.WriteError(c.Writer, http.StatusConflict, "用户名已被占用", oai.TypeInvalidRequest, "username_taken")
+			return
+		}
+		if errors.Is(err, model.ErrEmailTaken) {
+			oai.WriteError(c.Writer, http.StatusConflict, "邮箱已被占用（一个邮箱只能绑定一个账号）", oai.TypeInvalidRequest, "email_taken")
 			return
 		}
 		oai.WriteError(c.Writer, http.StatusBadRequest, "更新用户失败："+err.Error(), oai.TypeInvalidRequest, "invalid_user")
