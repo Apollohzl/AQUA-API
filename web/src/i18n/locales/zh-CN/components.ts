@@ -226,6 +226,7 @@ export default {
       models: '模型广场',
       resources: '资源',
       channels: '渠道管理',
+      modelMappings: '模型映射',
       groups: '模型分组',
       prices: '计价规则',
       tokens: '令牌管理',

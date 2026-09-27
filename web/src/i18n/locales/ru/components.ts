@@ -232,6 +232,7 @@ export default {
       models: 'Витрина моделей',
       resources: 'Ресурсы',
       channels: 'Каналы',
+      modelMappings: 'Сопоставление моделей',
       groups: 'Группы моделей',
       prices: 'Тарификация',
       tokens: 'Токены',

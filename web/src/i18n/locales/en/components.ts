@@ -225,6 +225,7 @@ export default {
       models: 'Model Plaza',
       resources: 'Resources',
       channels: 'Channels',
+      modelMappings: 'Model Mapping',
       groups: 'Model Groups',
       prices: 'Pricing',
       tokens: 'Tokens',

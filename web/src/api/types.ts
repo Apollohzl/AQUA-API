@@ -301,6 +301,40 @@ export interface ChannelModelMappingItem {
   remark?: string
 }
 
+/** 全站模型 ID 映射总览里的一行（已带上渠道信息） */
+export interface ModelMappingOverviewItem {
+  id: number
+  channel_id: number
+  channel_name: string
+  /** 渠道状态：1 启用 / 2 停用 / 3 自动停用；非 1 时映射不会生效 */
+  channel_status: number
+  group: string
+  /** 平台模型 ID（用户调用时使用） */
+  public_model: string
+  /** 上游模型 ID（实际发给上游） */
+  upstream_model: string
+  priority: number
+  enabled: boolean
+  remark: string
+}
+
+/** 未配置任何映射的渠道摘要（模型名原样透传给上游） */
+export interface ModelMappingPlainChannel {
+  channel_id: number
+  channel_name: string
+  channel_status: number
+  group: string
+  /** 该渠道声明的模型数；0 表示声明"支持全部模型" */
+  model_count: number
+}
+
+/** GET /api/admin/model-mappings 的响应 */
+export interface ModelMappingOverview {
+  items: ModelMappingOverviewItem[]
+  channels_without_mapping: ModelMappingPlainChannel[]
+  total: number
+}
+
 /** 渠道密钥池概览 */
 export interface KeyPoolSummary {
   total: number

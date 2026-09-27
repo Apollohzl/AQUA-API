@@ -230,6 +230,7 @@ export default {
       models: 'Plaza de modelos',
       resources: 'Recursos',
       channels: 'Canales',
+      modelMappings: 'Mapeo de modelos',
       groups: 'Grupos de modelos',
       prices: 'Precios',
       tokens: 'Tokens',

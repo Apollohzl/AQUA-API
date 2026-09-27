@@ -34,6 +34,7 @@ const groups = computed<NavGroup[]>(() => [
     title: t('components.nav.admin.resources'),
     items: [
       { label: t('components.nav.admin.channels'), to: '/admin/channels', icon: 'server' },
+      { label: t('components.nav.admin.modelMappings'), to: '/admin/model-mappings', icon: 'layers' },
       { label: t('components.nav.admin.groups'), to: '/admin/groups', icon: 'tag' },
       { label: t('components.nav.admin.prices'), to: '/admin/prices', icon: 'quota' },
       { label: t('components.nav.admin.tokens'), to: '/admin/tokens', icon: 'key' },

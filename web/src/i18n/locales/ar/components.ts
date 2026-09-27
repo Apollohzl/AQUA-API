@@ -223,6 +223,7 @@ export default {
       models: 'سوق النماذج',
       resources: 'الموارد',
       channels: 'القنوات',
+      modelMappings: 'تعيين النماذج',
       groups: 'مجموعات النماذج',
       prices: 'التسعير',
       tokens: 'الرموز',

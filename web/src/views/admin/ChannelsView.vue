@@ -21,6 +21,7 @@
  *   因此后端新增一种上游时本页无需改动。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 import AppIcon from '@/components/AppIcon.vue'
 import DataState from '@/components/DataState.vue'
@@ -69,6 +70,7 @@ import { channelTypeLabel, statusBadgeClass } from '@/utils/display'
 import { formatDateTime, joinModelList, parseModelList } from '@/utils/format'
 
 const site = useSiteStore()
+const route = useRoute()
 
 const channels = ref<Channel[]>([])
 const total = ref(0)
@@ -264,8 +266,8 @@ async function loadChannels(): Promise<void> {
   }
 }
 
-onMounted(() => {
-  void loadChannels()
+onMounted(async () => {
+  await loadChannels()
   void loadGroupOptions()
   void loadChannelTypes()
   void loadKeyStrategies()
@@ -273,6 +275,15 @@ onMounted(() => {
   clockTimer = window.setInterval(() => {
     now.value = Date.now()
   }, 1000)
+
+  // 深链：其他页面（如「模型映射」总览）可以带 ?edit={渠道ID} 跳进来，
+  // 直接打开该渠道的编辑抽屉，省掉"先搜索再点编辑"这一步。
+  // 必须放在 loadChannels 之后：编辑抽屉的初值取自列表行。
+  const editID = Number(route.query.edit ?? '')
+  if (Number.isInteger(editID) && editID > 0) {
+    const target = channels.value.find((item) => item.id === editID)
+    if (target) await openEdit(target)
+  }
 })
 
 onBeforeUnmount(() => {

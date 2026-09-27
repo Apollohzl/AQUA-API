@@ -36,6 +36,7 @@ import type {
   LogQuery,
   ModelGroup,
   ModelGroupPayload,
+  ModelMappingOverview,
   ModelPrice,
   ModelPricePayload,
   OAuthProvider,
@@ -217,6 +218,16 @@ export function replaceChannelMappings(
 }
 
 /* ── 上游模型列表 ───────────────────────────────────────── */
+
+/**
+ * GET /api/admin/model-mappings：全站模型 ID 映射总览。
+ *
+ * 跨渠道聚合，回答「我的平台有哪些模型 ID、分别映射到哪个上游 ID」；
+ * 同时给出没有配置映射的渠道（它们把模型名原样透传给上游）。
+ */
+export function fetchModelMappingOverview(): Promise<ModelMappingOverview> {
+  return api.get<ModelMappingOverview>('/admin/model-mappings')
+}
 
 /**
  * POST /api/admin/fetch-models：向上游查询可用模型列表。

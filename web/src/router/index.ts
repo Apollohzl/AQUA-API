@@ -178,6 +178,14 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '渠道管理' },
       },
       {
+        // 模型映射总览：跨渠道聚合「平台模型 ID → 上游模型 ID」。
+        // 编辑入口仍在渠道表单里，本页只做总览与跳转（单一写入点，避免两处互相覆盖）。
+        path: 'model-mappings',
+        name: 'admin-model-mappings',
+        component: () => import('@/views/admin/ModelMappingsView.vue'),
+        meta: { title: '模型映射' },
+      },
+      {
         path: 'groups',
         name: 'admin-groups',
         component: () => import('@/views/admin/GroupsView.vue'),

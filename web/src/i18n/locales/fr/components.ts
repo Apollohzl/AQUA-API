@@ -232,6 +232,7 @@ export default {
       models: 'Place du marché',
       resources: 'Ressources',
       channels: 'Canaux',
+      modelMappings: 'Mappage des modèles',
       groups: 'Groupes de modèles',
       prices: 'Tarification',
       tokens: 'Jetons',
