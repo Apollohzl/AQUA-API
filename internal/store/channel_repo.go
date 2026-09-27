@@ -252,8 +252,12 @@ func buildChannelWhere(q model.ChannelQuery) (string, []any) {
 		//
 		// 清单匹配用「前后补逗号 + LIKE」实现：它把 CSV 变成 "…,free,aqua,…" 形式，
 		// 从而避免 free 命中 freebies 这类子串误判；SQLite 与 MySQL 都支持，无需方言分支。
-		conditions = append(conditions, "(group_name = ? OR (',' || group_names || ',') LIKE ?)")
-		args = append(args, q.Group, "%,"+q.Group+",%")
+		//
+		// 分组名做 LIKE 转义：分组标识里若含下划线（如 my_group），不转义时 "_"
+		// 会被当作"任意单字符"通配符，既可能匹配到无关分组（路由错），
+		// 也让查询串里的 % 变成全表扫描模式。
+		conditions = append(conditions, "(group_name = ? OR (',' || group_names || ',') LIKE ? ESCAPE '\\')")
+		args = append(args, q.Group, "%,"+escapeLike(q.Group)+",%")
 	}
 	if q.Status != nil {
 		conditions = append(conditions, "status = ?")

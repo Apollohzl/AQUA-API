@@ -292,9 +292,11 @@ func buildModelWhere(query model.ModelQuery) (string, []any) {
 	args := make([]any, 0, 4)
 
 	if keyword := strings.TrimSpace(query.Keyword); keyword != "" {
-		// 关键词同时匹配模型名与展示名：管理员往往记得展示名而非标识
-		conditions = append(conditions, "(name LIKE ? OR display_name LIKE ?)")
-		like := "%" + keyword + "%"
+		// 关键词同时匹配模型名与展示名：管理员往往记得展示名而非标识。
+		// 转义 % 与 _：否则输入 "50%" 会被当成通配符，既能返回无关结果，
+		// 也能构造出昂贵的全表扫描模式（与 buildUserWhere 等保持一致口径）。
+		conditions = append(conditions, "(name LIKE ? ESCAPE '\\' OR display_name LIKE ? ESCAPE '\\')")
+		like := "%" + escapeLike(keyword) + "%"
 		args = append(args, like, like)
 	}
 	if vendor := strings.TrimSpace(query.Vendor); vendor != "" {
