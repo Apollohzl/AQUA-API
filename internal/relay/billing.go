@@ -265,6 +265,17 @@ func (b *Billing) priceFor(ctx context.Context, group, modelName string) *model.
 	return model.MatchModelPrice(b.rulesFor(ctx, group).prices, modelName)
 }
 
+// PriceInfo 返回某模型在某分组下命中的计价规则（供后台展示与试算使用）。
+//
+// 返回 nil 表示【未定价】（该模型没有任何适用规则），调用方应把它与
+// "命中规则但显式免费"区分显示：前者是待办，后者是站长的明确决定。
+//
+// 导出它的原因：计费链路与后台展示必须用同一份规则匹配结果，
+// 后台若自行遍历价格表，就可能出现"试算说免费、实际在扣费"的不一致。
+func (b *Billing) PriceInfo(ctx context.Context, group, modelName string) *model.ModelPrice {
+	return b.priceFor(ctx, group, modelName)
+}
+
 // Quote 计算该次用量应扣的额度（只算不扣）。
 //
 // cachedTokens 是输入中命中上游缓存的部分（0 表示上游未提供该维度）：
@@ -274,6 +285,13 @@ func (b *Billing) priceFor(ctx context.Context, group, modelName string) *model.
 func (b *Billing) Quote(ctx context.Context, group, modelName string,
 	promptTokens, completionTokens, cachedTokens int64) int64 {
 	price := b.priceFor(ctx, group, modelName)
+	if price == nil || price.IsFree() {
+		// 两种情况都算 0，但语义不同：
+		//   未定价（nil）= 站长还没给这个模型定价，日志里 quota 记 0 属于"待办"；
+		//   显式免费     = 站长明确选择不收费（活动模型 / 公益分组）。
+		// 二者的区分体现在展示层（广场标"免费"）与后台（价格页显示"免费"）。
+		return 0
+	}
 	return applyRatio(
 		price.ComputeQuotaWithCache(promptTokens, completionTokens, cachedTokens),
 		b.ratioFor(ctx, group))
@@ -287,6 +305,9 @@ func (b *Billing) Quote(ctx context.Context, group, modelName string,
 // 参数 group 为空表示使用 Billing 的默认分组。
 func (b *Billing) QuoteOnce(ctx context.Context, group, modelName string, count int64) int64 {
 	price := b.priceFor(ctx, group, modelName)
+	if price == nil || price.IsFree() {
+		return 0
+	}
 	return applyRatio(price.ComputePerCallQuota(count), b.ratioFor(ctx, group))
 }
 
@@ -312,6 +333,11 @@ func (b *Billing) ChargeOnce(ctx context.Context, group string, userID, tokenID 
 	price := b.priceFor(ctx, group, modelName)
 	if price == nil {
 		// 未定价：不扣费（与 token 计费保持同一语义，避免"没配价格就报错"）
+		return 0
+	}
+	if price.IsFree() {
+		// 显式免费：同样不扣费。写成独立的判断而不是并进上一个条件，
+		// 是为了让"免费"这条业务规则在代码里显式可查（将来加"免费额度上限"时改这里）。
 		return 0
 	}
 
@@ -382,6 +408,11 @@ func (b *Billing) Charge(ctx context.Context, group string, userID, tokenID uint
 		// 这样站长能从日志看出"哪些模型还没定价"，而不是被静默拦住。
 		return 0
 	}
+	if price.IsFree() {
+		// 显式免费：价格字段即使填了也不生效——免费是站长的明确决定，
+		// 不能被"顺手填过的价格"覆盖，否则会出现"选了免费还在扣费"的投诉。
+		return 0
+	}
 
 	quota := applyRatio(
 		price.ComputeQuotaWithCache(promptTokens, completionTokens, cachedTokens),
@@ -426,6 +457,11 @@ func (b *Billing) EstimateReserve(ctx context.Context, group, modelName string, 
 
 	price := b.priceFor(ctx, group, modelName)
 	if price == nil {
+		return 0, false
+	}
+	if price.IsFree() {
+		// 显式免费的模型必须【跳过预留】：否则免费模型会被额度墙挡住，
+		// 而"免费却不能用"正是历史上那次线上事故的表现形式。
 		return 0, false
 	}
 

@@ -195,6 +195,58 @@ func TestBilling_Quote_未配置缓存价时回退输入价(t *testing.T) {
 	}
 }
 
+func TestBilling_显式免费即使填了价格也不扣费(t *testing.T) {
+	ctx := context.Background()
+
+	// 站长先按量定价，后来把规则改成"免费"（价格字段有意保留，便于随时切回按量）
+	prices := &fakePriceRepo{prices: []*model.ModelPrice{{
+		ID: 1, Model: "test-model",
+		PromptPrice: 3_000_000, CompletionPrice: 15_000_000, PerCallPrice: 999,
+		BillingMode: model.BillingModeFree,
+		Group:       "default", Enabled: true,
+	}}}
+	billing := NewBilling(prices, newFakeGroupRepo(100), nil, nil, "default")
+
+	if got := billing.Quote(ctx, "", "test-model", 1_000_000, 1_000_000, 0); got != 0 {
+		t.Fatalf("显式免费不应按 token 收费，实际 %d", got)
+	}
+	if got := billing.QuoteOnce(ctx, "", "test-model", 3); got != 0 {
+		t.Fatalf("显式免费不应按次收费，实际 %d", got)
+	}
+	if got := billing.Charge(ctx, "", 0, 0, "test-model", 1_000_000, 1_000_000, 0); got != 0 {
+		t.Fatalf("显式免费不应扣费，实际 %d", got)
+	}
+	if got := billing.ChargeOnce(ctx, "", 0, 0, "test-model", 1); got != 0 {
+		t.Fatalf("显式免费不应按次扣费，实际 %d", got)
+	}
+
+	// 关键：免费规则必须【跳过额度预留】，否则免费模型会被额度墙挡住
+	//（"免费却不能用"正是历史上那次线上事故的表现形式）。
+	amount, priced := billing.EstimateReserve(ctx, "", "test-model", 4096)
+	if priced || amount != 0 {
+		t.Fatalf("免费模型应跳过预留，实际 amount=%d priced=%v", amount, priced)
+	}
+}
+
+func TestBilling_按量且价格为零不是免费(t *testing.T) {
+	ctx := context.Background()
+
+	// 明确选了"按量"但价格填 0：命中规则、金额为 0，但仍会走预留流程
+	//（与"显式免费"不同：它不是站长声明的免费，只是价格恰好为 0）。
+	prices := &fakePriceRepo{prices: []*model.ModelPrice{{
+		ID: 1, Model: "test-model", BillingMode: model.BillingModeToken,
+		Group: "default", Enabled: true,
+	}}}
+	billing := NewBilling(prices, newFakeGroupRepo(100), nil, nil, "default")
+
+	if got := billing.Quote(ctx, "", "test-model", 1000, 1000, 0); got != 0 {
+		t.Fatalf("价格为 0 时金额应为 0，实际 %d", got)
+	}
+	if _, priced := billing.EstimateReserve(ctx, "", "test-model", 4096); !priced {
+		t.Fatalf("按量规则即使价格为 0 也算已定价（priced），以区分于未定价")
+	}
+}
+
 func TestBilling_未定价模型不扣费(t *testing.T) {
 	ctx := context.Background()
 	billing := newTestBilling(150, 1_000_000, 2_000_000, 0)

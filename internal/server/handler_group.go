@@ -462,8 +462,16 @@ type plazaModelDTO struct {
 type plazaPriceDTO struct {
 	Group           string `json:"group"`
 	PromptPrice     int64  `json:"prompt_price"`
+	CachePrice      int64  `json:"cache_price"`
 	CompletionPrice int64  `json:"completion_price"`
 	PerCallPrice    int64  `json:"per_call_price"`
+	// BillingMode 是生效的计费方式（token / per_call / free）。
+	BillingMode string `json:"billing_mode"`
+	// IsFree 是派生布尔：显式免费。
+	//
+	// 广场必须能把"免费"标出来：用户最关心的就是"这个模型要不要花钱"，
+	// 让他靠试算去猜是明显的体验缺口。
+	IsFree bool `json:"is_free"`
 	// Ratio 是该分组的计费倍率（百分比，100 = 1.0 倍），便于用户算实际价格。
 	Ratio int64 `json:"ratio"`
 }
@@ -673,8 +681,11 @@ func plazaPricesFor(prices []*model.ModelPrice, modelName string, groupRatios ma
 		result = append(result, plazaPriceDTO{
 			Group:           group,
 			PromptPrice:     matched.PromptPrice,
+			CachePrice:      matched.CachePrice,
 			CompletionPrice: matched.CompletionPrice,
 			PerCallPrice:    matched.PerCallPrice,
+			BillingMode:     matched.EffectiveBillingMode(),
+			IsFree:          matched.IsFree(),
 			Ratio:           groupRatioOrDefault(groupRatios, group),
 		})
 	}

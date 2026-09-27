@@ -200,6 +200,81 @@ func TestModelPrice_ComputeQuota_向下取整不虚增(t *testing.T) {
 	}
 }
 
+func TestModelPrice_EffectiveBillingMode(t *testing.T) {
+	cases := []struct {
+		name  string
+		price *ModelPrice
+		want  string
+	}{
+		{"显式免费优先", &ModelPrice{BillingMode: BillingModeFree, PromptPrice: 999}, BillingModeFree},
+		{"显式按量", &ModelPrice{BillingMode: BillingModeToken, PerCallPrice: 5}, BillingModeToken},
+		{"显式按次", &ModelPrice{BillingMode: BillingModePerCall}, BillingModePerCall},
+		// 自动判定（历史数据）：只有按次价 → 按次
+		{"自动_只有按次价", &ModelPrice{PerCallPrice: 500}, BillingModePerCall},
+		// 自动判定：有 token 价 → 按量
+		{"自动_有token价", &ModelPrice{PromptPrice: 1, PerCallPrice: 500}, BillingModeToken},
+		// 自动判定：有缓存价也算按量口径
+		{"自动_只有缓存价", &ModelPrice{CachePrice: 1, PerCallPrice: 500}, BillingModeToken},
+		// 自动判定：全 0 走按量，结算结果为 0（与迁移前行为一致）
+		{"自动_全零", &ModelPrice{}, BillingModeToken},
+		// 无法识别的脏值回退自动判定，而不是当成非法值
+		{"无法识别的值回退自动", &ModelPrice{BillingMode: "wat"}, BillingModeToken},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.price.EffectiveBillingMode(); got != tc.want {
+				t.Fatalf("EffectiveBillingMode = %q，期望 %q", got, tc.want)
+			}
+		})
+	}
+
+	var missing *ModelPrice
+	if got := missing.EffectiveBillingMode(); got != BillingModeToken {
+		t.Fatalf("nil 规则应回退按量，实际 %q", got)
+	}
+	if missing.IsFree() {
+		t.Fatalf("nil 规则不是免费（它是未定价）")
+	}
+}
+
+func TestModelPrice_IsFree只认显式免费(t *testing.T) {
+	// 价格为 0 但方式是按量 → 不是免费（它是"按量但恰好为 0"）
+	zeroPriced := &ModelPrice{BillingMode: BillingModeToken}
+	if zeroPriced.IsFree() {
+		t.Fatalf("按量且价格为 0 不应判定为免费")
+	}
+	free := &ModelPrice{BillingMode: BillingModeFree, PromptPrice: 999}
+	if !free.IsFree() {
+		t.Fatalf("显式免费应判定为免费（价格字段不生效）")
+	}
+}
+
+func TestIsValidBillingMode(t *testing.T) {
+	for _, mode := range []string{BillingModeFree, BillingModeToken, BillingModePerCall} {
+		if !IsValidBillingMode(mode) {
+			t.Fatalf("%q 应为合法计费方式", mode)
+		}
+	}
+	for _, mode := range []string{"", "free ", "FREE", "按量", "wat"} {
+		if IsValidBillingMode(mode) {
+			t.Fatalf("%q 不应被判为合法计费方式", mode)
+		}
+	}
+}
+
+func TestModelPrice_Validate_拒绝非法计费方式(t *testing.T) {
+	invalid := &ModelPrice{Model: "m", Group: "default", BillingMode: "tilu"}
+	if err := invalid.Validate(); err == nil {
+		t.Fatalf("非法计费方式应被拒绝（否则计费会静默走自动判定）")
+	}
+	for _, mode := range []string{BillingModeAuto, BillingModeFree, BillingModeToken, BillingModePerCall} {
+		price := &ModelPrice{Model: "m", Group: "default", BillingMode: mode}
+		if err := price.Validate(); err != nil {
+			t.Fatalf("合法方式 %q 不应报错: %v", mode, err)
+		}
+	}
+}
+
 func TestModelPrice_Validate(t *testing.T) {
 	valid := &ModelPrice{Model: "gpt-4o", Group: "default", PromptPrice: 1, CompletionPrice: 1}
 	if err := valid.Validate(); err != nil {

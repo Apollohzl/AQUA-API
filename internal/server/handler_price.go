@@ -24,6 +24,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -41,11 +42,21 @@ type modelPriceDTO struct {
 	PromptPrice     int64  `json:"prompt_price"`
 	CachePrice      int64  `json:"cache_price"`
 	CompletionPrice int64  `json:"completion_price"`
-	Group           string `json:"group"`
-	Enabled         bool   `json:"enabled"`
-	Remark          string `json:"remark"`
-	CreatedAt       int64  `json:"created_at"`
-	UpdatedAt       int64  `json:"updated_at"`
+	PerCallPrice    int64  `json:"per_call_price"`
+	// BillingMode 是站长显式选择的计费方式；空串表示"自动判定"（历史数据）。
+	BillingMode string `json:"billing_mode"`
+	// EffectiveBillingMode 是实际生效的计费方式（把"自动"解释成具体口径）。
+	//
+	// 两个字段都给前端：前者用于回显表单的选择，后者用于展示"到底按什么算"——
+	// 只给一个的话，界面要么回显不出"自动"，要么显示不出真实口径。
+	EffectiveBillingMode string `json:"effective_billing_mode"`
+	// IsFree 是派生布尔：显式免费（与"未定价"是两回事，后者根本没有规则）。
+	IsFree    bool   `json:"is_free"`
+	Group     string `json:"group"`
+	Enabled   bool   `json:"enabled"`
+	Remark    string `json:"remark"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
 }
 
 // toModelPriceDTO 把领域模型转为对外 DTO。
@@ -54,16 +65,20 @@ func toModelPriceDTO(price *model.ModelPrice) modelPriceDTO {
 		return modelPriceDTO{}
 	}
 	return modelPriceDTO{
-		ID:              price.ID,
-		Model:           price.Model,
-		PromptPrice:     price.PromptPrice,
-		CachePrice:      price.CachePrice,
-		CompletionPrice: price.CompletionPrice,
-		Group:           price.Group,
-		Enabled:         price.Enabled,
-		Remark:          price.Remark,
-		CreatedAt:       unixOrZero(price.CreatedAt),
-		UpdatedAt:       unixOrZero(price.UpdatedAt),
+		ID:                   price.ID,
+		Model:                price.Model,
+		PromptPrice:          price.PromptPrice,
+		CachePrice:           price.CachePrice,
+		CompletionPrice:      price.CompletionPrice,
+		PerCallPrice:         price.PerCallPrice,
+		BillingMode:          price.BillingMode,
+		EffectiveBillingMode: price.EffectiveBillingMode(),
+		IsFree:               price.IsFree(),
+		Group:                price.Group,
+		Enabled:              price.Enabled,
+		Remark:               price.Remark,
+		CreatedAt:            unixOrZero(price.CreatedAt),
+		UpdatedAt:            unixOrZero(price.UpdatedAt),
 	}
 }
 
@@ -93,13 +108,26 @@ func (s *Server) handleListPrices(c *gin.Context) {
 
 // modelPriceUpsertRequest 是新增/更新计价规则的请求体。
 type modelPriceUpsertRequest struct {
-	Model           string `json:"model"`
-	PromptPrice     *int64 `json:"prompt_price"`
-	CachePrice      *int64 `json:"cache_price"`
-	CompletionPrice *int64 `json:"completion_price"`
-	Group           string `json:"group"`
-	Enabled         *bool  `json:"enabled"`
-	Remark          string `json:"remark"`
+	Model           string  `json:"model"`
+	PromptPrice     *int64  `json:"prompt_price"`
+	CachePrice      *int64  `json:"cache_price"`
+	CompletionPrice *int64  `json:"completion_price"`
+	PerCallPrice    *int64  `json:"per_call_price"`
+	BillingMode     *string `json:"billing_mode"`
+	Group           string  `json:"group"`
+	Enabled         *bool   `json:"enabled"`
+	Remark          string  `json:"remark"`
+}
+
+// validateBillingMode 校验计费方式取值，非法时返回给使用者可读的原因。
+//
+// 单独抽出来是因为新增与更新两条路径都要校验：漏掉一处就会出现
+// "能存进去但计费不认"的规则（EffectiveBillingMode 会静默回退到自动判定）。
+func validateBillingMode(mode string) error {
+	if mode == model.BillingModeAuto || model.IsValidBillingMode(mode) {
+		return nil
+	}
+	return fmt.Errorf("计费方式非法：%q（可选 免费 / 按量 / 按次，或留空自动判定）", mode)
 }
 
 // handleCreatePrice 新增计价规则。
@@ -131,6 +159,18 @@ func (s *Server) handleCreatePrice(c *gin.Context) {
 	}
 	if req.CompletionPrice != nil {
 		price.CompletionPrice = *req.CompletionPrice
+	}
+	if req.PerCallPrice != nil {
+		price.PerCallPrice = *req.PerCallPrice
+	}
+	if req.BillingMode != nil {
+		mode := strings.TrimSpace(*req.BillingMode)
+		if err := validateBillingMode(mode); err != nil {
+			oai.WriteError(c.Writer, http.StatusBadRequest, err.Error(),
+				oai.TypeInvalidRequest, "invalid_billing_mode")
+			return
+		}
+		price.BillingMode = mode
 	}
 	if req.Enabled != nil {
 		price.Enabled = *req.Enabled
@@ -194,6 +234,18 @@ func (s *Server) handleUpdatePrice(c *gin.Context) {
 	if req.CompletionPrice != nil {
 		price.CompletionPrice = *req.CompletionPrice
 	}
+	if req.PerCallPrice != nil {
+		price.PerCallPrice = *req.PerCallPrice
+	}
+	if req.BillingMode != nil {
+		mode := strings.TrimSpace(*req.BillingMode)
+		if err := validateBillingMode(mode); err != nil {
+			oai.WriteError(c.Writer, http.StatusBadRequest, err.Error(),
+				oai.TypeInvalidRequest, "invalid_billing_mode")
+			return
+		}
+		price.BillingMode = mode
+	}
 	if group := strings.TrimSpace(req.Group); group != "" {
 		price.Group = group
 	}
@@ -256,6 +308,9 @@ func (s *Server) handleDeletePrice(c *gin.Context) {
 // 参数：model、prompt_tokens、completion_tokens（可选，默认按 1000/1000 估算）、
 // cached_tokens（可选，默认 0；用于核对缓存命中价的折扣是否按预期生效）、
 // group（可选，缺省用计费组件的默认分组）——价格规则按分组隔离，试算也需能指定分组。
+//
+// 返回值中的 priced 语义是"命中计价规则"，而不是"金额大于 0"：
+// 显式免费的规则金额也是 0，若按金额判定，界面会把"免费"误显示成"未定价"。
 func (s *Server) handleQuotePreview(c *gin.Context) {
 	if s.deps.Billing == nil {
 		oai.WriteError(c.Writer, http.StatusServiceUnavailable,
@@ -273,15 +328,28 @@ func (s *Server) handleQuotePreview(c *gin.Context) {
 	completionTokens := parseInt64Query(c, "completion_tokens", 1000)
 	cachedTokens := parseInt64Query(c, "cached_tokens", 0)
 
-	quota := s.deps.Billing.Quote(c.Request.Context(), group, modelName,
-		promptTokens, completionTokens, cachedTokens)
+	ctx := c.Request.Context()
+	quota := s.deps.Billing.Quote(ctx, group, modelName, promptTokens, completionTokens, cachedTokens)
+	// 规则详情取自与计费同一份匹配结果，避免"试算说免费、实际在扣费"的不一致。
+	price := s.deps.Billing.PriceInfo(ctx, group, modelName)
+
+	// 未定价时把方式报成空串，前端据此显示"未定价"而不是"免费"。
+	billingMode := ""
+	isFree := false
+	if price != nil {
+		billingMode = price.EffectiveBillingMode()
+		isFree = price.IsFree()
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"model":             modelName,
 		"prompt_tokens":     promptTokens,
 		"cached_tokens":     cachedTokens,
 		"completion_tokens": completionTokens,
 		"quota":             quota,
-		"priced":            quota > 0,
+		"priced":            price != nil,
+		"billing_mode":      billingMode,
+		"is_free":           isFree,
 	})
 }
 

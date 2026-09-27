@@ -53,19 +53,86 @@ var ErrModelPriceNotFound = errors.New("model: 计价规则不存在")
 // ErrModelPriceDuplicated 表示同分组下已存在同名规则。
 var ErrModelPriceDuplicated = errors.New("model: 该分组下已存在同名计价规则")
 
+// 计费方式的取值。
+//
+// 集中定义成常量而不是散落字符串：这些值会同时出现在数据库、后台接口与前端，
+// 拼错时不会编译报错，只会静默回退到"自动判定"，属于最典型的"配了没生效"。
+const (
+	// BillingModeAuto 表示按价格字段自动判定（默认值，兼容全部历史数据）。
+	//
+	// 判定规则：只有按次价、没有 token 价 → 按次；其余按量。
+	// 保留它的意义：升级不会改变既有规则的计费行为。
+	BillingModeAuto = ""
+	// BillingModeFree 表示显式免费：无论价格字段填了什么，一律不计费。
+	//
+	// 与"不配价格"的区别在于意图明确——后台能一眼看出这条是"有意免费"
+	// 而不是"漏了定价"，模型广场也能据此显示「免费」标识。
+	BillingModeFree = "free"
+	// BillingModeToken 表示按 token 计费（输入 / 缓存 / 输出三个价）。
+	BillingModeToken = "token"
+	// BillingModePerCall 表示按次计费（图像 / 视频 / 异步任务类能力）。
+	BillingModePerCall = "per_call"
+)
+
 // ModelPrice 表示一条模型计价规则。
 type ModelPrice struct {
-	ID              uint64    // 主键
-	Model           string    // 模型名或通配模式（"gpt-4*"、"*"）
-	PromptPrice     int64     // 每 1M 输入 token 的额度
-	CachePrice      int64     // 每 1M「命中缓存的输入」token 的额度；0 表示按 PromptPrice 计
-	CompletionPrice int64     // 每 1M 输出 token 的额度
-	PerCallPrice    int64     // 每调用一次的额度（异步任务 / 图像视频类）；0 表示不计费
-	Group           string    // 适用分组
-	Enabled         bool      // 是否启用（停用即视为未定价）
-	Remark          string    // 备注（便于说明定价依据）
-	CreatedAt       time.Time // 创建时间
-	UpdatedAt       time.Time // 更新时间
+	ID              uint64 // 主键
+	Model           string // 模型名或通配模式（"gpt-4*"、"*"）
+	PromptPrice     int64  // 每 1M 输入 token 的额度
+	CachePrice      int64  // 每 1M「命中缓存的输入」token 的额度；0 表示按 PromptPrice 计
+	CompletionPrice int64  // 每 1M 输出 token 的额度
+	PerCallPrice    int64  // 每调用一次的额度（异步任务 / 图像视频类）；0 表示不计费
+	// BillingMode 是显式选择的计费方式，取值见 BillingMode* 常量。
+	//
+	// 空串（BillingModeAuto）表示按价格字段自动判定，用于兼容历史数据；
+	// 判定逻辑见 EffectiveBillingMode——计费链路一律使用它，不要直接读本字段。
+	BillingMode string
+	Group       string // 适用分组
+	Enabled     bool   // 是否启用（停用即视为未定价）
+	Remark      string // 备注（便于说明定价依据）
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// EffectiveBillingMode 返回最终生效的计费方式。
+//
+// 计费链路必须通过本方法取方式，而不是直接读 BillingMode：
+// 后者可能为空串（自动），直接用会漏掉"只有按次价"这类既有规则的判定。
+//
+// 自动判定的依据是"价格字段实际表达了什么口径"：
+//   - 只有按次价 → 按次（图像/视频类规则历来如此填写）；
+//   - 其余（含全 0） → 按量。全 0 的按量规则结算结果为 0，
+//     与迁移前的行为一致，因此不必单独判定为"免费"。
+func (p *ModelPrice) EffectiveBillingMode() string {
+	if p == nil {
+		return BillingModeToken
+	}
+	switch p.BillingMode {
+	case BillingModeFree, BillingModeToken, BillingModePerCall:
+		return p.BillingMode
+	}
+	if p.PerCallPrice > 0 && p.PromptPrice == 0 && p.CachePrice == 0 && p.CompletionPrice == 0 {
+		return BillingModePerCall
+	}
+	return BillingModeToken
+}
+
+// IsFree 返回该规则是否为"显式免费"。
+//
+// 注意与"未定价"的区别：本方法只对命中规则且方式为 free 的情况返回 true；
+// 没命中任何规则（priceFor 返回 nil）属于"未定价"，是另一回事。
+func (p *ModelPrice) IsFree() bool {
+	return p != nil && p.EffectiveBillingMode() == BillingModeFree
+}
+
+// IsValidBillingMode 判断计费方式取值是否合法（供后台接口校验使用）。
+func IsValidBillingMode(mode string) bool {
+	switch mode {
+	case BillingModeFree, BillingModeToken, BillingModePerCall:
+		return true
+	default:
+		return false
+	}
 }
 
 // Validate 校验计价规则。
@@ -80,6 +147,11 @@ func (p *ModelPrice) Validate() error {
 	if p.PromptPrice < 0 || p.CachePrice < 0 || p.CompletionPrice < 0 || p.PerCallPrice < 0 {
 		return fmt.Errorf("价格不能为负数（输入 %d / 缓存 %d / 输出 %d / 每次 %d）",
 			p.PromptPrice, p.CachePrice, p.CompletionPrice, p.PerCallPrice)
+	}
+	// 计费方式只认空串（自动）与三个明确取值：拼错的值会让计费静默走自动分支，
+	// 站长会看到"选了免费却还在扣费"，因此必须在入库前拦住。
+	if p.BillingMode != BillingModeAuto && !IsValidBillingMode(p.BillingMode) {
+		return fmt.Errorf("计费方式非法：%q（可选 free / token / per_call，留空表示自动判定）", p.BillingMode)
 	}
 	return nil
 }
