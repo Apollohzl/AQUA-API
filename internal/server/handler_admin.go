@@ -882,6 +882,114 @@ type channelKeyUpdateRequest struct {
 	Balance  *int64 `json:"balance"`
 }
 
+// channelKeyQuotaResponse 是额度探测的响应。
+//
+// 为什么同时回传"已落库的字段"：前端据此立即刷新那一行，不必再整表拉一次。
+type channelKeyQuotaResponse struct {
+	KeyID        uint64 `json:"key_id"`
+	PlanType     string `json:"plan_type"`
+	UsedPercent  int    `json:"used_percent"`
+	ResetAt      int64  `json:"reset_at"`
+	Email        string `json:"email"`
+	LimitReached bool   `json:"limit_reached"`
+	Note         string `json:"note"`
+}
+
+// handleProbeChannelKeyQuota 查询某把订阅账号凭据的额度快照并落库。
+//
+// 存在的意义：订阅账号的额度只有上游知道，不主动问就只能等"被限流"才发现，
+// 而那时用户已经拿到一次失败。站长在后台点一下即可看到每个账号的
+// 套餐、已用百分比与重置时间；结果落库后调度会自动跳过已用满的账号。
+func (s *Server) handleProbeChannelKeyQuota(c *gin.Context) {
+	channelID, ok := parseIDParam(c)
+	if !ok {
+		return
+	}
+	keyID, err := strconv.ParseUint(c.Param("keyId"), 10, 64)
+	if err != nil || keyID == 0 {
+		oai.WriteError(c.Writer, http.StatusBadRequest, "密钥 ID 非法", oai.TypeInvalidRequest, "invalid_id")
+		return
+	}
+	if s.deps.Relay == nil || s.deps.ChannelKeys == nil {
+		oai.WriteError(c.Writer, http.StatusServiceUnavailable, "转发引擎或凭据池未就绪",
+			oai.TypeServer, oai.CodeInternal)
+		return
+	}
+
+	ctx := c.Request.Context()
+	channel, err := s.deps.Channels.GetByID(ctx, channelID)
+	if err != nil {
+		if errors.Is(err, model.ErrChannelNotFound) {
+			oai.WriteError(c.Writer, http.StatusNotFound, "渠道不存在", oai.TypeInvalidRequest, "channel_not_found")
+			return
+		}
+		s.respondInternalError(c, "查询渠道失败")
+		return
+	}
+
+	// 逐条找目标凭据：凭据池接口只提供"按渠道列出"，
+	// 额外加一个 GetByID 只会为这一处需求扩大仓储接口。
+	keys, err := s.deps.ChannelKeys.ListByChannel(ctx, channelID)
+	if err != nil {
+		s.respondInternalError(c, "读取凭据池失败")
+		return
+	}
+	var target *model.ChannelKey
+	for _, item := range keys {
+		if item.ID == keyID {
+			target = item
+			break
+		}
+	}
+	if target == nil {
+		oai.WriteError(c.Writer, http.StatusNotFound, "凭据不存在", oai.TypeInvalidRequest, "key_not_found")
+		return
+	}
+
+	quota, err := s.deps.Relay.QueryCodexQuota(ctx, channel, target)
+	if err != nil {
+		// 探测失败要落"未知"而不是保留旧值：旧快照会继续影响调度判断，
+		// 让一个可能已经恢复的账号被继续跳过。
+		_ = s.deps.ChannelKeys.UpdateQuota(ctx, keyID, model.QuotaUsedPercentUnknown, time.Time{}, time.Now())
+		oai.WriteError(c.Writer, http.StatusBadGateway, err.Error(),
+			oai.TypeServer, "quota_probe_failed")
+		return
+	}
+
+	now := time.Now()
+	if err := s.deps.ChannelKeys.UpdateQuota(ctx, keyID, quota.UsedPercent, quota.ResetAt, now); err != nil {
+		s.respondInternalError(c, "保存额度快照失败")
+		return
+	}
+	// 顺带补齐套餐：探测是"免费"的额外信息，没必要让站长再手工维护一遍。
+	// 只写非空值（空串表示本次没拿到，不该把已知套餐抹掉）。
+	if strings.TrimSpace(quota.PlanType) != "" {
+		_ = s.deps.ChannelKeys.UpdateAccountMeta(ctx, keyID, "", quota.PlanType)
+	}
+
+	note := "额度快照已更新；已用满的账号会自动跳过，窗口重置后自动回到池中"
+	if quota.UsedPercent == model.QuotaUsedPercentUnknown {
+		note = "上游未返回额度窗口（该账号可能不按窗口计费，或套餐不支持查询）"
+	}
+	c.JSON(http.StatusOK, channelKeyQuotaResponse{
+		KeyID:        keyID,
+		PlanType:     quota.PlanType,
+		UsedPercent:  quota.UsedPercent,
+		ResetAt:      unixOrZeroTime(quota.ResetAt),
+		Email:        quota.Email,
+		LimitReached: quota.LimitReached,
+		Note:         note,
+	})
+}
+
+// unixOrZeroTime 把时间转成 Unix 秒；零值时间返回 0。
+func unixOrZeroTime(value time.Time) int64 {
+	if value.IsZero() {
+		return 0
+	}
+	return value.Unix()
+}
+
 // handleUpdateChannelKeyStatus 更新某把密钥的状态、调度参数与余额。
 //
 // 典型场景：

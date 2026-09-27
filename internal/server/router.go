@@ -141,6 +141,9 @@ func (s *Server) registerRoutes() {
 	// 密钥池明细与单把密钥的状态/调度参数管理
 	admin.GET("/channels/:id/keys", s.handleListChannelKeys)
 	admin.PUT("/keys/:keyId", s.handleUpdateChannelKeyStatus)
+	// 订阅账号额度探测：把上游额度窗口取回来并落库，
+	// 让"哪个账号快满了"与"何时恢复"在后台可见，而不是等被限流才发现。
+	admin.POST("/channels/:id/keys/:keyId/quota", s.handleProbeChannelKeyQuota)
 
 	// 凭据调度策略目录：后台渠道表单据此渲染「调度策略」下拉与帮助文案，
 	// 因此新增策略不需要改前端代码。

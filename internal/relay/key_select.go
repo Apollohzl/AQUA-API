@@ -441,6 +441,16 @@ func classifyCredentialFailure(status int, body []byte, failCount int) credentia
 
 	switch {
 	case status == http.StatusTooManyRequests:
+		// 订阅账号的 429 往往带"何时恢复"的明确时间（额度窗口重置）。
+		// 用它做冷却比指数退避准确得多：退避给几十秒，而账号可能要等两小时——
+		// 那期间每次轮询到它都会白试一次，还会把失败次数推高。
+		if hint := codexQuotaResetHint(body); hint > 0 {
+			return credentialFailureAction{
+				Cooldown: hint,
+				Reason: fmt.Sprintf("上游额度已用满（HTTP %d），按上游提示冷却至恢复（约 %s）",
+					status, hint.Round(time.Minute)),
+			}
+		}
 		return credentialFailureAction{
 			Cooldown: backoff(cooldownRateLimitedBase, failCount, cooldownRateLimitedCap),
 			Reason:   fmt.Sprintf("上游限流（HTTP %d），临时冷却", status),
