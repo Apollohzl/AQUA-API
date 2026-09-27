@@ -267,6 +267,15 @@ type PaymentOrderRepository interface {
 
 	// SumPaidQuota 统计某用户已支付的额度合计（用于充值记录展示）。
 	SumPaidQuota(ctx context.Context, userID uint64) (int64, error)
+
+	// SumPaidAmountCents 统计某用户的【累计有效充值金额】（单位：分，只计已支付订单）。
+	//
+	// 与 SumPaidQuota 的区别（两者不可互相替代）：
+	//   - SumPaidQuota 返回额度，是内部记账单位，数值随兑换比例（payment_exchange_rate）
+	//     变动，且会被消费掉，因此不能用作"充过多少钱"的业务判据；
+	//   - 本方法返回真实支付的钱，是外部事实，与内部刻度、消费情况都无关。
+	//     分组解锁门槛（ModelGroup.UnlockMinRechargeCents）必须用它判定。
+	SumPaidAmountCents(ctx context.Context, userID uint64) (int64, error)
 }
 
 // GenerateTradeNo 生成对外订单号。

@@ -24,6 +24,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -134,7 +135,8 @@ func (s *Server) createTokenAndRespond(c *gin.Context, ownerID uint64, name stri
 
 	// 分组先校验再落库：若令牌指向一个不存在的分组，调用时会出现"无渠道可用"
 	// 或全量 404，且从令牌列表上看不出原因，属于极难定位的运营故障。
-	group, ok := s.resolveTokenGroupName(c, groupName)
+	// 归属一并传入：带充值门槛的分组（如大客户价）必须按归属用户的资格放行。
+	group, ok := s.resolveTokenGroupName(c, groupName, ownerID)
 	if !ok {
 		return
 	}
@@ -225,9 +227,12 @@ func (s *Server) updateToken(c *gin.Context, ownerID uint64) {
 		token.Models = *req.Models
 	}
 	// 分组：留空表示"不修改"（与渠道的 key_strategy 保护方式一致），
-	// 非空时校验"格式合法 + 分组存在"后再覆盖，避免令牌指向不存在的分组。
+	// 非空时校验"格式合法 + 分组存在 + 归属用户已达解锁门槛"后再覆盖，
+	// 避免令牌指向不存在的分组或用户绕开价格门槛自选低价分组。
+	// 用令牌自身的归属（token.OwnerID）而非入参 ownerID：管理员改别人令牌时
+	// 传的是 0，门槛必须按令牌真正的主人判定。
 	if req.GroupName != nil {
-		if group, ok := s.resolveTokenGroupName(c, *req.GroupName); ok {
+		if group, ok := s.resolveTokenGroupName(c, *req.GroupName, token.OwnerID); ok {
 			if group != "" {
 				token.GroupName = group
 			}
@@ -291,14 +296,19 @@ func (s *Server) loadOwnedToken(c *gin.Context, id, ownerID uint64) (*model.Toke
 
 // resolveTokenGroupName 校验并归一化令牌的分组标识，失败时已写出响应。
 //
+// 参数 ownerID 是令牌【归属用户】的 id，用于分组解锁门槛判定；
+// 传 0（无归属）时视为管理员操作，跳过门槛校验。
+//
 // 返回 (归一化后的分组名, 是否通过)：
 //   - 入参为空 → ("", true)：表示"使用网关默认分组"，交由转发层回退；
 //   - 格式非法（大写、含空格/逗号/斜杠、超长）→ 400 并原样回传领域错误；
-//   - 分组不存在 → 400 提示"分组不存在"（避免令牌指向空分组导致调用全量失败）。
+//   - 分组不存在 → 400 提示"分组不存在"（避免令牌指向空分组导致调用全量失败）；
+//   - 分组设了充值门槛而未达标 → 403 并说明还差多少。
 //
 // 为什么存在性校验放在 server 层而不是 model 层：领域模型不应依赖仓储，
 // 由接口层组合"格式校验（model）+ 存在性校验（仓储）"才是正确的分层。
-func (s *Server) resolveTokenGroupName(c *gin.Context, raw string) (string, bool) {
+// 解锁门槛同理——它是"用户资格 × 分组配置"的交叉判断，天然属于接口层。
+func (s *Server) resolveTokenGroupName(c *gin.Context, raw string, ownerID uint64) (string, bool) {
 	name := strings.TrimSpace(raw)
 	if name == "" {
 		return "", true
@@ -311,7 +321,8 @@ func (s *Server) resolveTokenGroupName(c *gin.Context, raw string) (string, bool
 		oai.WriteError(c.Writer, http.StatusServiceUnavailable, "分组模块未启用", oai.TypeServer, oai.CodeInternal)
 		return "", false
 	}
-	if _, err := s.deps.Groups.GetByName(c.Request.Context(), name); err != nil {
+	group, err := s.deps.Groups.GetByName(c.Request.Context(), name)
+	if err != nil {
 		if errors.Is(err, model.ErrModelGroupNotFound) {
 			writeUserError(c, http.StatusBadRequest, "group.not_found", oai.TypeInvalidRequest, "group_not_found")
 			return "", false
@@ -319,7 +330,43 @@ func (s *Server) resolveTokenGroupName(c *gin.Context, raw string) (string, bool
 		s.respondInternalError(c, "查询分组失败")
 		return "", false
 	}
+	if !s.checkGroupUnlock(c, group, ownerID) {
+		return "", false
+	}
 	return name, true
+}
+
+// checkGroupUnlock 判断归属用户是否有资格使用该分组（充值解锁门槛）。
+//
+// 为什么必须放在这里强制校验：分组是【用户自选】的。若只在界面上把未解锁的
+// 分组置灰，用户直接调接口就能挂上 5 折分组——"低价分组只给大客户"这条
+// 定价策略会被无声绕过，站长在账单上只看到毛利变薄，查不出原因。
+// 因此界面提示只是体验，真正的闸门在服务端。
+func (s *Server) checkGroupUnlock(c *gin.Context, group *model.ModelGroup, ownerID uint64) bool {
+	if !group.RequiresRechargeUnlock() {
+		return true
+	}
+	// ownerID 为 0 是管理员通道（后台给任意用户建令牌时不带归属语义），放行。
+	if ownerID == 0 {
+		return true
+	}
+	if s.deps.Orders == nil {
+		oai.WriteError(c.Writer, http.StatusServiceUnavailable, "充值模块未启用", oai.TypeServer, oai.CodeInternal)
+		return false
+	}
+	paid, err := s.deps.Orders.SumPaidAmountCents(c.Request.Context(), ownerID)
+	if err != nil {
+		s.respondInternalError(c, "查询累计充值金额失败")
+		return false
+	}
+	if paid >= group.UnlockMinRechargeCents {
+		return true
+	}
+	oai.WriteError(c.Writer, http.StatusForbidden,
+		fmt.Sprintf("该分组需累计充值满 %s 元解锁（当前已充值 %s 元）",
+			model.FormatCents(group.UnlockMinRechargeCents), model.FormatCents(paid)),
+		oai.TypeInvalidRequest, "group_locked")
+	return false
 }
 
 // requireCurrentUser 取出当前登录用户；未登录时已写出 401 响应，返回 false。

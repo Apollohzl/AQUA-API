@@ -33,7 +33,7 @@ import (
 )
 
 // groupColumns 集中定义查询列，顺序必须与 scanModelGroup 的扫描顺序严格一致。
-const groupColumns = `id, name, display_name, ratio, description, enabled, created_at, updated_at`
+const groupColumns = `id, name, display_name, ratio, unlock_min_recharge_cents, description, enabled, created_at, updated_at`
 
 // defaultGroupPageSize / maxGroupPageSize 是分组列表的分页参数。
 //
@@ -66,9 +66,9 @@ func (r *modelGroupRepository) Create(ctx context.Context, group *model.ModelGro
 	group.UpdatedAt = now
 
 	res, err := r.db.ExecContext(ctx, `
-		INSERT INTO model_groups (name, display_name, ratio, description, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		group.Name, group.DisplayName, group.Ratio, group.Description,
+		INSERT INTO model_groups (name, display_name, ratio, unlock_min_recharge_cents, description, enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		group.Name, group.DisplayName, group.Ratio, group.UnlockMinRechargeCents, group.Description,
 		boolToInt(group.Enabled), group.CreatedAt.Unix(), group.UpdatedAt.Unix(),
 	)
 	if err != nil {
@@ -161,9 +161,9 @@ func (r *modelGroupRepository) Update(ctx context.Context, group *model.ModelGro
 	group.UpdatedAt = time.Now()
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE model_groups SET
-			display_name = ?, ratio = ?, description = ?, enabled = ?, updated_at = ?
+			display_name = ?, ratio = ?, unlock_min_recharge_cents = ?, description = ?, enabled = ?, updated_at = ?
 		WHERE id = ?`,
-		group.DisplayName, group.Ratio, group.Description,
+		group.DisplayName, group.Ratio, group.UnlockMinRechargeCents, group.Description,
 		boolToInt(group.Enabled), group.UpdatedAt.Unix(), group.ID,
 	)
 	if err != nil {
@@ -212,13 +212,14 @@ func scanModelGroup(sc rowScanner) (*model.ModelGroup, error) {
 		name        string
 		displayName string
 		ratio       int64
+		unlockCents int64
 		description string
 		enabled     int
 		createdAt   int64
 		updatedAt   int64
 	)
 
-	if err := sc.Scan(&id, &name, &displayName, &ratio, &description, &enabled,
+	if err := sc.Scan(&id, &name, &displayName, &ratio, &unlockCents, &description, &enabled,
 		&createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
@@ -227,13 +228,14 @@ func scanModelGroup(sc rowScanner) (*model.ModelGroup, error) {
 	}
 
 	return &model.ModelGroup{
-		ID:          id,
-		Name:        name,
-		DisplayName: displayName,
-		Ratio:       ratio,
-		Description: description,
-		Enabled:     enabled != 0,
-		CreatedAt:   time.Unix(createdAt, 0),
-		UpdatedAt:   time.Unix(updatedAt, 0),
+		ID:                     id,
+		Name:                   name,
+		DisplayName:            displayName,
+		Ratio:                  ratio,
+		UnlockMinRechargeCents: unlockCents,
+		Description:            description,
+		Enabled:                enabled != 0,
+		CreatedAt:              time.Unix(createdAt, 0),
+		UpdatedAt:              time.Unix(updatedAt, 0),
 	}, nil
 }

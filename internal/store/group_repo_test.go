@@ -178,6 +178,55 @@ func TestModelGroupRepository_List与Count(t *testing.T) {
 	}
 }
 
+// TestModelGroupRepository_解锁门槛持久化 覆盖新增列"写进去 / 读回来 / 能改掉"。
+//
+// 门槛是定价策略的执行依据（未达标不能挂到低价分组），一旦读写漏掉这一列，
+// 表现是"门槛恒为 0 = 所有分组对所有人开放"，站长在被悄悄吃掉毛利后才发现。
+func TestModelGroupRepository_解锁门槛持久化(t *testing.T) {
+	repo := newTestGroupRepo(t)
+	ctx := context.Background()
+
+	group := &model.ModelGroup{
+		Name: "vip", DisplayName: "大客户", Ratio: 50,
+		UnlockMinRechargeCents: 10000, // 100 元
+		Enabled:                true,
+	}
+	if err := repo.Create(ctx, group); err != nil {
+		t.Fatalf("创建带门槛的分组失败: %v", err)
+	}
+
+	got, err := repo.GetByName(ctx, "vip")
+	if err != nil {
+		t.Fatalf("查询分组失败: %v", err)
+	}
+	if got.UnlockMinRechargeCents != 10000 {
+		t.Fatalf("门槛应为 10000 分，实际 %d", got.UnlockMinRechargeCents)
+	}
+	if !got.RequiresRechargeUnlock() {
+		t.Fatal("门槛大于 0 时应判定为需要解锁")
+	}
+
+	// 改为无门槛（0）后应能读回，且不再判定为需要解锁
+	got.UnlockMinRechargeCents = 0
+	if err := repo.Update(ctx, got); err != nil {
+		t.Fatalf("更新分组失败: %v", err)
+	}
+	after, err := repo.GetByName(ctx, "vip")
+	if err != nil {
+		t.Fatalf("查询分组失败: %v", err)
+	}
+	if after.UnlockMinRechargeCents != 0 || after.RequiresRechargeUnlock() {
+		t.Fatalf("门槛应已被清为 0，实际 %d", after.UnlockMinRechargeCents)
+	}
+
+	// 负值属于非法输入（会让"累计充值 >= 负数"恒成立而静默失效）
+	if err := repo.Create(ctx, &model.ModelGroup{
+		Name: "bad", Ratio: 100, UnlockMinRechargeCents: -1, Enabled: true,
+	}); err == nil {
+		t.Fatal("负门槛应被领域校验拒绝")
+	}
+}
+
 func TestModelGroupRepository_Delete(t *testing.T) {
 	repo := newTestGroupRepo(t)
 	ctx := context.Background()

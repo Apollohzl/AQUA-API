@@ -60,11 +60,26 @@ type ModelGroup struct {
 	Name        string // 分组标识（小写，被渠道与价格表引用）
 	DisplayName string // 展示名（留空时界面回退 Name）
 	// Ratio 是计费倍率（百分比整数，100 = 1.0 倍）。
-	Ratio       int64
-	Description string
-	Enabled     bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	Ratio int64
+	// UnlockMinRechargeCents 是把令牌挂到本分组所需的【累计有效充值】下限（单位：分）。
+	//
+	// 0 表示无门槛。大于 0 时服务端会在分配分组时校验归属用户是否达标
+	// （见 server.resolveTokenGroupName）——这是"低价分组只给大客户"唯一能被
+	// 强制执行的依据：分组是用户自选的，没有门槛校验就等于人人可拿最低折扣。
+	//
+	// 用金额（分）而非额度（quota）做门槛的两个原因：
+	//  1) 余额会被消费掉，按余额判定会让"充过 100 元"的用户在用掉一半后失去资格；
+	//  2) quota 是内部记账单位，其数值随兑换比例变动，不适合承载业务承诺。
+	UnlockMinRechargeCents int64
+	Description            string
+	Enabled                bool
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+}
+
+// RequiresRechargeUnlock 表示本分组是否设有充值解锁门槛。
+func (g *ModelGroup) RequiresRechargeUnlock() bool {
+	return g != nil && g.UnlockMinRechargeCents > 0
 }
 
 // Validate 校验分组的必要字段。
@@ -92,6 +107,11 @@ func (g *ModelGroup) Validate() error {
 	// （例如把"1.5 倍"写成了 15 万），拦下来比事后追账便宜得多。
 	if g.Ratio > 100_000 {
 		return fmt.Errorf("计费倍率过大（当前 %d，100 表示 1.0 倍），请检查是否填错单位", g.Ratio)
+	}
+	// 解锁门槛是金额（分），负值会让"累计充值 >= 负数"恒成立而静默失效，
+	// 填 0 才是"无门槛"的正确表达，因此负值一律拒绝。
+	if g.UnlockMinRechargeCents < 0 {
+		return fmt.Errorf("解锁门槛金额不能为负（当前 %d 分，0 表示无门槛）", g.UnlockMinRechargeCents)
 	}
 	return nil
 }

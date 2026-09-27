@@ -302,3 +302,56 @@ func TestPaymentOrderRepository_SumPaidQuota(t *testing.T) {
 		t.Fatalf("已支付额度合计应为 400，实际 %d", total)
 	}
 }
+
+// TestPaymentOrderRepository_SumPaidAmountCents 覆盖"累计充值金额"的统计口径。
+//
+// 这是分组解锁门槛（充值满 100 元解锁大客户分组）的判定依据，两条必须锁死：
+//   - 只算【已支付】订单：待支付/已关闭订单不能算作用户充过钱；
+//   - 算的是【实付金额 amount】而不是入账额度 quota：额度会随兑换比例变动，
+//     且两者数值本就不同（见下一段注释），用错口径会让门槛时松时紧。
+func TestPaymentOrderRepository_SumPaidAmountCents(t *testing.T) {
+	repo, _, userID := newTestOrderRepo(t)
+	ctx := context.Background()
+
+	// 一笔 5000 分（50 元）已支付
+	paid := newPendingOrder(userID, "pay2026010100000caaaaaa", 5000, 5_000_000)
+	if err := repo.Create(ctx, paid); err != nil {
+		t.Fatalf("创建订单失败: %v", err)
+	}
+	if _, err := repo.MarkPaid(ctx, paid.TradeNo, "", "", time.Now()); err != nil {
+		t.Fatalf("标记支付失败: %v", err)
+	}
+
+	// 一笔 9900 分（99 元）仍待支付：落下它就能凑够 100 元，因此必须被排除在外
+	pending := newPendingOrder(userID, "pay2026010100000dbbbbbb", 9900, 9_900_000)
+	if err := repo.Create(ctx, pending); err != nil {
+		t.Fatalf("创建订单失败: %v", err)
+	}
+
+	total, err := repo.SumPaidAmountCents(ctx, userID)
+	if err != nil {
+		t.Fatalf("统计累计充值金额失败: %v", err)
+	}
+	if total != 5000 {
+		t.Fatalf("累计充值金额应为 5000 分（只算已支付），实际 %d", total)
+	}
+
+	// 额度口径与金额口径必然不同：这里 5,000,000 额度 vs 5,000 分。
+	// 若哪天有人把门槛判定改成 SumPaidQuota，本断言会立刻暴露口径混用。
+	quotaTotal, err := repo.SumPaidQuota(ctx, userID)
+	if err != nil {
+		t.Fatalf("统计充值额度失败: %v", err)
+	}
+	if quotaTotal == total {
+		t.Fatalf("额度与金额口径不应相等（额度 %d，金额 %d 分）", quotaTotal, total)
+	}
+
+	// 无订单的用户应返回 0 而不是报错（新用户一进入分组下拉就会走这条路径）
+	other, err := repo.SumPaidAmountCents(ctx, userID+100000)
+	if err != nil {
+		t.Fatalf("无订单用户不应报错: %v", err)
+	}
+	if other != 0 {
+		t.Fatalf("无订单用户应为 0，实际 %d", other)
+	}
+}

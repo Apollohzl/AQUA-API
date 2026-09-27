@@ -100,6 +100,10 @@ func (s *Server) registerRoutes() {
 	portal.POST("/tokens", s.handleMyCreateToken)
 	portal.PATCH("/tokens/:id", s.handleMyUpdateToken)
 	portal.DELETE("/tokens/:id", s.handleMyDeleteToken)
+	// 可选分组（带"当前用户是否已解锁"标记）：令牌页的"所属分组"下拉据此置灰未解锁项。
+	// 未登录的下拉用公开的模型广场（/api/models），两者分工：广场给"有什么"，
+	// 本接口给"你能用什么"。
+	portal.GET("/groups", s.handleMyGroups)
 	portal.GET("/usage", s.handleMyUsage)
 	portal.GET("/logs", s.handleMyLogs)
 	// 异步任务（用户只能看自己的）

@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +40,8 @@ type tokenGroupFixture struct {
 	srv      *Server
 	tokens   model.TokenRepository
 	groups   model.ModelGroupRepository
+	orders   model.PaymentOrderRepository
+	channels model.ChannelRepository
 	adminTok string
 	userTok  string
 	userID   uint64
@@ -91,6 +94,8 @@ func newTokenGroupFixture(t *testing.T) *tokenGroupFixture {
 	fx := &tokenGroupFixture{
 		tokens:   store.NewTokenRepository(st.DB(), cipher),
 		groups:   store.NewModelGroupRepository(st.DB()),
+		orders:   store.NewPaymentOrderRepository(st.DB()),
+		channels: store.NewChannelRepository(st.DB(), cipher),
 		userID:   owner.ID,
 		adminTok: createTokenGroupSession(t, sessions, admin.ID),
 		userTok:  createTokenGroupSession(t, sessions, owner.ID),
@@ -98,9 +103,10 @@ func newTokenGroupFixture(t *testing.T) *tokenGroupFixture {
 	fx.srv = New(Deps{
 		Config:      cfg,
 		Store:       st,
-		Channels:    store.NewChannelRepository(st.DB(), cipher),
+		Channels:    fx.channels,
 		Groups:      fx.groups,
 		Tokens:      fx.tokens,
+		Orders:      fx.orders,
 		Users:       users,
 		Sessions:    sessions,
 		Settings:    store.NewSettingRepository(st.DB(), st.Dialect()),
@@ -277,5 +283,190 @@ func TestTokenGroup_非法分组名被拒(t *testing.T) {
 				t.Fatalf("非法分组名应返回 400，实际 %d %s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 分组解锁门槛（累计充值解锁低价分组）
+// ---------------------------------------------------------------------------
+
+// withGatedGroup 建一个带充值门槛的分组，并挂一个启用渠道。
+//
+// 渠道不是可有可无的：门户分组下拉（/api/user/groups）只下发"有启用渠道在服务"
+// 的分组（否则用户选进去必然 503），没有渠道的分组根本不会出现在下拉里。
+func (fx *tokenGroupFixture) withGatedGroup(t *testing.T, name string, ratio, thresholdCents int64) {
+	t.Helper()
+	ctx := context.Background()
+
+	if err := fx.groups.Create(ctx, &model.ModelGroup{
+		Name: name, DisplayName: name, Ratio: ratio,
+		UnlockMinRechargeCents: thresholdCents, Enabled: true,
+	}); err != nil {
+		t.Fatalf("创建分组 %s 失败: %v", name, err)
+	}
+	if err := fx.channels.Create(ctx, &model.Channel{
+		Name: name + "-渠道", Type: 1, BaseURL: "https://" + name + ".example.com",
+		APIKey: "sk-" + name, Models: []string{name + "-model"}, Group: name,
+		Priority: 1, Weight: 1, Status: model.ChannelStatusEnabled,
+	}); err != nil {
+		t.Fatalf("创建渠道 %s 失败: %v", name, err)
+	}
+}
+
+// payForUser 为用户造一笔【已支付】的充值订单，金额单位为分。
+func payForUser(t *testing.T, repo model.PaymentOrderRepository, userID uint64, tradeNo string, cents int64) {
+	t.Helper()
+	ctx := context.Background()
+
+	order := &model.PaymentOrder{
+		TradeNo: tradeNo, UserID: userID, Amount: cents, Currency: "CNY",
+		Quota: cents * 100, Method: model.PaymentMethodManual,
+		Status: model.PaymentStatusPending, ExpiresAt: time.Now().Add(30 * time.Minute),
+	}
+	if err := repo.Create(ctx, order); err != nil {
+		t.Fatalf("创建订单失败: %v", err)
+	}
+	if _, err := repo.MarkPaid(ctx, tradeNo, "", "", time.Now()); err != nil {
+		t.Fatalf("标记支付失败: %v", err)
+	}
+}
+
+// findGroupItem 在分组列表响应里按 name 找到分组卡片。
+func findGroupItem(body map[string]any, name string) map[string]any {
+	raw, ok := body["items"].([]any)
+	if !ok {
+		return nil
+	}
+	for _, it := range raw {
+		item, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		if got, _ := item["name"].(string); got == name {
+			return item
+		}
+	}
+	return nil
+}
+
+// TestTokenGroup_充值门槛未达标被拒_达标后放行 覆盖分组解锁门槛的完整边界。
+//
+// 为什么这条最要紧：分组是【用户自选】的。若只在界面上把未解锁的分组置灰，
+// 用户直接调接口就能把令牌挂到 5 折分组上——站长的定价策略被无声绕过，
+// 账单上只看到毛利变薄，查不出原因。因此这里同时锁死门户与后台两条入口。
+func TestTokenGroup_充值门槛未达标被拒_达标后放行(t *testing.T) {
+	fx := newTokenGroupFixture(t)
+	// 大客户分组：5 折，累计充值满 100 元（10000 分）解锁
+	fx.withGatedGroup(t, "billing_vip", 50, 10000)
+
+	const createBody = `{"name":"低价令牌","unlimited_quota":true,"group_name":"billing_vip"}`
+
+	// 1) 门户侧：累计充值 0 → 403，且错误信息要能自我解释（含门槛金额）
+	rec, body := doBearerJSON(t, fx.srv, http.MethodPost, "/api/user/tokens", fx.userTok, createBody)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("未达标应返回 403，实际 %d %s", rec.Code, rec.Body.String())
+	}
+	if msg := redeemErrorMessage(body); !strings.Contains(msg, "100.00") {
+		t.Errorf("错误信息应说明门槛金额，实际 %q", msg)
+	}
+
+	// 2) 后台侧：代某用户建令牌同样受门槛约束（门槛看的是归属用户的资格，
+	//    不是"谁在操作"），否则管理员通道就成了绕过闸门的后门。
+	adminBody := `{"user_id":` + strconv.FormatUint(fx.userID, 10) +
+		`,"name":"后台低价令牌","unlimited_quota":true,"group_name":"billing_vip"}`
+	rec, _ = doBearerJSON(t, fx.srv, http.MethodPost, "/api/admin/tokens", fx.adminTok, adminBody)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("后台代建也应受门槛约束（403），实际 %d %s", rec.Code, rec.Body.String())
+	}
+
+	// 3) 差 1 分：充到 99.99 元仍不达标
+	payForUser(t, fx.orders, fx.userID, "pay-threshold-9999", 9999)
+	rec, _ = doBearerJSON(t, fx.srv, http.MethodPost, "/api/user/tokens", fx.userTok, createBody)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("99.99 元仍应被拒（403），实际 %d %s", rec.Code, rec.Body.String())
+	}
+
+	// 4) 补足到 100.00 元 → 放行
+	payForUser(t, fx.orders, fx.userID, "pay-threshold-tail", 1)
+	rec, created := doBearerJSON(t, fx.srv, http.MethodPost, "/api/user/tokens", fx.userTok, createBody)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("达标后应放行，实际 %d %s", rec.Code, rec.Body.String())
+	}
+	if got, _ := created["group_name"].(string); got != "billing_vip" {
+		t.Fatalf("分组应为 billing_vip，实际 %q", got)
+	}
+}
+
+// TestTokenGroup_更新令牌同样受门槛约束 覆盖"先建普通令牌、再改挂到门槛分组"。
+//
+// 只堵创建入口是不够的：用户可以先建一个默认分组的令牌，再 PATCH 改分组。
+func TestTokenGroup_更新令牌同样受门槛约束(t *testing.T) {
+	fx := newTokenGroupFixture(t)
+	fx.withGatedGroup(t, "billing_vip", 50, 10000)
+
+	rec, created := doBearerJSON(t, fx.srv, http.MethodPost, "/api/user/tokens", fx.userTok,
+		`{"name":"普通令牌","unlimited_quota":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("创建普通令牌失败：%d %s", rec.Code, rec.Body.String())
+	}
+	id := uint64(created["id"].(float64))
+	path := "/api/user/tokens/" + strconv.FormatUint(id, 10)
+
+	rec, body := doBearerJSON(t, fx.srv, http.MethodPatch, path, fx.userTok, `{"group_name":"billing_vip"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("改挂门槛分组应被拒（403），实际 %d %s", rec.Code, rec.Body.String())
+	}
+	if msg := redeemErrorMessage(body); !strings.Contains(msg, "100.00") {
+		t.Errorf("错误信息应说明门槛金额，实际 %q", msg)
+	}
+
+	// 落库确认：被拒的修改不能生效（否则前端报错但数据已变，属于最坏情况）
+	stored, err := fx.tokens.GetByID(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetByID 失败: %v", err)
+	}
+	if stored.GroupName != "" {
+		t.Fatalf("被拒后分组不应被写入，实际 %q", stored.GroupName)
+	}
+}
+
+// TestMyGroups_下发解锁状态 覆盖门户分组下拉的"是否已解锁"标记。
+func TestMyGroups_下发解锁状态(t *testing.T) {
+	fx := newTokenGroupFixture(t)
+	fx.withGatedGroup(t, "billing_vip", 50, 10000)
+
+	rec, body := doBearerJSON(t, fx.srv, http.MethodGet, "/api/user/groups", fx.userTok, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("查询可选分组失败：%d %s", rec.Code, rec.Body.String())
+	}
+	item := findGroupItem(body, "billing_vip")
+	if item == nil {
+		t.Fatal("可选分组里应包含 billing_vip（它有启用渠道）")
+	}
+	if unlocked, _ := item["unlocked"].(bool); unlocked {
+		t.Error("未充值时应为未解锁")
+	}
+	if got, _ := item["unlock_min_recharge_cents"].(float64); int64(got) != 10000 {
+		t.Errorf("应下发门槛 10000 分，实际 %v", item["unlock_min_recharge_cents"])
+	}
+	if got, _ := item["paid_amount_cents"].(float64); int64(got) != 0 {
+		t.Errorf("累计充值应为 0，实际 %v", item["paid_amount_cents"])
+	}
+
+	payForUser(t, fx.orders, fx.userID, "pay-my-groups-10000", 10000)
+
+	rec, body = doBearerJSON(t, fx.srv, http.MethodGet, "/api/user/groups", fx.userTok, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("查询可选分组失败：%d %s", rec.Code, rec.Body.String())
+	}
+	item = findGroupItem(body, "billing_vip")
+	if item == nil {
+		t.Fatal("达标后分组仍应在列表里")
+	}
+	if unlocked, _ := item["unlocked"].(bool); !unlocked {
+		t.Error("充值满 100 元后应变为已解锁")
+	}
+	if got, _ := item["paid_amount_cents"].(float64); int64(got) != 10000 {
+		t.Errorf("累计充值应为 10000 分，实际 %v", item["paid_amount_cents"])
 	}
 }

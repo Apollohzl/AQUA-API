@@ -32,6 +32,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -57,6 +58,10 @@ type modelGroupDTO struct {
 	Ratio       int64  `json:"ratio"`
 	Description string `json:"description"`
 	Enabled     bool   `json:"enabled"`
+	// UnlockMinRechargeCents 是把令牌挂到本分组所需的累计充值下限（单位：分，0 = 无门槛）。
+	// 用"分"而不是"元"透出：金额一旦经过浮点就会在门槛比较上出现 99.99999 < 100 之类的
+	// 假性未达标，整数分是唯一安全的表示（前端负责换算成元展示与输入）。
+	UnlockMinRechargeCents int64 `json:"unlock_min_recharge_cents"`
 	// ChannelCount / PriceCount 是引用统计，便于管理员判断"这个分组能不能删"。
 	ChannelCount int   `json:"channel_count"`
 	PriceCount   int   `json:"price_count"`
@@ -70,17 +75,18 @@ func toModelGroupDTO(group *model.ModelGroup, channelCount, priceCount int) mode
 		return modelGroupDTO{}
 	}
 	return modelGroupDTO{
-		ID:           group.ID,
-		Name:         group.Name,
-		DisplayName:  group.DisplayName,
-		Label:        group.Label(),
-		Ratio:        group.Ratio,
-		Description:  group.Description,
-		Enabled:      group.Enabled,
-		ChannelCount: channelCount,
-		PriceCount:   priceCount,
-		CreatedAt:    unixOrZero(group.CreatedAt),
-		UpdatedAt:    unixOrZero(group.UpdatedAt),
+		ID:                     group.ID,
+		Name:                   group.Name,
+		DisplayName:            group.DisplayName,
+		Label:                  group.Label(),
+		Ratio:                  group.Ratio,
+		UnlockMinRechargeCents: group.UnlockMinRechargeCents,
+		Description:            group.Description,
+		Enabled:                group.Enabled,
+		ChannelCount:           channelCount,
+		PriceCount:             priceCount,
+		CreatedAt:              unixOrZero(group.CreatedAt),
+		UpdatedAt:              unixOrZero(group.UpdatedAt),
 	}
 }
 
@@ -148,6 +154,9 @@ type modelGroupUpsertRequest struct {
 	Ratio       *int64 `json:"ratio"`
 	Description string `json:"description"`
 	Enabled     *bool  `json:"enabled"`
+	// UnlockMinRechargeCents 是解锁门槛（分）。用指针区分"未传"与"传 0"：
+	// 未传 = 保持原值，传 0 = 明确清除门槛。
+	UnlockMinRechargeCents *int64 `json:"unlock_min_recharge_cents"`
 }
 
 // handleCreateGroup 处理 POST /api/admin/groups。
@@ -177,6 +186,9 @@ func (s *Server) handleCreateGroup(c *gin.Context) {
 	}
 	if req.Enabled != nil {
 		group.Enabled = *req.Enabled
+	}
+	if req.UnlockMinRechargeCents != nil {
+		group.UnlockMinRechargeCents = *req.UnlockMinRechargeCents
 	}
 
 	if err := s.deps.Groups.Create(c.Request.Context(), group); err != nil {
@@ -239,6 +251,9 @@ func (s *Server) handleUpdateGroup(c *gin.Context) {
 	}
 	if req.Enabled != nil {
 		group.Enabled = *req.Enabled
+	}
+	if req.UnlockMinRechargeCents != nil {
+		group.UnlockMinRechargeCents = *req.UnlockMinRechargeCents
 	}
 
 	if err := s.deps.Groups.Update(ctx, group); err != nil {
@@ -436,6 +451,109 @@ func (s *Server) handleListModels(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"object": "list", "data": data})
+}
+
+// ---------------------------------------------------------------------------
+// 分组（用户门户）
+// ---------------------------------------------------------------------------
+
+// portalGroupDTO 是门户侧（访问令牌的"所属分组"下拉）看到的分组信息。
+//
+// 与广场的 plazaGroupDTO 分开的理由：广场是【公开】数据（不含任何用户信息），
+// 而本结构体带有"当前用户是否已解锁"的判断，必须登录后下发，
+// 两者混在一起会让公开接口意外泄露用户资格信息。
+type portalGroupDTO struct {
+	Name        string `json:"name"`
+	Label       string `json:"label"`
+	Ratio       int64  `json:"ratio"`
+	Description string `json:"description"`
+	// UnlockMinRechargeCents 是解锁本分组所需的累计充值（分）；0 表示无门槛。
+	UnlockMinRechargeCents int64 `json:"unlock_min_recharge_cents"`
+	// Unlocked 表示当前用户是否已解锁（无门槛时恒为 true）。
+	Unlocked bool `json:"unlocked"`
+	// PaidAmountCents 是当前用户的累计充值（分），前端据此显示"还差多少解锁"。
+	PaidAmountCents int64 `json:"paid_amount_cents"`
+}
+
+// handleMyGroups 处理 GET /api/user/groups（当前用户可选的分组）。
+//
+// 为什么需要这个接口而不是直接复用公开的模型广场：广场不知道"你是谁"，
+// 无法告诉前端"这个分组你还没解锁"。把门槛下发到前端只是体验（置灰 + 提示），
+// 真正的闸门在服务端（见 resolveTokenGroupName）——两处都做才既好用又绕不过。
+func (s *Server) handleMyGroups(c *gin.Context) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok {
+		writeUserError(c, http.StatusUnauthorized,
+			"auth.not_logged_in", oai.TypeAuthentication, oai.CodeMissingAPIKey)
+		return
+	}
+	if s.deps.Groups == nil {
+		oai.WriteError(c.Writer, http.StatusServiceUnavailable,
+			"分组模块未启用", oai.TypeServer, oai.CodeInternal)
+		return
+	}
+
+	ctx := c.Request.Context()
+	groups, err := s.deps.Groups.List(ctx, model.ModelGroupQuery{EnabledOnly: true, Limit: 200})
+	if err != nil {
+		s.respondInternalError(c, "查询分组列表失败")
+		return
+	}
+	served, err := s.servedGroupNames(ctx)
+	if err != nil {
+		s.respondInternalError(c, "查询可用分组失败")
+		return
+	}
+
+	paid := int64(0)
+	if s.deps.Orders != nil {
+		paid, err = s.deps.Orders.SumPaidAmountCents(ctx, user.ID)
+		if err != nil {
+			s.respondInternalError(c, "查询累计充值金额失败")
+			return
+		}
+	}
+
+	items := make([]portalGroupDTO, 0, len(groups))
+	for _, group := range groups {
+		// 只下发"确实有启用渠道在服务"的分组：选到空分组后所有请求都会
+		// 503（无可用渠道），而用户从界面上完全看不出原因。
+		if !served[group.Name] {
+			continue
+		}
+		items = append(items, portalGroupDTO{
+			Name:                   group.Name,
+			Label:                  group.Label(),
+			Ratio:                  group.Ratio,
+			Description:            group.Description,
+			UnlockMinRechargeCents: group.UnlockMinRechargeCents,
+			Unlocked:               paid >= group.UnlockMinRechargeCents,
+			PaidAmountCents:        paid,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items, "paid_amount_cents": paid})
+}
+
+// servedGroupNames 返回"至少有一个启用渠道在服务"的分组集合。
+//
+// 判据与转发路由一致（渠道必须处于启用状态），因此集合里的分组选进去一定能路由到渠道；
+// 不在集合里的分组选进去必然 503，不能让它们出现在下拉里。
+func (s *Server) servedGroupNames(ctx context.Context) (map[string]bool, error) {
+	served := make(map[string]bool)
+	if s.deps.Channels == nil {
+		return served, nil
+	}
+	enabled := model.ChannelStatusEnabled
+	channels, err := s.deps.Channels.List(ctx, model.ChannelQuery{Status: &enabled, Limit: 500})
+	if err != nil {
+		return nil, fmt.Errorf("server: 查询启用渠道失败: %w", err)
+	}
+	for _, channel := range channels {
+		for _, name := range channel.GroupList() {
+			served[name] = true
+		}
+	}
+	return served, nil
 }
 
 // ---------------------------------------------------------------------------

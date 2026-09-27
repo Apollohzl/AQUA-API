@@ -348,6 +348,25 @@ func (r *paymentOrderRepository) SumPaidQuota(ctx context.Context, userID uint64
 	return total.Int64, nil
 }
 
+// SumPaidAmountCents 统计某用户已支付订单的实付金额合计（单位：分）。
+//
+// 用途：分组解锁门槛（如"累计充值满 100 元解锁大客户分组"）。
+// 为什么按 amount（分）而不是 quota：amount 是真实支付的钱，与内部额度刻度、
+// 兑换比例、消费情况都无关，改比例或用户消费掉余额都不会让门槛判定漂移。
+func (r *paymentOrderRepository) SumPaidAmountCents(ctx context.Context, userID uint64) (int64, error) {
+	var total sql.NullInt64
+	err := r.db.QueryRowContext(ctx,
+		"SELECT SUM(amount) FROM payment_orders WHERE user_id = ? AND status = ?",
+		userID, int(model.PaymentStatusPaid)).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("store: 统计累计充值金额失败: %w", err)
+	}
+	if !total.Valid {
+		return 0, nil
+	}
+	return total.Int64, nil
+}
+
 // buildOrderWhere 依据查询条件拼装 WHERE 子句与参数。
 func buildOrderWhere(query model.PaymentOrderQuery) (string, []any) {
 	conditions := make([]string, 0, 3)
