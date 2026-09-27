@@ -9,11 +9,14 @@
  * 流转（Flow）：
  *   views/console/ReferralView.vue → fetchReferral() / checkin() / fetchCheckin()
  *                                  → /api/user/referral、/api/user/checkin
+ *   views/console/FinanceView.vue  → listMyReferralRewards()
+ *                                  → /api/user/referral/rewards（返利明细）
  *
  * 扩展（Extend）：
  *   新增邀请相关接口时在此追加函数；本文件只做"路径 + 类型"映射，不含业务逻辑。
  */
 import { api } from './client'
+import type { Paged, ReferralReward } from './types'
 
 /** 签到状态（GET/POST /api/user/checkin 与 referral.checkin 共用） */
 export interface CheckinStatus {
@@ -41,6 +44,13 @@ export interface ReferralInfo {
   invited_count: number
   /** 当前配置的"邀请注册奖"额度（便于页面提示用户能拿多少） */
   register_bonus_quota: number
+  /**
+   * 充值返利比例（整数百分比，如 3 表示 3%）。
+   *
+   * 由后端下发而不是前端写死：比例是邀请人最关心的数字（决定值不值得推广），
+   * 站长改配置后页面应立即跟着变。
+   */
+  recharge_ratio: number
   /** 我累计获得的邀请返利额度 */
   total_reward_quota: number
   /** 签到概况 */
@@ -60,4 +70,16 @@ export function fetchCheckin(): Promise<CheckinStatus> {
 /** POST /api/user/checkin：执行今日签到（当天重复签到会返回 409） */
 export function checkin(): Promise<CheckinStatus> {
   return api.post<CheckinStatus>('/user/checkin')
+}
+
+/**
+ * GET /api/user/referral/rewards：我的返利明细（分页）。
+ *
+ * 为什么需要它：累计返利只有一个数字，回答不了"哪一笔、什么时候、谁带来的"，
+ * 而这三件事正是用户对账时想知道的（数据来自后端既有的返利台账）。
+ */
+export function listMyReferralRewards(
+  paged: { page?: number; size?: number } = {},
+): Promise<Paged<ReferralReward>> {
+  return api.get<Paged<ReferralReward>>('/user/referral/rewards', paged)
 }

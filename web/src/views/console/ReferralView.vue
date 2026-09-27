@@ -44,6 +44,21 @@ const inviteLink = computed(() => {
   return origin + info.value.invite_path
 })
 
+/** 页面说明随实际配置变化：没配注册奖时不能承诺"注册即得奖励" */
+const pageDesc = computed(() => {
+  if ((info.value?.register_bonus_quota ?? 0) > 0) {
+    return '把邀请链接分享给朋友：对方注册即得奖励，对方充值你还可持续获得返利。'
+  }
+  return '把邀请链接分享给朋友：好友通过链接注册后，其每笔充值你都能获得返利。'
+})
+
+/** 返利规则文案：比例由后端下发，避免前端写死后与后台配置不一致 */
+const rechargeRuleText = computed(() => {
+  const ratio = info.value?.recharge_ratio ?? 0
+  if (ratio <= 0) return '好友每笔充值入账后你会获得返利（当前返利比例未开启）。'
+  return `好友每笔充值入账后，你可获得该笔充值金额的 ${ratio}%（同一笔只返一次）。`
+})
+
 async function load(): Promise<void> {
   loading.value = true
   errorMessage.value = ''
@@ -85,12 +100,18 @@ onMounted(load)
     <div class="page-head">
       <div>
         <h2 class="page-title">邀请返利</h2>
-        <p class="page-desc">把邀请链接分享给朋友：对方注册即得奖励，对方充值你还可持续获得返利。</p>
+        <p class="page-desc">{{ pageDesc }}</p>
       </div>
-      <RouterLink to="/console" class="btn btn-secondary btn-sm">
-        <AppIcon name="home" :size="14" />
-        返回概览
-      </RouterLink>
+      <div class="toolbar">
+        <RouterLink to="/console/finance" class="btn btn-secondary btn-sm">
+          <AppIcon name="chart" :size="14" />
+          查看返利明细
+        </RouterLink>
+        <RouterLink to="/console" class="btn btn-secondary btn-sm">
+          <AppIcon name="home" :size="14" />
+          返回概览
+        </RouterLink>
+      </div>
     </div>
 
     <DataState
@@ -138,11 +159,12 @@ onMounted(load)
         </div>
 
         <ul class="mt-4 space-y-1.5 text-xs leading-relaxed text-ink-400">
-          <li>
+          <!-- 注册奖未配置（为 0）时不承诺奖励，否则页面会写着"可获得 ¥0.00" -->
+          <li v-if="info.register_bonus_quota > 0">
             · 好友注册成功，你可获得
             <strong class="text-ink-200">{{ yuanText(info.register_bonus_quota) }}</strong> 余额。
           </li>
-          <li>· 好友每笔充值入账后，你会按后台设置的比例获得返利（同一笔只返一次）。</li>
+          <li>· {{ rechargeRuleText }}</li>
           <li>· 邀请关系在好友注册时确定，之后不可更改，请分享给真实用户。</li>
         </ul>
       </section>

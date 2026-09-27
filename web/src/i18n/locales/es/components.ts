@@ -269,6 +269,7 @@ export default {
       tokens: 'Tokens de acceso',
       tasks: 'Tareas de generación',
       billing: 'Facturación y registros',
+      finance: 'Finanzas',
       recharge: 'Recargar',
       logs: 'Registros de uso',
       referral: 'Referidos y registro diario',

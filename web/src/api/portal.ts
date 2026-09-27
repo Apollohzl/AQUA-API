@@ -19,6 +19,7 @@ import type {
   CreateOrderPayload,
   CreateTokenPayload,
   CreateTokenResult,
+  FinanceSummary,
   LogQuery,
   OrderQuery,
   Paged,
@@ -97,6 +98,18 @@ export function listMyOrders(query: OrderQuery = {}): Promise<Paged<PaymentOrder
 /** POST /api/user/orders：下单（只传金额与通道，额度由服务端计算） */
 export function createOrder(payload: CreateOrderPayload): Promise<PaymentOrder> {
   return api.post<PaymentOrder>('/user/orders', payload)
+}
+
+/* ── 财务记录 ───────────────────────────────────────────── */
+
+/**
+ * GET /api/user/finance：财务板块顶部汇总。
+ *
+ * 只返回四个数字（余额/累计充值/累计返利/累计消费）+ 充值笔数；
+ * 明细各有专门接口（订单、返利明细、调用日志），因此这里保持轻量。
+ */
+export function fetchFinanceSummary(): Promise<FinanceSummary> {
+  return api.get<FinanceSummary>('/user/finance')
 }
 
 /**

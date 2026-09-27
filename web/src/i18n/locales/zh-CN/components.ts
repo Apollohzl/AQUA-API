@@ -266,6 +266,7 @@ export default {
       tokens: '访问令牌',
       tasks: '生成任务',
       billing: '账务与记录',
+      finance: '财务记录',
       recharge: '账户充值',
       logs: '调用日志',
       referral: '邀请返利',

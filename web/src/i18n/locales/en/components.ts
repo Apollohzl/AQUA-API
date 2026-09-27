@@ -264,6 +264,7 @@ export default {
       tokens: 'Access Tokens',
       tasks: 'Generation Tasks',
       billing: 'Billing & Records',
+      finance: 'Finance',
       recharge: 'Top Up',
       logs: 'Usage Logs',
       referral: 'Referrals & Check-in',

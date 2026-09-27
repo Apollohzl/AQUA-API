@@ -28,7 +28,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import DataState from '@/components/DataState.vue'
 import Pagination from '@/components/Pagination.vue'
 import { ApiError } from '@/api/client'
-import { createOrder, getMyOrder, listMyOrders } from '@/api/portal'
+import { createOrder, fetchFinanceSummary, getMyOrder, listMyOrders } from '@/api/portal'
 import { fetchPaymentInfo } from '@/api/site'
 import type { PaymentOrder, PublicPaymentInfo } from '@/api/types'
 import { ORDER_STATUS_PAID, ORDER_STATUS_PENDING } from '@/api/types'
@@ -101,6 +101,34 @@ const selected = computed(() => choices.value.find((item) => item.key === choice
 
 /** 当前等待支付的订单（用于展示"等待支付"引导与轮询） */
 const pendingOrder = ref<PaymentOrder | null>(null)
+
+/* ── 当前余额 ───────────────────────────────────────────── */
+
+/**
+ * 余额取自财务汇总接口（而不是会话里的用户对象）。
+ *
+ * 理由：会话里的额度是登录时的那一份快照，用户充值成功后不会自动变新——
+ * 于是"刚付完钱、余额还是旧的"，会让人以为钱没到账。
+ * 这里在支付成功后主动刷新一次，保证"余额随到账立即变化"。
+ */
+const balanceQuota = ref<number | null>(null)
+
+const balanceText = computed(() => {
+  const quota = balanceQuota.value
+  if (quota === null) return '—'
+  // -1 是"不限额度"的约定值，不能折算成金额
+  if (quota < 0) return '不限额度'
+  return yuanText(quota)
+})
+
+async function loadBalance(): Promise<void> {
+  try {
+    balanceQuota.value = (await fetchFinanceSummary()).balance_quota
+  } catch {
+    // 余额读不到不影响充值本身：显示占位符，不让整页报错
+    balanceQuota.value = null
+  }
+}
 
 const orders = ref<PaymentOrder[]>([])
 const total = ref(0)
@@ -210,6 +238,8 @@ function startPolling(tradeNo: string): void {
         stopPolling()
         if (order.status === ORDER_STATUS_PAID) {
           toastSuccess(`充值成功，已到账 ${yuanText(order.quota)}`)
+          // 到账后立刻刷新余额：否则页面上还是付款前的旧数字
+          void loadBalance()
         }
         await loadOrders()
       }
@@ -322,7 +352,7 @@ watch(
 )
 
 onMounted(async () => {
-  await Promise.all([loadInfo(), loadOrders()])
+  await Promise.all([loadInfo(), loadOrders(), loadBalance()])
   const tradeNo = route.query.trade_no
   if (typeof tradeNo === 'string' && tradeNo) {
     try {
@@ -371,6 +401,17 @@ onBeforeUnmount(stopPolling)
           <AppIcon name="wallet" :size="16" class="text-brand-700" />
           选择充值金额
         </h3>
+
+        <!-- 当前余额：放在下单区最上方，用户决定充多少之前先知道"现在还剩多少" -->
+        <div
+          class="mt-4 flex items-center justify-between gap-3 rounded-lg border border-brand-500/25 bg-brand-500/5 px-3 py-2.5"
+        >
+          <span class="flex items-center gap-1.5 text-xs text-ink-400">
+            <AppIcon name="quota" :size="14" class="text-brand-700" />
+            当前余额
+          </span>
+          <span class="font-mono text-lg font-semibold text-brand-700">{{ balanceText }}</span>
+        </div>
 
         <div class="mt-4 flex flex-wrap gap-2">
           <button

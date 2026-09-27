@@ -135,6 +135,14 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '生成任务' },
       },
       {
+        // 财务记录：把"钱"的三类流水（充值/返利/消费）与四个汇总数字收在一页，
+        // 用户对账不必在充值页、邀请页、日志页之间来回翻。
+        path: 'finance',
+        name: 'console-finance',
+        component: () => import('@/views/console/FinanceView.vue'),
+        meta: { title: '财务记录' },
+      },
+      {
         path: 'recharge',
         name: 'console-recharge',
         component: () => import('@/views/console/RechargeView.vue'),

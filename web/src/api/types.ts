@@ -1390,6 +1390,44 @@ export interface OrderQuery {
   user_id?: number
 }
 
+/* ────────────────────────── 财务记录 ────────────────────────── */
+
+/**
+ * GET /api/user/finance：财务板块顶部汇总。
+ *
+ * 所有金额字段都是**额度**（站内计费单位），由前端按后端配置的兑换比例
+ * 折算成人民币展示（见 composables/useQuotaUnit.ts）——比例站长可改，
+ * 因此后端不做展示换算。
+ */
+export interface FinanceSummary {
+  /** 当前余额；-1 表示不限额度 */
+  balance_quota: number
+  /** 累计消费额度 */
+  used_quota: number
+  /** 累计有效充值额度（已支付且未退款：退款后会自动从合计里消失） */
+  recharged_quota: number
+  /** 已支付订单笔数 */
+  recharge_count: number
+  /** 累计返利额度（邀请注册奖 + 充值返利） */
+  reward_quota: number
+}
+
+/** 一条返利明细（GET /api/user/referral/rewards） */
+export interface ReferralReward {
+  id: number
+  /** 奖励类型代码：register / recharge */
+  kind: string
+  /** 奖励类型中文名（由后端翻译，前端不做代码到名字的映射） */
+  kind_text: string
+  /** 本次奖励额度 */
+  quota: number
+  /** 触发奖励的用户名；已由后端脱敏（如 13***@qq.com） */
+  invitee: string
+  /** 充值返利对应的订单号；注册奖为空串 */
+  order_trade_no: string
+  created_at: number
+}
+
 /* ────────────────────────── OAuth 提供方 ────────────────────────── */
 
 /**

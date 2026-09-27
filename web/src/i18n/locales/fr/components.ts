@@ -271,6 +271,7 @@ export default {
       tokens: 'Jetons d’accès',
       tasks: 'Tâches de génération',
       billing: 'Facturation et historique',
+      finance: 'Finances',
       recharge: 'Recharger',
       logs: 'Journaux d’appels',
       referral: 'Parrainage et pointage',
