@@ -17,7 +17,8 @@
  *   从收银台返回（?trade_no=xxx）→ 直接轮询该订单
  *
  * 扩展（Extend）：
- *   新增支付方式时无需改动本页（通道列表由后端返回）；
+ *   新增支付方式时无需改动本页：通道与"子方式（支付宝/微信）"都由后端下发，
+ *   本页只负责把 sub_methods 展开成一行行选项（见 choices 计算属性）；
  *   需要"自定义金额输入键盘"等交互优化时，改 amount 相关一段即可。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -42,10 +43,57 @@ const infoError = ref('')
 
 /** 表单：金额用"元"字符串承载，提交前换算成"分" */
 const amountYuan = ref('10')
-const method = ref('')
-const subMethod = ref('')
+
+/**
+ * 一个"可选中"的支付选项。
+ *
+ * 为什么要把通道展开成选项列表：易支付这类聚合通道只有一个通道名（epay），
+ * 但用户在收银台上真正要选的是"支付宝还是微信"。若直接渲染通道，
+ * 页面上就只出现一行「在线支付」，用户既看不出能选微信，也无从表达自己的选择。
+ * 所以这里把后端下发的 sub_methods 展开成"每个子方式一行"。
+ */
+interface PayChoice {
+  /** 选中键：无子方式即通道名（epay），有子方式为「通道:子方式」（epay:wxpay） */
+  key: string
+  method: string
+  subMethod: string
+  label: string
+  hint: string
+  ready: boolean
+}
+
+/** 选中的选项键（用 key 而不是分别存 method/subMethod，避免两者不同步） */
+const choiceKey = ref('')
 const submitting = ref(false)
 const formError = ref('')
+
+/** 由后端配置推导出的全部可选支付方式 */
+const choices = computed<PayChoice[]>(() => {
+  const result: PayChoice[] = []
+  for (const item of info.value?.methods ?? []) {
+    const isManual = item.name === 'manual'
+    const hint = isManual ? '向站长付款后由管理员确认入账' : '跳转到第三方收银台完成支付'
+    const subs = item.sub_methods ?? []
+    if (!subs.length) {
+      result.push({ key: item.name, method: item.name, subMethod: '', label: item.label, hint, ready: item.ready })
+      continue
+    }
+    for (const sub of subs) {
+      result.push({
+        key: `${item.name}:${sub.name}`,
+        method: item.name,
+        subMethod: sub.name,
+        label: sub.label,
+        hint,
+        ready: item.ready,
+      })
+    }
+  }
+  return result
+})
+
+/** 当前选中的选项（下单时取它的 method / sub_method） */
+const selected = computed(() => choices.value.find((item) => item.key === choiceKey.value) ?? null)
 
 /** 当前等待支付的订单（用于展示"等待支付"引导与轮询） */
 const pendingOrder = ref<PaymentOrder | null>(null)
@@ -105,9 +153,10 @@ async function loadInfo(): Promise<void> {
   infoError.value = ''
   try {
     info.value = await fetchPaymentInfo()
-    if (!method.value && info.value.methods.length) {
-      // 默认选中第一个"密钥已就绪"的通道，避免用户选到还没配好的通道后报错
-      method.value = (info.value.methods.find((item) => item.ready) || info.value.methods[0]).name
+    // 默认选中第一个"密钥已就绪"的选项，避免用户选到还没配好的通道后报错；
+    // 如果站长刚改了配置导致原来的选中项消失，这里会顺带纠正回来。
+    if (!choices.value.some((item) => item.key === choiceKey.value)) {
+      choiceKey.value = (choices.value.find((item) => item.ready) || choices.value[0])?.key ?? ''
     }
   } catch (err) {
     infoError.value = err instanceof ApiError ? err.message : '充值信息加载失败'
@@ -170,7 +219,8 @@ async function submit(): Promise<void> {
     formError.value = '请输入正确的充值金额'
     return
   }
-  if (!method.value) {
+  const choice = selected.value
+  if (!choice) {
     formError.value = '请选择支付方式'
     return
   }
@@ -190,8 +240,8 @@ async function submit(): Promise<void> {
   try {
     const order = await createOrder({
       amount_cents: cents,
-      method: method.value,
-      sub_method: subMethod.value || undefined,
+      method: choice.method,
+      sub_method: choice.subMethod || undefined,
     })
     pendingOrder.value = order
     await loadOrders()
@@ -220,6 +270,15 @@ function changeSize(next: number): void {
   size.value = next
   page.value = 1
   void loadOrders()
+}
+
+/**
+ * 订单的支付方式文案：优先显示子方式（如「支付宝」「微信支付」）。
+ * 中文名由后端下发（method_label / sub_method_label），前端不做代码到名字的映射，
+ * 否则后端加了通道、前端就会显示成 alipay 这样的原始代码。
+ */
+function orderMethodText(order: PaymentOrder): string {
+  return order.sub_method_label || order.method_label || order.method
 }
 
 /** 订单状态徽标：待支付用警示色（需要用户行动），已入账用成功色 */
@@ -336,17 +395,15 @@ onBeforeUnmount(stopPolling)
           <p class="label">支付方式</p>
           <div class="space-y-2">
             <label
-              v-for="item in info.methods"
-              :key="item.name"
+              v-for="item in choices"
+              :key="item.key"
               class="flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors"
-              :class="method === item.name ? 'border-brand-500/60 bg-brand-500/5' : 'border-ink-800 hover:border-ink-700'"
+              :class="choiceKey === item.key ? 'border-brand-500/60 bg-brand-500/5' : 'border-ink-800 hover:border-ink-700'"
             >
-              <input v-model="method" class="checkbox" type="radio" :value="item.name" :disabled="!item.ready" />
+              <input v-model="choiceKey" class="checkbox" type="radio" :value="item.key" :disabled="!item.ready" />
               <span class="min-w-0 flex-1">
                 <span class="block text-sm text-ink-100">{{ item.label }}</span>
-                <span class="block text-[11px] text-ink-500">
-                  {{ item.name === 'manual' ? '向站长付款后由管理员确认入账' : '跳转到第三方收银台完成支付' }}
-                </span>
+                <span class="block text-[11px] text-ink-500">{{ item.hint }}</span>
               </span>
               <span v-if="!item.ready" class="badge badge-warn">未配置密钥</span>
             </label>
@@ -461,7 +518,7 @@ onBeforeUnmount(stopPolling)
               <td data-label="订单号"><code class="font-mono text-[12px] text-ink-200">{{ order.trade_no }}</code></td>
               <td class="cell-num" data-label="金额">¥{{ order.amount_text }}</td>
               <td class="cell-num" data-label="到账额度">{{ formatNumber(order.quota) }}</td>
-              <td class="cell-muted" data-label="方式">{{ order.method }}<span v-if="order.sub_method"> / {{ order.sub_method }}</span></td>
+              <td class="cell-muted" data-label="方式">{{ orderMethodText(order) }}</td>
               <td data-label="状态">
                 <span :class="orderBadgeClass(order)">{{ order.status_text }}</span>
                 <span v-if="order.status === ORDER_STATUS_PAID && !order.credited" class="ml-1 badge badge-warn">

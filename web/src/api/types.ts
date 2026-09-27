@@ -1240,6 +1240,10 @@ export interface PaymentOrder {
   quota: number
   method: string
   sub_method: string
+  /** 通道中文名（后端翻译，如「在线支付」） */
+  method_label?: string
+  /** 子方式中文名（后端翻译，如「支付宝」「微信支付」） */
+  sub_method_label?: string
   status: number
   status_text: string
   /** 第三方收银台地址；人工确认通道为空 */
@@ -1263,7 +1267,15 @@ export interface CreateOrderPayload {
 /** 公开的充值参数（GET /api/payment/public） */
 export interface PublicPaymentInfo {
   enabled: boolean
-  methods: { name: string; label: string; ready: boolean }[]
+  /**
+   * 可用的支付通道。
+   *
+   * sub_methods 是通道下的"子支付方式"：易支付这类聚合通道只有一个通道名，
+   * 但用户要选的是"支付宝还是微信"，因此由后端下发子方式（含中文名），
+   * 前端把每个子方式渲染成一行独立选项。
+   * 没有子方式概念的通道（Stripe、人工确认）下发空数组。
+   */
+  methods: { name: string; label: string; ready: boolean; sub_methods: { name: string; label: string }[] }[]
   exchange_rate: number
   currency: string
   min_cents: number

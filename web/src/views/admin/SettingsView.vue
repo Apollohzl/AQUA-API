@@ -205,6 +205,33 @@ function setSwitch(settingKey: string, on: boolean): void {
 }
 
 /**
+ * list 字段的选项开关状态。
+ *
+ * list 字段在设置表里是"逗号分隔的字符串"（如 "alipay,wxpay"）。
+ * 有 options 的 list（例如易支付「开通的支付方式」）渲染成可勾选项，
+ * 而不是让站长手打代码 —— 手打 alipay/wxpay 最容易拼错，
+ * 而拼错的后果是"用户看不到微信入口"这种不报错的静默故障。
+ */
+function isListOptionOn(settingKey: string, value: string): boolean {
+  return splitPaymentList(paymentParams.value[settingKey] ?? '').includes(value)
+}
+
+/** 勾选 / 取消勾选一个 list 选项（写回逗号分隔字符串） */
+function toggleListOption(settingKey: string, value: string): void {
+  const current = splitPaymentList(paymentParams.value[settingKey] ?? '')
+  const next = current.includes(value) ? current.filter((item) => item !== value) : [...current, value]
+  paymentParams.value[settingKey] = next.join(',')
+}
+
+/** 把逗号分隔值切成数组（去空白项），与后端 splitList 的口径保持一致 */
+function splitPaymentList(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item !== '')
+}
+
+/**
  * 已勾选通道的配置问题清单。
  *
  * 提前拦截三类"开了也用不了"的配置，避免站长保存后才发现充值页下不了单：
@@ -969,8 +996,33 @@ onMounted(() => {
                           <span v-if="field.required" class="text-red-600">*</span>
                         </label>
 
+                        <!-- list 且带选项：渲染成可勾选项（如易支付的「支付宝/微信支付」） -->
+                        <div
+                          v-if="field.kind === 'list' && (field.options?.length ?? 0) > 0"
+                          class="flex flex-wrap gap-2"
+                        >
+                          <label
+                            v-for="option in field.options || []"
+                            :key="option.value"
+                            class="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors"
+                            :class="
+                              isListOptionOn(field.setting_key, option.value)
+                                ? 'border-brand-500/60 bg-brand-500/5 text-ink-100'
+                                : 'border-ink-800 text-ink-300 hover:border-ink-700'
+                            "
+                          >
+                            <input
+                              class="checkbox"
+                              type="checkbox"
+                              :checked="isListOptionOn(field.setting_key, option.value)"
+                              @change="toggleListOption(field.setting_key, option.value)"
+                            />
+                            {{ option.label }}
+                          </label>
+                        </div>
+
                         <select
-                          v-if="field.kind === 'select'"
+                          v-else-if="field.kind === 'select'"
                           :id="`pf-${channel.key}-${field.key}`"
                           v-model="paymentParams[field.setting_key]"
                           class="input"

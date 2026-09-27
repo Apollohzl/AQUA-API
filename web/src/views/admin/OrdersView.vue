@@ -152,6 +152,15 @@ async function handleRefund(order: PaymentOrder): Promise<void> {
   await run(order.trade_no, () => refundOrder(order.trade_no), '已退款并扣回额度')
 }
 
+/**
+ * 订单的支付方式文案：优先显示子方式（如「支付宝」「微信支付」）。
+ * 中文名由后端下发（method_label / sub_method_label），前端不做代码到名字的映射，
+ * 否则后端加了通道，这里就会显示成 alipay 这样的原始代码。
+ */
+function orderMethodText(order: PaymentOrder): string {
+  return order.sub_method_label || order.method_label || order.method
+}
+
 function orderBadgeClass(order: PaymentOrder): string {
   switch (order.status) {
     case ORDER_STATUS_PAID:
@@ -274,7 +283,7 @@ const emptyHint = computed(() =>
             <td class="cell-num" data-label="金额">¥{{ order.amount_text }}</td>
             <td class="cell-num" data-label="额度">{{ formatNumber(order.quota) }}</td>
             <td class="cell-muted" data-label="方式">
-              {{ order.method }}<span v-if="order.sub_method"> / {{ order.sub_method }}</span>
+              {{ orderMethodText(order) }}
             </td>
             <td data-label="状态">
               <span :class="orderBadgeClass(order)">{{ order.status_text }}</span>
