@@ -78,6 +78,15 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/ModelPlazaView.vue'),
     meta: { title: '模型广场' },
   },
+  {
+    // 加入交流群：落地页的按钮跳到这里，再由访客自选加入哪个 QQ 群。
+    // 独立成页而不是把链接直接挂在按钮上——访客需要先知道"有几个群、哪个是主群"
+    // 才会安心点，且直接外链会在无预告的情况下唤起 QQ。
+    path: '/join',
+    name: 'join-groups',
+    component: () => import('@/views/JoinGroupsView.vue'),
+    meta: { title: '加入交流群' },
+  },
 
   /* ── 用户门户 ─────────────────────────────────────────── */
   {

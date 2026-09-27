@@ -245,6 +245,12 @@ const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
                 <AppIcon name="bolt" :size="16" />
                 查看接入示例
               </a>
+              <!-- 入群入口：跳转到专门的「加入交流群」页（/join），
+                   让访客先看清有几个群、哪个是主群，再自己决定加哪个。 -->
+              <RouterLink to="/join" class="btn btn-ghost">
+                <AppIcon name="users" :size="16" />
+                加入交流群
+              </RouterLink>
             </div>
           </div>
 
@@ -492,6 +498,7 @@ const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
           <RouterLink v-if="site.registrationEnabled" to="/register" class="transition-colors hover:text-ink-200">
             注册
           </RouterLink>
+          <RouterLink to="/join" class="transition-colors hover:text-ink-200">加入交流群</RouterLink>
           <a href="#features" class="transition-colors hover:text-ink-200">核心特性</a>
           <a href="#models" class="transition-colors hover:text-ink-200">可用模型</a>
         </nav>
