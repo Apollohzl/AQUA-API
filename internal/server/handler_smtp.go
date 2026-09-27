@@ -70,6 +70,18 @@ type smtpSettingsDTO struct {
 	UpdatedAt int64  `json:"updated_at"`
 	// PasswordSet 表示库里是否已保存口令（用于界面提示"留空则沿用已保存的口令"）。
 	PasswordSet bool `json:"password_set"`
+	// ValuesFromEnv 表示上面这组 host/port/username/from/from_name 是【从环境变量回填】的，
+	// 而不是后台保存过的配置。
+	//
+	// 为什么必须回填：站长已经通过环境变量把邮件通道配好了，打开这个页面却看到一片空白，
+	// 会直接得出"配置丢了/没生效"的结论（这正是修复前的实际投诉）。
+	// 回填后他看到的就是"现在真正在用的那套参数"，只需要决定要不要搬到后台配置里。
+	ValuesFromEnv bool `json:"values_from_env"`
+	// EnvPasswordSet 表示环境变量里提供了口令。
+	//
+	// 口令无法（也不应）被读取回显，所以当 ValuesFromEnv 为真时，
+	// 界面要提示"口令由环境变量提供，无法显示；若改用后台配置需重新填写"。
+	EnvPasswordSet bool `json:"env_password_set"`
 
 	// Source 是当前实际生效的配置来源：database / env / none。
 	Source string `json:"source"`
@@ -164,6 +176,8 @@ func (s *Server) buildSMTPDTO(stored *model.SMTPSettings) smtpSettingsDTO {
 		EffectivePort:   effective.Port,
 		EffectiveFrom:   effective.From,
 		EffectiveSender: effective.FromName,
+		// 环境变量的口令只暴露"有没有"，绝不回显内容
+		EnvPasswordSet: strings.TrimSpace(s.deps.SMTPBase.Password) != "",
 	}
 	if s.deps.Mailer != nil {
 		dto.Ready = s.deps.Mailer.Configured()
@@ -180,6 +194,17 @@ func (s *Server) buildSMTPDTO(stored *model.SMTPSettings) smtpSettingsDTO {
 		if dto.UpdatedAt < 0 {
 			dto.UpdatedAt = 0
 		}
+	}
+	// 后台没有保存过任何配置时，用"当前生效的参数"回填表单：
+	// 站长因此能看到自己通过环境变量配的那套值，而不是一片空白。
+	// 注意这只回填非口令字段——口令在任何路径下都不会被回显。
+	if stored == nil {
+		dto.Host = effective.Host
+		dto.Port = effective.Port
+		dto.Username = effective.Username
+		dto.From = effective.From
+		dto.FromName = effective.FromName
+		dto.ValuesFromEnv = dto.Host != "" || dto.Username != "" || dto.From != ""
 	}
 	// 未保存过时给出一份"可直接编辑的初值"：端口用协议默认值，
 	// 避免界面显示 0 让站长以为端口坏了。
@@ -244,6 +269,16 @@ func (s *Server) handleUpdateSMTP(c *gin.Context) {
 	settings.Password = strings.TrimSpace(req.Password)
 	if settings.Password == "" && existing != nil {
 		settings.Password = existing.Password
+	}
+	// 库里没有口令、请求也没带口令：这是"想启用后台配置但没填口令"。
+	// 单独给出可操作的提示，并说明环境变量里的口令无法被读取复用——
+	// 否则站长会以为"环境变量里明明有口令，为什么这里说没有"。
+	if settings.Enabled && settings.Password == "" {
+		oai.WriteError(c.Writer, http.StatusBadRequest,
+			"请填写 SMTP 登录口令（授权码）。为安全起见，环境变量中的口令不会被读取或复用，"+
+				"若要改用后台配置，需要把口令重新填写一次。",
+			oai.TypeInvalidRequest, "smtp_password_required")
+		return
 	}
 
 	if err := settings.Validate(); err != nil {

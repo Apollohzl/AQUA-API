@@ -287,6 +287,14 @@ const smtpSourceText = computed(() => {
   }
 })
 
+/** 表单里这组参数是否来自环境变量回填（此时口令必须重填才能改用后台配置） */
+const smtpValuesFromEnv = computed(() => smtp.value?.values_from_env === true)
+
+/** 状态条的配色：已就绪用绿、未就绪用黄 */
+const smtpStatusClass = computed(() =>
+  smtp.value?.ready ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700' : 'border-amber-500/25 bg-amber-500/10 text-amber-700',
+)
+
 async function loadSMTP(): Promise<void> {
   smtpLoading.value = true
   smtpError.value = ''
@@ -318,7 +326,13 @@ function smtpFormError(): string {
   }
   if (!smtpUsername.value.trim()) return '请填写 SMTP 登录账号'
   if (!smtpFrom.value.trim() || !smtpFrom.value.includes('@')) return '请填写正确的发件地址（需含 @）'
-  if (!smtpPassword.value.trim() && !smtpPasswordSet.value) return '首次配置必须填写 SMTP 登录口令（授权码）'
+  if (!smtpPassword.value.trim() && !smtpPasswordSet.value) {
+    // 首次改为后台配置时最常见的一种"卡住"：站长以为环境变量里的口令能自动带过来。
+    // 明确说明它读不到、需要重填，否则他会一直以为是自己填错了。
+    return smtp.value?.env_password_set
+      ? '环境变量里的口令无法被读取或复用；若要改用后台配置，请重新填写一次 SMTP 口令（授权码）'
+      : '首次配置必须填写 SMTP 登录口令（授权码）'
+  }
   return ''
 }
 
@@ -643,7 +657,7 @@ onMounted(() => {
           >
             <p class="flex items-center gap-1.5 font-medium">
               <AppIcon :name="emailReady ? 'check' : 'alert'" :size="14" />
-              {{ emailReady ? '邮件通道已就绪' : '邮件通道未配置' }}
+              {{ emailReady ? '邮件通道已就绪（可发信）' : '邮件通道未就绪（无法发信）' }}
             </p>
             <p v-if="emailReady" class="mt-1">发件地址：{{ emailFrom }}</p>
             <p v-else class="mt-1">
@@ -677,17 +691,33 @@ onMounted(() => {
         </div>
 
         <div class="card-pad grid gap-4">
-          <p class="text-xs text-ink-300">{{ smtpSourceText }}</p>
+          <!-- 状态条：站长打开这一页最先要知道的是"邮件通道现在到底能不能发信、用的是哪一套参数"。
+               此前这里只显示一行灰字，来源为环境变量时表单还是空的，看起来像"配置丢了"。 -->
+          <div class="rounded-lg border px-3 py-2.5 text-xs leading-relaxed" :class="smtpStatusClass">
+            <p class="flex items-center gap-1.5 font-medium">
+              <AppIcon :name="smtp?.ready ? 'check' : 'alert'" :size="14" />
+              {{ smtp?.ready ? '邮件通道已就绪（可发信）' : '邮件通道未就绪（无法发信）' }}
+            </p>
+            <p class="mt-1">{{ smtpSourceText }}</p>
+            <p v-if="smtp?.ready" class="mt-0.5">
+              实际使用的服务：<code>{{ smtp?.effective_host }}:{{ smtp?.effective_port }}</code>　发件人：
+              <code>{{ smtp?.effective_from || '—' }}</code>
+            </p>
+            <p v-if="smtpValuesFromEnv" class="mt-1">
+              下面的参数已按<strong>环境变量里的当前配置</strong>回填，方便你核对；口令出于安全不会显示。
+              若要改为在后台维护，请补填口令后勾选「启用后台配置」并保存。
+            </p>
+          </div>
 
           <p v-if="smtpError" class="field-error">{{ smtpError }}</p>
 
           <label class="flex cursor-pointer items-start gap-3">
             <input v-model="smtpEnabled" class="checkbox mt-0.5" type="checkbox" />
             <span>
-              <span class="block text-sm text-ink-100">启用这条后台配置</span>
+              <span class="block text-sm text-ink-100">启用后台配置（覆盖环境变量）</span>
               <span class="mt-0.5 block text-xs leading-relaxed text-ink-400">
-                勾选并保存后，本站将使用下面填写的账号发信（优先于环境变量）；
-                不勾选时回退环境变量，两者都没有则邮件功能不可用。
+                勾选并保存后，本站改用下面这套账号发信，且立即生效（无需重启）；
+                不勾选时继续使用环境变量里的那套（两者都没有则邮件功能不可用）。
               </span>
             </span>
           </label>
@@ -716,7 +746,13 @@ onMounted(() => {
                 class="input input-mono"
                 type="password"
                 autocomplete="new-password"
-                :placeholder="smtpPasswordSet ? '已配置，留空表示不修改' : '请输入 SMTP 授权码'"
+                :placeholder="
+                  smtpPasswordSet
+                    ? '已配置，留空表示不修改'
+                    : smtp?.env_password_set
+                      ? '环境变量已提供口令（不可显示）；改用后台配置请重新填写'
+                      : '请输入 SMTP 授权码'
+                "
               />
               <p class="hint">
                 为安全起见，服务端永不回传已保存的口令；<strong>留空保存即沿用原口令</strong>。

@@ -66,6 +66,20 @@ func TestSMTPConfig_保存即生效且不回传口令(t *testing.T) {
 	if body["effective_host"] != "smtp.base.example.com" {
 		t.Fatalf("生效地址应为环境变量里的地址，实际 %v", body["effective_host"])
 	}
+	// 关键修复点：后台没保存过配置时，表单字段必须回填环境变量的值，
+	// 否则站长打开页面看到一片空白，会误以为"我配好的通道丢了"。
+	if body["host"] != "smtp.base.example.com" {
+		t.Fatalf("host 应回填环境变量的值，实际 %v", body["host"])
+	}
+	if body["from"] != "base@example.com" {
+		t.Fatalf("发件地址应回填环境变量的值，实际 %v", body["from"])
+	}
+	if body["values_from_env"] != true {
+		t.Fatalf("应标记这组值来自环境变量，实际 %v", body["values_from_env"])
+	}
+	if body["env_password_set"] != true {
+		t.Fatalf("应告知环境变量里已有口令，实际 %v", body["env_password_set"])
+	}
 	if _, leaked := body["password"]; leaked {
 		t.Fatal("响应中不得出现 password 字段")
 	}
@@ -164,6 +178,28 @@ func TestSMTPConfig_启用时必填校验(t *testing.T) {
 		`{"host":"","port":465,"username":"","from":"","enabled":false,"password":""}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("未启用时留空应被接受，实际 %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSMTPConfig_改用后台配置时口令必填 覆盖"环境变量有口令但不可复用"的提示。
+//
+// 场景：站长看到回填的环境变量参数后直接勾选启用并保存（口令框留空）。
+// 此时必须给出明确指引，而不是含糊的"口令不能为空"——
+// 否则他会疑惑"环境变量里明明有口令"。
+func TestSMTPConfig_改用后台配置时口令必填(t *testing.T) {
+	fx := newSMTPFixture(t)
+	// 未保存过任何后台配置，只有环境变量兜底（口令在环境变量里）
+	rec, body := doBearerJSON(t, fx.srv, http.MethodPut, "/api/admin/smtp", fx.adminTok,
+		`{"host":"smtp.base.example.com","port":465,"username":"base@example.com",`+
+			`"from":"base@example.com","from_name":"Base","enabled":true,"password":""}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("未填口令且要启用，应返回 400，实际 %d %s", rec.Code, rec.Body.String())
+	}
+	if code := redeemErrorCode(body); code != "smtp_password_required" {
+		t.Fatalf("错误码应为 smtp_password_required，实际 %v", code)
+	}
+	if msg := redeemErrorMessage(body); !strings.Contains(msg, "环境变量") {
+		t.Fatalf("错误信息应说明环境变量口令不可复用，实际 %q", msg)
 	}
 }
 

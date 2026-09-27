@@ -257,6 +257,10 @@ export interface SMTPSettings {
   updated_at: number
   /** 库里是否已保存口令（用于提示"留空即沿用"） */
   password_set: boolean
+  /** 上面这组参数是否来自环境变量回填（而非后台保存过的配置） */
+  values_from_env: boolean
+  /** 环境变量里是否提供了口令（口令无法回显，只能给"有没有"） */
+  env_password_set: boolean
   /** 当前实际生效的来源：database / env / none */
   source: 'database' | 'env' | 'none' | string
   /** 此刻是否真的能发信 */
@@ -541,6 +545,18 @@ export interface ChannelTestResult {
   model: string
   message: string
   status_code: number
+  /** 上游响应片段（已截断）；失败时是最有价值的排查线索 */
+  upstream_body?: string
+  /** 本次探测使用的凭据掩码；空表示无凭据可用 */
+  key_masked?: string
+  /** 凭据来源：pool（密钥池）/ single（渠道单密钥） */
+  key_source?: string
+  pool_total?: number
+  pool_available?: number
+  pool_cooling?: number
+  pool_disabled?: number
+  pool_removed?: number
+  pool_exhausted?: number
 }
 
 /* ────────────────────────── 上游渠道类型目录 ────────────────────────── */
