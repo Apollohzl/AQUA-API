@@ -48,7 +48,7 @@ const groups = computed<NavGroup[]>(() => [
     title: t('components.nav.console.billing'),
     items: [
       // 「财务记录」放第一项：它是账务板块的总入口（余额 + 三类流水），
-      // 用户对账先来这里；充值、返利、日志保留各自入口，分别回答"怎么付钱""怎么赚钱""哪次调用有问题"。
+      // 用户对账先来这里；充值、奖励、日志保留各自入口，分别回答"怎么付钱""怎么赚钱""哪次调用有问题"。
       { label: t('components.nav.console.finance'), to: '/console/finance', icon: 'chart' },
       { label: t('components.nav.console.recharge'), to: '/console/recharge', icon: 'wallet' },
       { label: t('components.nav.console.referral'), to: '/console/referral', icon: 'users' },

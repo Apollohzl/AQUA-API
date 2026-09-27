@@ -4,15 +4,15 @@
  *
  * 意图（Why）：
  *   "我的钱去哪儿了"是一个问题，不该分散在四个页面回答。此前用户要看余额去概览、
- *   看充值去充值页、看返利去邀请页、看消费去日志页 —— 对账时要来回翻。
+ *   看充值去充值页、看奖励去邀请页、看消费去日志页 —— 对账时要来回翻。
  *   本页把四件事收在一处：
- *     1) 顶部汇总卡：余额 / 累计充值 / 累计返利 / 累计消费（四个数字一次给全）；
- *     2) 下方三类流水标签页：充值记录、返利明细、消费流水。
+ *     1) 顶部汇总卡：余额 / 累计充值 / 累计奖励 / 累计消费（四个数字一次给全）；
+ *     2) 下方三类流水标签页：充值记录、奖励明细、消费流水。
  *   金额一律按后端配置的兑换比例折算成人民币（见 useQuotaUnit）：
  *   额度是站内计费单位，用户只认钱。
  *
  * 为什么明细不合并成一张表：三类记录的字段与语义完全不同
- *   （订单有支付状态、返利有来源人、消费有模型与 token），
+ *   （订单有支付状态、奖励有来源人、消费有模型与 token），
  *   硬塞进一张表会逼着每行留一半空列，反而更难读。
  *
  * 流转（Flow）：
@@ -39,7 +39,7 @@ import { ORDER_STATUS_PAID, ORDER_STATUS_PENDING } from '@/api/types'
 import { useQuotaUnit } from '@/composables/useQuotaUnit'
 import { formatDateTime, formatNumber } from '@/utils/format'
 
-/** 余额/充值/返利/消费一律按人民币展示（比例来自后端设置，见 useQuotaUnit） */
+/** 余额/充值/奖励/消费一律按人民币展示（比例来自后端设置，见 useQuotaUnit） */
 const { yuanText, quotaText: rawQuotaText, rateText } = useQuotaUnit()
 
 type TabKey = 'orders' | 'rewards' | 'spend'
@@ -51,7 +51,7 @@ interface TabItem {
 
 const TABS: TabItem[] = [
   { key: 'orders', label: '充值记录' },
-  { key: 'rewards', label: '返利明细' },
+  { key: 'rewards', label: '奖励明细' },
   { key: 'spend', label: '消费流水' },
 ]
 
@@ -187,7 +187,7 @@ onMounted(async () => {
       <div>
         <h2 class="page-title">财务记录</h2>
         <p class="page-desc">
-          余额、充值、返利与消费的完整流水都集中在这里，金额以人民币显示。
+          余额、充值、奖励与消费的完整流水都集中在这里，金额以人民币显示。
         </p>
       </div>
       <div class="toolbar">
@@ -220,7 +220,7 @@ onMounted(async () => {
           共 {{ formatNumber(summary?.recharge_count ?? 0) }} 笔已支付订单（退款后自动扣除）
         </p>
       </StatCard>
-      <StatCard label="累计返利" :value="rewardText" icon="users" tone="brand">
+      <StatCard label="累计奖励" :value="rewardText" icon="users" tone="brand">
         <p class="text-xs text-ink-400">邀请好友注册与充值带来的奖励。</p>
       </StatCard>
       <StatCard label="累计消费" :value="usedText" icon="trend" tone="warn">
@@ -249,7 +249,7 @@ onMounted(async () => {
         :empty="!current.loading.value && !current.error.value && current.items.value.length === 0"
         loading-text="正在读取流水…"
         empty-text="暂无记录"
-        empty-hint="完成一笔充值、获得一次返利或发起一次调用后，这里会出现对应记录。"
+        empty-hint="完成一笔充值、获得一次奖励或发起一次调用后，这里会出现对应记录。"
         @retry="current.load()"
       />
 
@@ -286,7 +286,7 @@ onMounted(async () => {
         </table>
       </div>
 
-      <!-- 返利明细 -->
+      <!-- 奖励明细 -->
       <div v-else-if="activeTab === 'rewards' && rewards.items.value.length" class="table-wrap table-cards">
         <table class="data-table">
           <thead>

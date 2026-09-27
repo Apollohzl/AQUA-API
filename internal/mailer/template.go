@@ -108,20 +108,23 @@ func RenderBroadcast(templateKey, siteName string) (subject, htmlBody string, ok
 	}
 }
 
-// billingLineEmail 构造「计费专线上线 + 官方交流群」通知的主题与正文。
+// billingLineEmail 构造「计费专线上线 + 交流群」通知的主题与正文。
 //
-// 两条硬约束（改动文案时必须守住）：
-//  1. 正文【不出现任何网址/超链接】，包括本官网域名 —— 运营要求"引导用户前往官网"
+// 三条硬约束（改动文案时必须守住）：
+//  1. 正文【不出现任何网址/超链接】，包括本站域名 —— 运营要求"引导用户前往官网"
 //     但不挂链接；同时纯文本对垃圾邮件评分更友好；
 //  2. 不承诺缓存命中折扣（上游实测 cached_tokens 恒为 0），
-//     也不提上游会注入系统提示等实现细节：说了却兑现不了、或把用户劝退，都是负收益。
+//     也不提上游会注入系统提示等实现细节：说了却兑现不了、或把用户劝退，都是负收益；
+//  3. 不使用「官方中转」「厂商官网价 N 折」「高速稳定」等表述 —— 这类措辞涉及
+//     与厂商关系的暗示、绝对化宣传，是邮件与页面被投诉/被要求整改的高频触发点。
+//     价格一律表述为"低于标准档位，以模型广场公示为准"。
 func billingLineEmail(siteName string) (subject, htmlBody string, ok bool) {
 	name := html.EscapeString(strings.TrimSpace(siteName))
 	if name == "" {
 		name = "AQUA-API"
 	}
 
-	subject = fmt.Sprintf("【%s】高速稳定计费专线已上线（官网价约 6 折）", name)
+	subject = fmt.Sprintf("【%s】计费专线已上线", name)
 
 	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
 <html lang="zh-CN">
@@ -131,21 +134,21 @@ func billingLineEmail(siteName string) (subject, htmlBody string, ok bool) {
     <h1 style="margin:0 0 8px;font-size:18px;font-weight:600;color:#0f172a;">%[1]s</h1>
     <p style="margin:0 0 22px;font-size:13px;color:#64748b;">这是一封站点通知，有两件新东西想告诉你。</p>
 
-    <h2 style="margin:0 0 10px;font-size:15px;font-weight:600;color:#0f172a;">一、高速稳定的计费专线已上线</h2>
+    <h2 style="margin:0 0 10px;font-size:15px;font-weight:600;color:#0f172a;">一、计费专线已上线</h2>
     <p style="margin:0 0 12px;font-size:13px;color:#475569;line-height:1.8;">
-      我们已接入官方中转的计费专线，按量计费、高速稳定，适合生产环境长期使用。
+      计费专线由第三方模型接口服务提供，按量计费，适合生产环境使用。
     </p>
     <ul style="margin:0 0 12px;padding-left:20px;font-size:13px;color:#475569;line-height:1.9;">
-      <li>价格约为模型厂商官网价的 <strong>6 折</strong></li>
+      <li>单价低于标准档位，具体以「模型广场」公示的价格为准</li>
       <li>首期覆盖 7 个主力模型，对外名称统一带 <code style="font-family:Consolas,monospace;">AQUA/</code> 前缀：
         deepseek-v4-flash、deepseek-v4-pro、deepseek-v4.1-flash、doubao-seed-2.1-turbo、
         doubao-seed-evolving、glm-5.3、glm-5.3-flash</li>
-      <li>按上游返回的实际用量结算：输入与输出分别计价，每一笔都能在「调用日志」里
+      <li>按服务端返回的实际用量结算：输入与输出分别计价，每一笔都能在「调用日志」里
         查到输入 / 输出 token 与扣费金额</li>
-      <li>原有「免费公益」分组保持不变、照常可用；计费专线是多出来的一个选择，不影响你现在的调用</li>
+      <li>原有免费分组保持不变、照常可用；计费专线是多出来的一个选择，不影响你现在的调用</li>
     </ul>
     <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:0 0 8px;">
-      <div style="font-size:12px;color:#64748b;letter-spacing:.5px;margin-bottom:8px;">怎么开始用（在官网操作，三步）</div>
+      <div style="font-size:12px;color:#64748b;letter-spacing:.5px;margin-bottom:8px;">怎么开始用（在站点操作，三步）</div>
       <ol style="margin:0;padding-left:20px;font-size:13px;color:#0f172a;line-height:1.9;">
         <li>进入「访问令牌」页，新建一个访问令牌</li>
         <li>把新令牌的「所属分组」选为「计费专线」</li>
@@ -154,12 +157,12 @@ func billingLineEmail(siteName string) (subject, htmlBody string, ok bool) {
     </div>
     <p style="margin:8px 0 22px;font-size:12px;color:#94a3b8;line-height:1.7;">
       建议新建令牌而不是改现有的那一个：免费与计费并存，方便对比，也方便随时切回去。
-      各模型的详细价格与全部可用模型，请在官网「模型广场」查看。
+      各模型的详细价格与全部可用模型，请在「模型广场」查看。
     </p>
 
-    <h2 style="margin:0 0 10px;font-size:15px;font-weight:600;color:#0f172a;">二、官方交流群已开通</h2>
+    <h2 style="margin:0 0 10px;font-size:15px;font-weight:600;color:#0f172a;">二、交流群已开通</h2>
     <p style="margin:0 0 10px;font-size:13px;color:#475569;line-height:1.8;">
-      官网首页新增了「加入交流群」入口，点进去可以看到两个 QQ 群的群号与入群入口。
+      站点首页新增了「加入交流群」入口，点进去可以看到两个 QQ 群的群号与入群入口。
     </p>
     <ul style="margin:0 0 10px;padding-left:20px;font-size:13px;color:#475569;line-height:1.9;">
       <li>主群（AQUA开源项目交流群）：<strong style="font-family:Consolas,monospace;">1103667832</strong></li>

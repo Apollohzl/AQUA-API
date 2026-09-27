@@ -425,7 +425,7 @@ const knownTokenHint = computed(() => {
             </span>
             <p class="text-sm font-medium text-ink-200">粘贴令牌并选择模型后开始对话</p>
             <p class="max-w-md text-xs leading-relaxed text-ink-400">
-              上游返回的真实错误会被原样展示，便于定位是令牌、模型还是上游的问题。
+              服务端返回的真实错误会被原样展示，便于定位是令牌、模型还是线路的问题。
             </p>
           </div>
 
@@ -448,6 +448,15 @@ const knownTokenHint = computed(() => {
             </div>
           </div>
         </div>
+
+        <!-- AI 生成内容标识：按《人工智能生成合成内容标识办法》，模型输出须明示为 AI 生成 -->
+        <p
+          v-if="messages.some((m) => m.role === 'assistant' && m.content.trim())"
+          class="mx-5 mb-2 flex items-start gap-2 rounded-lg border border-ink-800 bg-ink-850/60 px-3 py-2 text-[11px] leading-relaxed text-ink-400"
+        >
+          <AppIcon name="alert" :size="13" class="mt-0.5 shrink-0" />
+          <span>以上内容由人工智能模型生成，仅供参考，请自行核实；请勿用于违法用途或直接作为专业决策依据。</span>
+        </p>
 
         <!-- 错误：原样展示上游/网关返回的信息 -->
         <p

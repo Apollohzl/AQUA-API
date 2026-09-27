@@ -4,8 +4,11 @@
 //   - 正文【不含任何网址/超链接】：这是运营给出的硬要求（引导去官网但不挂链接），
 //     同时纯文本对垃圾邮件评分更友好；一旦有人在改文案时顺手贴了个链接，
 //     本用例会立刻拦住；
-//   - 关键信息必须在：6 折、7 个模型名、三步操作、两个群号 —— 少一个，
+//   - 关键信息必须在：计费专线、7 个模型名、三步操作、两个群号 —— 少一个，
 //     用户收到的就是一封"说了等于没说"的通知，而群发发了就收不回来；
+//   - 【合规红线】：不得出现「官方中转」「厂商官网价」「高速稳定」等表述 ——
+//     这类措辞涉及与厂商关系的暗示与绝对化宣传，是邮件被投诉/被要求整改的高频触发点，
+//     用测试把它钉死，避免以后改文案时又被加回来；
 //   - 站点名必须转义：它来自后台设置，属于半可信输入。
 package mailer
 
@@ -46,23 +49,30 @@ func TestRenderBroadcast_计费专线通知关键信息齐全且无链接(t *tes
 		t.Fatal("计费专线模板应可渲染")
 	}
 
-	if !strings.Contains(subject, "AQUA-API") || !strings.Contains(subject, "6 折") {
-		t.Errorf("主题应含站点名与利益点，实际 %q", subject)
+	if !strings.Contains(subject, "AQUA-API") || !strings.Contains(subject, "计费专线") {
+		t.Errorf("主题应含站点名与核心信息（计费专线已上线），实际 %q", subject)
 	}
 
 	// 关键信息逐项核对（每一项缺失都会让通知失去意义）
 	required := []string{
-		"高速稳定", "6 折",
+		"计费专线", "模型广场",
 		"deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4.1-flash",
 		"doubao-seed-2.1-turbo", "doubao-seed-evolving",
 		"glm-5.3", "glm-5.3-flash",
-		"访问令牌", "所属分组", "计费专线",
-		"免费公益",
+		"访问令牌", "所属分组",
+		"免费分组",
 		"1103667832", "1006740220",
 	}
 	for _, want := range required {
 		if !strings.Contains(body, want) {
 			t.Errorf("正文缺少关键信息 %q", want)
+		}
+	}
+
+	// 合规红线：这些措辞会暗示与厂商的关系或构成绝对化宣传，一旦出现即视为回归
+	for _, banned := range []string{"官方中转", "官网价", "高速稳定", "免费公益"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("正文不应出现 %q（合规红线：暗示官方关系或绝对化宣传）", banned)
 		}
 	}
 

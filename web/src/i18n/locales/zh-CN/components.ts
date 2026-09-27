@@ -157,11 +157,11 @@ export default {
   },
   modelDetail: {
     subtitle: '模型详情与调用方式。价格均为每 100 万 token 的额度消耗，按次计费的模型单独标注。',
-    upstreamVendor: '上游厂商：',
-    channelSupport: ' · {count} 个渠道支持',
+    upstreamVendor: '模型厂商：',
+    channelSupport: ' · {count} 条线路可用',
     available: '当前可用',
-    unavailable: '未接入渠道',
-    unavailableHint: '该模型暂无启用中的上游渠道，调用会立即返回 503。请在后台「渠道管理」里为它配置渠道。',
+    unavailable: '暂不可用',
+    unavailableHint: '该模型当前暂不可用，线路正在调整中；请稍后再试或选择其他模型。',
     groupsAndPrices: '分组与价格',
     col: {
       group: '分组',
@@ -190,7 +190,7 @@ export default {
     availableCount: '{count} 个当前可用',
     modelGroups: '模型分组',
     allGroups: '全部分组',
-    upstreamVendors: '上游厂商',
+    upstreamVendors: '模型厂商',
     allVendors: '全部厂商',
     availability: '可用状态',
     status: {
@@ -269,7 +269,7 @@ export default {
       finance: '财务记录',
       recharge: '账户充值',
       logs: '调用日志',
-      referral: '邀请返利',
+      referral: '邀请奖励',
     },
   },
 }

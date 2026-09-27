@@ -1,16 +1,16 @@
 <script setup lang="ts">
 /**
- * 用户门户 · 邀请返利 & 每日签到。
+ * 用户门户 · 邀请奖励 & 每日签到。
  *
  * 意图（Why）：
  *   把"拉新"与"留存"两件事放在同一页：
- *     1) 邀请卡片让用户一眼拿到自己的邀请码与邀请链接，并看到邀请人数与累计返利；
+ *     1) 邀请卡片让用户一眼拿到自己的邀请码与邀请链接，并看到邀请人数与累计奖励；
  *     2) 签到卡片把"今天签没签、连续几天、累计多少"讲清楚，并给一个明确的签到按钮。
- *   额度奖励的发放规则（注册奖、返利比例）完全由后端设置决定，前端只做展示，
+ *   额度奖励的发放规则（注册奖、充值奖励比例）完全由后端设置决定，前端只做展示，
  *   避免把规则复制到前端后与后端失配。
  *
  * 流转（Flow）：
- *   onMounted → fetchReferral() → 渲染邀请码/链接/人数/累计返利 + 签到概况
+ *   onMounted → fetchReferral() → 渲染邀请码/链接/人数/累计奖励 + 签到概况
  *   点击签到 → checkin() → 用返回的最新状态刷新签到卡片（无需再发一次查询）
  *
  * 扩展（Extend）：
@@ -29,7 +29,7 @@ import { toastError, toastSuccess } from '@/composables/useToast'
 import { useQuotaUnit } from '@/composables/useQuotaUnit'
 import { formatNumber } from '@/utils/format'
 
-/** 奖励与返利一律按人民币展示（比例来自后端设置，见 useQuotaUnit） */
+/** 奖励一律按人民币展示（比例来自后端设置，见 useQuotaUnit） */
 const { yuanText } = useQuotaUnit()
 
 const info = ref<ReferralInfo | null>(null)
@@ -47,16 +47,16 @@ const inviteLink = computed(() => {
 /** 页面说明随实际配置变化：没配注册奖时不能承诺"注册即得奖励" */
 const pageDesc = computed(() => {
   if ((info.value?.register_bonus_quota ?? 0) > 0) {
-    return '把邀请链接分享给朋友：对方注册即得奖励，对方充值你还可持续获得返利。'
+    return '把邀请链接分享给朋友：对方注册即得奖励，对方充值你还可持续获得奖励。'
   }
-  return '把邀请链接分享给朋友：好友通过链接注册后，其每笔充值你都能获得返利。'
+  return '把邀请链接分享给朋友：好友通过链接注册后，其每笔充值你都能获得奖励。'
 })
 
-/** 返利规则文案：比例由后端下发，避免前端写死后与后台配置不一致 */
+/** 充值奖励规则文案：比例由后端下发，避免前端写死后与后台配置不一致 */
 const rechargeRuleText = computed(() => {
   const ratio = info.value?.recharge_ratio ?? 0
-  if (ratio <= 0) return '好友每笔充值入账后你会获得返利（当前返利比例未开启）。'
-  return `好友每笔充值入账后，你可获得该笔充值金额的 ${ratio}%（同一笔只返一次）。`
+  if (ratio <= 0) return '好友每笔充值入账后你会获得奖励（当前奖励比例未开启）。'
+  return `好友每笔充值入账后，你可获得该笔充值金额的 ${ratio}%（同一笔只计一次）。`
 })
 
 async function load(): Promise<void> {
@@ -99,13 +99,13 @@ onMounted(load)
   <div class="page">
     <div class="page-head">
       <div>
-        <h2 class="page-title">邀请返利</h2>
+        <h2 class="page-title">邀请奖励</h2>
         <p class="page-desc">{{ pageDesc }}</p>
       </div>
       <div class="toolbar">
         <RouterLink to="/console/finance" class="btn btn-secondary btn-sm">
           <AppIcon name="chart" :size="14" />
-          查看返利明细
+          查看奖励明细
         </RouterLink>
         <RouterLink to="/console" class="btn btn-secondary btn-sm">
           <AppIcon name="home" :size="14" />
@@ -143,7 +143,7 @@ onMounted(load)
             <CopyButton :value="inviteLink" label="复制" small outline />
           </div>
           <p class="hint">
-            好友通过该链接注册即视为你的邀请；注册奖励与充值返利由管理员在后台配置。
+            好友通过该链接注册即视为你的邀请；注册奖励与充值奖励由管理员在后台配置。
           </p>
         </div>
 
@@ -153,7 +153,7 @@ onMounted(load)
             <p class="mt-1 font-mono text-xl font-semibold text-ink-100">{{ formatNumber(info.invited_count) }}</p>
           </div>
           <div class="rounded-lg border border-ink-800 px-3 py-3">
-            <p class="text-xs text-ink-500">累计返利</p>
+            <p class="text-xs text-ink-500">累计奖励</p>
             <p class="mt-1 font-mono text-xl font-semibold text-brand-700">{{ yuanText(info.total_reward_quota) }}</p>
           </div>
         </div>
