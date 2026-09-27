@@ -60,6 +60,26 @@ export function formatQuota(remain: number | null | undefined, unlimited?: boole
   return formatNumber(remain)
 }
 
+/**
+ * 「分」→「元」（数值），配合 formatCurrency 展示。
+ *
+ * 为什么金额用整数「分」在前后端之间传递：浮点比较会出现
+ * 99.99999 < 100 这类假性未达标（分组解锁门槛正是按金额比较的），
+ * 因此换算只在展示/输入的边界上做，中间一律保持整数分。与后端
+ * model.FormatCents 同口径。
+ */
+export function centsToYuan(cents: number | null | undefined): number {
+  const value = Number(cents ?? 0)
+  return Number.isFinite(value) ? value / 100 : 0
+}
+
+/** 「元」→ 整数「分」；非法或负值返回 null（由调用方提示，不静默当 0）。 */
+export function yuanToCents(raw: string | number): number | null {
+  const value = Number(String(raw).trim())
+  if (!Number.isFinite(value) || value < 0) return null
+  return Math.round(value * 100)
+}
+
 /** 解析输入框里的模型列表：支持中英文逗号、空格、换行分隔 */
 export function parseModelList(input: string): string[] {
   return input

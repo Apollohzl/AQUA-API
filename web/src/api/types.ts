@@ -1118,6 +1118,13 @@ export interface ModelGroup {
   ratio: number
   description: string
   enabled: boolean
+  /**
+   * 解锁本分组所需的累计充值（单位：分，0 = 无门槛）。
+   *
+   * 后端以「分」为整数存储与传输，避免浮点比较出现 99.99999 < 100 的假性未达标；
+   * 展示与输入由前端换算成元（见 formatCents / yuanToCents）。
+   */
+  unlock_min_recharge_cents: number
   /** 引用统计：界面上据此提示「该分组正在被使用，删除会影响 N 个渠道」 */
   channel_count: number
   price_count: number
@@ -1131,6 +1138,8 @@ export interface ModelGroupPayload {
   ratio?: number
   description?: string
   enabled?: boolean
+  /** 解锁门槛（分）。不传 = 保持原值，传 0 = 清除门槛。 */
+  unlock_min_recharge_cents?: number
 }
 
 /* ────────────────────────── 模型广场（公开） ────────────────────────── */
@@ -1176,6 +1185,34 @@ export interface ModelPlaza {
   items: PlazaModel[]
   groups: PlazaGroup[]
   total: number
+}
+
+/* ─────────────────── 门户可选分组（GET /api/user/groups） ─────────────────── */
+
+/**
+ * 门户侧（创建令牌时「所属分组」下拉）看到的分组。
+ *
+ * 与广场的 PlazaGroup 的区别：这里带「当前用户是否已解锁」的判断，
+ * 因此必须登录后才能拿到——未解锁的分组仍会下发（前端置灰并提示差多少），
+ * 而不是直接隐藏：让用户看见"充值能拿到更低价格"本身就是转化引导。
+ */
+export interface PortalGroup {
+  name: string
+  label: string
+  ratio: number
+  description: string
+  /** 解锁所需的累计充值（分，0 = 无门槛） */
+  unlock_min_recharge_cents: number
+  /** 当前用户是否已解锁（无门槛时恒为 true） */
+  unlocked: boolean
+  /** 当前用户的累计充值（分），用于显示"还差多少解锁" */
+  paid_amount_cents: number
+}
+
+/** GET /api/user/groups 响应 */
+export interface MyGroupsResponse {
+  items: PortalGroup[]
+  paid_amount_cents: number
 }
 
 /* ────────────────────────── 异步任务 ────────────────────────── */

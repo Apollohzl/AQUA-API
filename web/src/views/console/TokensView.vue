@@ -25,15 +25,15 @@ import OneTimeKeyDialog from '@/components/OneTimeKeyDialog.vue'
 import Pagination from '@/components/Pagination.vue'
 import TokenFormFields from '@/components/TokenFormFields.vue'
 import { ApiError } from '@/api/client'
-import { createMyToken, deleteMyToken, listAvailableGroups, listMyTokens, updateMyToken } from '@/api/portal'
-import { STATUS_DISABLED, STATUS_ENABLED, type AccessToken, type PlazaGroup } from '@/api/types'
+import { createMyToken, deleteMyToken, listMyGroups, listMyTokens, updateMyToken } from '@/api/portal'
+import { STATUS_DISABLED, STATUS_ENABLED, type AccessToken, type PortalGroup } from '@/api/types'
 import { confirmDialog } from '@/composables/useConfirm'
 import { emptyTokenForm, toTokenPayload, validateTokenForm, type TokenFormState } from '@/composables/tokenForm'
 import { toastError, toastSuccess } from '@/composables/useToast'
 import { useQuotaUnit } from '@/composables/useQuotaUnit'
 import { useSiteStore } from '@/stores/site'
 import { statusBadgeClass } from '@/utils/display'
-import { formatDateTime, formatExpiry } from '@/utils/format'
+import { formatCurrency, formatDateTime, formatExpiry, centsToYuan } from '@/utils/format'
 
 const site = useSiteStore()
 
@@ -84,11 +84,13 @@ function changeSize(next: number): void {
 /* ── 分组列表（供「所属分组」选择）─────────────────────── */
 
 /**
- * 分组选项：门户端没有后台的分组接口权限，改用公开的模型广场接口
- * （见 api/portal.ts 的 listAvailableGroups，返回 name/label/ratio）。
+ * 分组选项：来自门户接口 GET /api/user/groups，它带回了「当前用户是否已解锁」
+ * （见 api/portal.ts 的 listMyGroups）。
+ * 未解锁的分组不隐藏、只置灰并说明还差多少——让用户看到"充值能拿到更低价格"
+ * 本身就是转化引导，隐藏起来则只剩困惑。
  * 惰性加载：仅在首次打开创建弹窗时拉取，避免页面加载即多一次请求。
  */
-const groups = ref<PlazaGroup[]>([])
+const groups = ref<PortalGroup[]>([])
 const groupsLoading = ref(false)
 let groupsLoaded = false
 
@@ -96,7 +98,8 @@ async function loadGroups(): Promise<void> {
   if (groupsLoaded || groupsLoading.value) return
   groupsLoading.value = true
   try {
-    groups.value = await listAvailableGroups()
+    const result = await listMyGroups()
+    groups.value = result.items ?? []
     groupsLoaded = true
   } catch (err) {
     toastError(err instanceof ApiError ? err.message : '分组列表加载失败，将只能使用默认分组')
@@ -105,14 +108,17 @@ async function loadGroups(): Promise<void> {
   }
 }
 
-/** 分组下拉文案：优先展示名，缺省回退标识 */
-function groupText(group: PlazaGroup): string {
-  return group.label || group.name
-}
-
-/** 倍率展示：ratio 为百分比整数（100 = 1.0 倍） */
-function groupRatioText(ratio: number): string {
-  return (ratio / 100).toFixed(1)
+/**
+ * 分组下拉项文案：展示名 + 倍率 +（未解锁时）还差多少。
+ *
+ * ratio 是百分比整数（100 = 1.0 倍）；门槛与已充金额都是「分」，
+ * 展示前用 centsToYuan 换算，避免在组件里散落 /100。
+ */
+function groupOptionText(group: PortalGroup): string {
+  const base = `${group.label || group.name}（${(group.ratio / 100).toFixed(1)} 倍）`
+  if (group.unlocked) return base
+  const gap = Math.max(group.unlock_min_recharge_cents - group.paid_amount_cents, 0)
+  return `${base} · 未解锁，还需充值 ${formatCurrency(centsToYuan(gap))}`
 }
 
 /* ── 创建 ─────────────────────────────────────────────── */
@@ -404,8 +410,9 @@ const isEmpty = computed(() => !loading.value && !error.value && tokens.value.le
         <label class="label" for="token-group">所属分组</label>
         <select id="token-group" v-model="groupName" class="input max-w-[20rem]" :disabled="groupsLoading">
           <option value="">{{ groupsLoading ? '正在加载分组…' : '默认分组（不指定）' }}</option>
-          <option v-for="group in groups" :key="group.name" :value="group.name">
-            {{ groupText(group) }}（{{ groupRatioText(group.ratio) }} 倍）
+          <!-- 未解锁的分组置灰不可选：后端也会拒绝，置灰只是避免"选了才被拒"的挫败感 -->
+          <option v-for="group in groups" :key="group.name" :value="group.name" :disabled="!group.unlocked">
+            {{ groupOptionText(group) }}
           </option>
         </select>
         <p class="hint">分组决定该令牌可用的渠道与计费倍率；不指定时使用网关默认分组。</p>

@@ -13,7 +13,6 @@
  *   注意：创建令牌会返回一次性明文 key，函数返回类型必须是 CreateTokenResult。
  */
 import { api } from './client'
-import { fetchModelPlaza } from './site'
 import type {
   AccessToken,
   CreateOrderPayload,
@@ -21,10 +20,10 @@ import type {
   CreateTokenResult,
   FinanceSummary,
   LogQuery,
+  MyGroupsResponse,
   OrderQuery,
   Paged,
   PaymentOrder,
-  PlazaGroup,
   Task,
   TaskQuery,
   UpdateTokenPayload,
@@ -53,17 +52,16 @@ export function deleteMyToken(id: number): Promise<unknown> {
 }
 
 /**
- * 读取门户可用的分组清单（用于创建令牌时选择「所属分组」）。
+ * 读取门户可选的分组（用于创建令牌时选择「所属分组」）。
  *
- * 为什么复用公开的模型广场接口：门户端没有后台的 GET /api/admin/groups 权限，
- * 而模型广场（GET /api/models）本就对登录用户开放，且已经带回了
- * 分组的 name / label / ratio——正好是下拉所需的全部信息。
- * 代价是只列出「有模型且已启用」的分组；这正是给用户选择时想要的口径
- * （没有模型的分组选了也调不通）。
+ * 为什么不用公开的模型广场（GET /api/models）：广场不知道"你是谁"，
+ * 无法告诉前端"这个分组你还没解锁"。带门槛的分组（如大客户价）如果
+ * 不置灰，用户会选进去然后被后端 403，体验上等同于"界面骗人"。
+ * 注意：前端置灰只是体验，真正的闸门在服务端（创建/更新令牌时校验），
+ * 否则直接调接口就能绕过去。
  */
-export async function listAvailableGroups(): Promise<PlazaGroup[]> {
-  const plaza = await fetchModelPlaza()
-  return plaza.groups ?? []
+export function listMyGroups(): Promise<MyGroupsResponse> {
+  return api.get<MyGroupsResponse>('/user/groups')
 }
 
 /** GET /api/user/usage?days=7：我的用量统计（days 由页面控件决定） */

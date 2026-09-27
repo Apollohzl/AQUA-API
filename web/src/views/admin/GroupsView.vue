@@ -29,7 +29,7 @@ import { createGroup, deleteGroup, listGroups, updateGroup } from '@/api/admin'
 import type { ModelGroup } from '@/api/types'
 import { confirmDialog } from '@/composables/useConfirm'
 import { toastError, toastSuccess } from '@/composables/useToast'
-import { formatDateTime } from '@/utils/format'
+import { formatCurrency, formatDateTime, centsToYuan, yuanToCents } from '@/utils/format'
 
 const groups = ref<ModelGroup[]>([])
 const loading = ref(true)
@@ -48,6 +48,12 @@ const form = ref({
   ratioText: '100',
   description: '',
   enabled: true,
+  /**
+   * 解锁门槛（元，字符串承载）。0 = 无门槛；大于 0 时，只有累计充值达标的用户
+   * 才能把访问令牌挂到该分组。这是"低价分组只给大客户"唯一能被强制执行的配置
+   * （令牌分组是用户自选的，不设门槛等于对所有人开放最低折扣）。
+   */
+  unlockYuanText: '0',
 })
 
 /** 倍率预览：把百分比换算成人话，避免管理员填错单位 */
@@ -55,6 +61,14 @@ const ratioPreview = computed(() => {
   const ratio = Number(form.value.ratioText)
   if (!Number.isFinite(ratio) || ratio <= 0) return '请输入大于 0 的数字'
   return `实际扣费 = 基础额度 × ${(ratio / 100).toFixed(2)}`
+})
+
+/** 解锁门槛预览：明确 0 的含义，避免管理员把"0 元"误读成"充 0 元才能用" */
+const unlockPreview = computed(() => {
+  const cents = yuanToCents(form.value.unlockYuanText || '0')
+  if (cents === null) return '请输入不小于 0 的金额（元）'
+  if (cents === 0) return '不设门槛：所有用户都能把令牌挂到该分组'
+  return `累计充值满 ${formatCurrency(centsToYuan(cents))} 的用户才能把令牌挂到该分组`
 })
 
 async function load(): Promise<void> {
@@ -77,7 +91,7 @@ onMounted(load)
 function openCreate(): void {
   editing.value = null
   formError.value = ''
-  form.value = { name: '', display_name: '', ratioText: '100', description: '', enabled: true }
+  form.value = { name: '', display_name: '', ratioText: '100', description: '', enabled: true, unlockYuanText: '0' }
   formOpen.value = true
 }
 
@@ -91,6 +105,7 @@ function openEdit(group: ModelGroup): void {
     ratioText: String(group.ratio),
     description: group.description,
     enabled: group.enabled,
+    unlockYuanText: String(centsToYuan(group.unlock_min_recharge_cents)),
   }
   formOpen.value = true
 }
@@ -105,6 +120,13 @@ async function submit(): Promise<void> {
     formError.value = '分组标识不能为空'
     return
   }
+  // 门槛以「分」提交：金额一旦经过浮点就可能出现 99.99999 < 100 的假性未达标，
+  // 因此换算只在这里做一次，之后全链路都是整数分。
+  const unlockCents = yuanToCents(form.value.unlockYuanText || '0')
+  if (unlockCents === null) {
+    formError.value = '解锁门槛必须是不小于 0 的金额（元），0 表示无门槛'
+    return
+  }
 
   saving.value = true
   formError.value = ''
@@ -115,6 +137,7 @@ async function submit(): Promise<void> {
         ratio: Math.round(ratio),
         description: form.value.description.trim(),
         enabled: form.value.enabled,
+        unlock_min_recharge_cents: unlockCents,
       })
       toastSuccess(`分组「${editing.value.label}」已更新，新倍率立即生效`)
     } else {
@@ -124,6 +147,7 @@ async function submit(): Promise<void> {
         ratio: Math.round(ratio),
         description: form.value.description.trim(),
         enabled: form.value.enabled,
+        unlock_min_recharge_cents: unlockCents,
       })
       toastSuccess(`分组「${created.label}」已创建`)
     }
@@ -165,6 +189,12 @@ function ratioBadgeClass(ratio: number): string {
 function ratioText(ratio: number): string {
   return `${(ratio / 100).toFixed(2)}x`
 }
+
+/** 解锁门槛展示：0 显示为「无门槛」，否则显示金额，让管理员一眼看出哪个分组在挡人 */
+function unlockText(group: ModelGroup): string {
+  if (group.unlock_min_recharge_cents <= 0) return '无门槛'
+  return `充值满 ${formatCurrency(centsToYuan(group.unlock_min_recharge_cents))}`
+}
 </script>
 
 <template>
@@ -195,6 +225,7 @@ function ratioText(ratio: number): string {
           <tr>
             <th>分组</th>
             <th>倍率</th>
+            <th>解锁门槛</th>
             <th>说明</th>
             <th>引用情况</th>
             <th>状态</th>
@@ -207,7 +238,7 @@ function ratioText(ratio: number): string {
             :loading="loading"
             :error="error"
             :empty="!loading && !error && groups.length === 0"
-            :colspan="7"
+            :colspan="8"
             loading-text="正在读取分组…"
             empty-text="还没有任何分组"
             empty-hint="默认分组由系统初始化。点击「新建分组」可以创建面向不同人群的分组。"
@@ -224,6 +255,7 @@ function ratioText(ratio: number): string {
             <td data-label="倍率">
               <span :class="ratioBadgeClass(group.ratio)">{{ ratioText(group.ratio) }}</span>
             </td>
+            <td class="cell-muted" data-label="解锁门槛">{{ unlockText(group) }}</td>
             <td class="cell-muted max-w-[16rem]" data-label="说明">
               <span class="line-clamp-2">{{ group.description || '—' }}</span>
             </td>
@@ -300,6 +332,12 @@ function ratioText(ratio: number): string {
           <label class="label" for="group-ratio">计费倍率（百分比）</label>
           <input id="group-ratio" v-model="form.ratioText" class="input" type="number" min="1" step="1" />
           <p class="hint">{{ ratioPreview }}（倍率只影响扣费，不改变上游实际用量）</p>
+        </div>
+
+        <div>
+          <label class="label" for="group-unlock">解锁门槛（元）</label>
+          <input id="group-unlock" v-model="form.unlockYuanText" class="input" type="number" min="0" step="0.01" />
+          <p class="hint">{{ unlockPreview }}</p>
         </div>
 
         <div>
