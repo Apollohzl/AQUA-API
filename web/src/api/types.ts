@@ -291,7 +291,15 @@ export interface Channel {
   masked_key: string
   /** 空数组表示「支持全部模型」（M2 过渡约定） */
   models: string[]
+  /** 主分组（= groups 的第一项），用于展示与分组统计 */
   group: string
+  /**
+   * 本渠道可服务的全部分组（多选；后端保证非空，第一项即主分组）。
+   *
+   * 路由按令牌分组匹配渠道：列在这里的分组都能路由到本渠道，
+   * 因此"一个渠道同时服务免费组与自营组"无需建两个渠道。
+   */
+  groups: string[]
   priority: number
   weight: number
   /**
@@ -486,6 +494,13 @@ export interface ChannelPayload {
   base_url: string
   api_key?: string
   models: string[]
+  /**
+   * 服务分组清单（多选，至少一项；第一项为主分组）。
+   *
+   * 提交它即以它为准，后端会把 group 归一等同于 groups[0]。
+   * 未提交时后端按单分组 group 处理（兼容旧客户端）。
+   */
+  groups?: string[]
   group: string
   priority: number
   weight: number

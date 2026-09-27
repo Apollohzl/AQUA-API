@@ -361,6 +361,27 @@ function humanizeSeconds(seconds: number): string {
   return `${value} 秒`
 }
 
+/* ── 渠道分组（多选）──────────────────────────────────── */
+
+/** 新增分组的输入草稿：既可从已有分组里选，也可手打一个尚未在「模型分组」页建的分组名 */
+const newGroupName = ref('')
+
+/** 追加一个分组（去空白、去重；已存在则只清空输入框） */
+function addGroup(name: string): void {
+  const value = name.trim()
+  if (!value) return
+  if (!form.value.groups.some((item) => item.trim() === value)) {
+    form.value.groups = [...form.value.groups, value]
+  }
+  newGroupName.value = ''
+}
+
+/** 移除一个分组；至少保留一项（不属于任何分组的渠道永远不会被选中） */
+function removeGroup(index: number): void {
+  if (form.value.groups.length <= 1) return
+  form.value.groups = form.value.groups.filter((_, i) => i !== index)
+}
+
 /**
  * 分组候选：来源于「模型分组」页。
  *
@@ -498,7 +519,14 @@ interface ChannelForm {
    */
   keysText: string
   modelText: string
-  group: string
+  /**
+   * 本渠道可服务的分组清单（多选，至少一项；第一项是「主分组」）。
+   *
+   * 为什么是多选：同一上游常要同时服务免费用户与付费用户；只能选一个分组时，
+   * 拿着另一个分组的令牌调用会因"没有候选渠道"直接 503（线上实测过）。
+   * 主分组只影响展示与统计口径，路由匹配看整个清单。
+   */
+  groups: string[]
   priority: number
   weight: number
   status: number
@@ -524,7 +552,7 @@ function emptyChannelForm(): ChannelForm {
     api_key: '',
     keysText: '',
     modelText: '',
-    group: 'default',
+    groups: ['default'],
     priority: 10,
     weight: 1,
     status: STATUS_ENABLED,
@@ -586,7 +614,7 @@ async function openEdit(channel: Channel): Promise<void> {
     api_key: '',
     keysText: '',
     modelText: joinModelList(channel.models),
-    group: channel.group || 'default',
+    groups: channel.groups?.length ? [...channel.groups] : [channel.group || 'default'],
     priority: channel.priority,
     weight: channel.weight,
     status: channel.status,
@@ -611,7 +639,7 @@ async function openEdit(channel: Channel): Promise<void> {
       api_key: '',
       keysText: '',
       modelText: joinModelList(detail.models),
-      group: detail.group || 'default',
+      groups: detail.groups?.length ? [...detail.groups] : [detail.group || 'default'],
       priority: detail.priority,
       weight: detail.weight,
       status: detail.status,
@@ -638,6 +666,11 @@ function validateForm(): string | null {
   }
   if (form.value.priority < 0) return '优先级不能为负数'
   if (form.value.weight <= 0) return '权重必须大于 0'
+  // 分组：至少一项且不能为空串。不属于任何分组的渠道既不会被选中，
+  // 也不会出现在任何分组页面里，属于"配了但永远不生效"的静默失效。
+  const groups = form.value.groups.map((name) => name.trim()).filter(Boolean)
+  if (groups.length === 0) return '请至少填写一个分组'
+  if (groups.length !== form.value.groups.length) return '分组名不能为空'
   if (cooldownSecondsInvalid.value) {
     return `密钥冷却时长必须在 0 ~ ${maxCooldownSeconds.value} 秒之间（当前 ${form.value.keyCooldownSeconds}）`
   }
@@ -887,7 +920,9 @@ async function submitForm(): Promise<void> {
     type: Number(form.value.type) || 1,
     base_url: form.value.base_url.trim(),
     models: parseModelList(form.value.modelText),
-    group: form.value.group.trim() || 'default',
+    // 多分组：groups 为准，同时带上主分组 group（= 清单首项）便于旧接口/脚本读取
+    groups: form.value.groups.map((name) => name.trim()).filter(Boolean),
+    group: form.value.groups[0]?.trim() || 'default',
     priority: Number(form.value.priority) || 0,
     weight: Number(form.value.weight) || 1,
     status: form.value.status,
@@ -976,6 +1011,7 @@ async function toggleStatus(channel: Channel): Promise<void> {
       type: channel.type,
       base_url: channel.base_url,
       models: channel.models,
+      groups: channel.groups,
       group: channel.group,
       priority: channel.priority,
       weight: channel.weight,
@@ -1114,7 +1150,14 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
                 <span v-else class="text-xs text-ink-400">全部</span>
               </td>
 
-              <td class="whitespace-nowrap text-ink-300" data-label="分组">{{ channel.group || '—' }}</td>
+              <td class="whitespace-nowrap text-ink-300" data-label="分组">
+                <!-- 多分组渠道逐个展示：只显示主分组会让站长误判"这个渠道没服务另一个分组" -->
+                <span class="flex flex-wrap gap-1">
+                  <span v-for="name in channel.groups?.length ? channel.groups : [channel.group]" :key="name" class="chip">
+                    {{ name }}
+                  </span>
+                </span>
+              </td>
               <td class="cell-num" data-label="优先级">{{ channel.priority }}</td>
               <td class="cell-num" data-label="权重">{{ channel.weight }}</td>
 
@@ -1259,24 +1302,53 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
           </div>
 
           <div>
-            <label class="label" for="channel-group">分组</label>
-            <input
-              id="channel-group"
-              v-model="form.group"
-              class="input input-mono"
-              type="text"
-              list="channel-group-options"
-              placeholder="default"
-            />
-            <!-- 下拉候选来自「模型分组」页：分组名写错会让渠道静默地从路由中消失，
-                 因此这里尽量让管理员从已有分组里选，而不是凭记忆手打。 -->
-            <datalist id="channel-group-options">
-              <option v-for="group in groupOptions" :key="group.name" :value="group.name">
-                {{ group.label }}（{{ (group.ratio / 100).toFixed(2) }}x）
-              </option>
-            </datalist>
+            <label class="label" for="channel-group-new">服务分组（可多选）</label>
+            <!--
+              多分组编辑：每行一个分组，第一项是「主分组」。
+              为什么不做成单选：同一上游常要同时服务免费用户与付费用户，
+              只能选一个分组时，拿着另一个分组的令牌调用会因"没有候选渠道"直接 503。
+            -->
+            <div class="space-y-1.5">
+              <div v-for="(name, index) in form.groups" :key="index" class="flex flex-wrap items-center gap-2">
+                <span class="chip" :class="index === 0 ? 'border-brand-500/50 text-brand-700' : ''">{{ name }}</span>
+                <span v-if="index === 0" class="text-[11px] text-ink-500">主分组（用于展示与统计）</span>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  :disabled="form.groups.length <= 1"
+                  :title="form.groups.length <= 1 ? '至少保留一个分组' : '移除该分组'"
+                  @click="removeGroup(index)"
+                >
+                  <AppIcon name="close" :size="13" />
+                </button>
+              </div>
+            </div>
+
+            <div class="mt-2 flex flex-wrap gap-2">
+              <input
+                id="channel-group-new"
+                v-model="newGroupName"
+                class="input input-mono max-w-[14rem]"
+                type="text"
+                list="channel-group-options"
+                placeholder="选择已有分组或输入新分组名"
+                @keydown.enter.prevent="addGroup(newGroupName)"
+              />
+              <!-- 下拉候选来自「模型分组」页：分组名写错会让渠道静默地从路由中消失，
+                   因此优先让管理员从已有分组里选，而不是凭记忆手打。 -->
+              <datalist id="channel-group-options">
+                <option v-for="group in groupOptions" :key="group.name" :value="group.name">
+                  {{ group.label }}（{{ (group.ratio / 100).toFixed(2) }}x）
+                </option>
+              </datalist>
+              <button type="button" class="btn btn-secondary" @click="addGroup(newGroupName)">
+                <AppIcon name="plus" :size="14" />
+                添加分组
+              </button>
+            </div>
             <p class="hint">
-              用于按业务线隔离渠道；分组倍率在「模型分组」页配置。不确定时保持 default。
+              请求按<strong>令牌的分组</strong>匹配渠道：列在这里的分组都能路由到本渠道。
+              倍率在「模型分组」页配置；不确定时保持 default。主分组仅影响展示与分组统计口径。
             </p>
           </div>
         </div>

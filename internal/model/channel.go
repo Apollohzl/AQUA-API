@@ -104,13 +104,22 @@ type Channel struct {
 	// 语义为"键值字符串对"，与 channeltype.Type.ExtraFields 的 Key 对应；
 	// 落库时序列化为 JSON 对象。协议适配器据此补齐路径占位符与查询参数。
 	ExtraConfig map[string]string
-	BaseURL     string        // 上游基础地址，如 https://api.openai.com
-	APIKey      string        // 上游密钥【明文，仅内存】
-	Models      []string      // 可用模型列表
-	Group       string        // 所属分组，用于按分组路由与计费
-	Priority    int           // 优先级，数值越大越优先
-	Weight      int           // 同优先级内的随机权重，需 > 0
-	Status      ChannelStatus // 可用状态
+	BaseURL     string   // 上游基础地址，如 https://api.openai.com
+	APIKey      string   // 上游密钥【明文，仅内存】
+	Models      []string // 可用模型列表
+	Group       string   // 主分组（= Groups 的第一项），用于展示与分组统计
+	// Groups 是本渠道可服务的全部分组（落库于 channels.group_names）。
+	//
+	// 为什么需要多分组：同一上游常常要同时服务免费用户与付费用户，
+	// 或在新分组上线初期先让老渠道覆盖过去。若一个渠道只能属于一个分组，
+	// 用户拿着别的分组的令牌调用时会因"没有候选渠道"直接 503（线上实测过）。
+	//
+	// 约定：为空表示"未显式配置"，此时按 [Group] 单分组处理（既有行为不变）。
+	// 写入路径由仓储保证 Group 恒等于 Groups[0]，不会出现两者互相矛盾。
+	Groups   []string
+	Priority int           // 优先级，数值越大越优先
+	Weight   int           // 同优先级内的随机权重，需 > 0
+	Status   ChannelStatus // 可用状态
 	// KeyStrategy 是本渠道凭据池的调度策略（落库于 channels.key_strategy）。
 	//
 	// 空值在落库时由仓储归一为 DefaultKeyStrategy()（最少在途），
@@ -139,6 +148,65 @@ type Channel struct {
 	// 说明：这是"最近一次"的瞬时结果，不是健康状态本身——
 	// 渠道是否可用要看 Status（自动禁用由健康检查写入）。
 	LastTestOK bool
+}
+
+// GroupList 返回渠道可服务的分组清单（去重、去空白）。
+//
+// 语义：Groups 非空时以它为准；为空则回退为 [Group]（既有单分组数据）。
+// 返回值恒非空——Group 也为空时给一个默认分组名，避免调用方拿到空切片后
+// 在界面上显示成"不属于任何分组"这种不可用状态。
+func (c *Channel) GroupList() []string {
+	if c == nil {
+		return nil
+	}
+	if result := NormalizeGroupNames(c.Groups); len(result) > 0 {
+		return result
+	}
+	if name := strings.TrimSpace(c.Group); name != "" {
+		return []string{name}
+	}
+	return []string{DefaultGroupName}
+}
+
+// NormalizeGroupNames 归一化分组清单：去空白、去空项、去重，并保持输入顺序。
+//
+// 为什么顺序重要：约定"主分组 = 清单第一项"，顺序决定界面与统计里显示哪个名字，
+// 因此不能为了去重而排序。
+func NormalizeGroupNames(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(names))
+	result := make([]string, 0, len(names))
+	for _, raw := range names {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		if _, duplicated := seen[name]; duplicated {
+			continue
+		}
+		seen[name] = struct{}{}
+		result = append(result, name)
+	}
+	return result
+}
+
+// MatchesGroup 判断该渠道是否服务于指定分组。
+//
+// group 为空时视为"不按分组过滤"（与 ChannelQuery.Group 为空不过滤的语义一致），
+// 直接返回 true，避免调用方各自处理空值导致行为漂移。
+func (c *Channel) MatchesGroup(group string) bool {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return true
+	}
+	for _, name := range c.GroupList() {
+		if name == group {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate 校验渠道的必要字段，供创建与更新时调用。

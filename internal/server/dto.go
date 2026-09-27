@@ -120,8 +120,13 @@ type channelDTO struct {
 	MaskedKey   string            `json:"masked_key"`
 	Models      []string          `json:"models"`
 	Group       string            `json:"group"`
-	Priority    int               `json:"priority"`
-	Weight      int               `json:"weight"`
+	// Groups 是本渠道可服务的全部分组（多选；恒非空，主分组为其第一项）。
+	//
+	// 前端用多选控件编辑它；路由匹配以它为准，
+	// 因此"一个渠道同时服务免费组与自营组"这种常见诉求不再需要建两个渠道。
+	Groups   []string `json:"groups"`
+	Priority int      `json:"priority"`
+	Weight   int      `json:"weight"`
 	// KeyStrategy 是凭据池调度策略标识（sequential / round_robin / ...）；
 	// 后端保证恒为合法值（空值已归一为默认策略）。
 	KeyStrategy string `json:"key_strategy"`
@@ -271,8 +276,11 @@ func toChannelDTO(ch *model.Channel) channelDTO {
 		MaskedKey:   ch.MaskedAPIKey(),
 		Models:      models,
 		Group:       ch.Group,
-		Priority:    ch.Priority,
-		Weight:      ch.Weight,
+		// 恒下发非空清单：既有单分组渠道会自动得到 [group]，
+		// 前端因此不必区分"单分组/多分组"两套渲染逻辑。
+		Groups:   ch.GroupList(),
+		Priority: ch.Priority,
+		Weight:   ch.Weight,
 		// 统一下发合法策略：即使库中出现空值/脏值，前端也能拿到默认策略。
 		KeyStrategy:      string(model.NormalizeKeyStrategy(string(ch.KeyStrategy))),
 		KeyFailurePolicy: string(model.NormalizeKeyFailurePolicy(string(ch.KeyFailurePolicy))),

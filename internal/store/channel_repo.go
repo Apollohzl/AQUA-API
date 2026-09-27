@@ -46,7 +46,7 @@ const (
 // channelColumns 集中定义查询列，避免各处手写列名导致顺序错乱。
 //
 // 注意：列顺序必须与 scanChannel 的 Scan 参数顺序严格一致。
-const channelColumns = `id, name, type, type_key, extra_config, base_url, api_key_enc, models, group_name, priority, weight, status, created_at, updated_at, last_test_at, last_test_ok, key_strategy, key_failure_policy, key_cooldown_seconds`
+const channelColumns = `id, name, type, type_key, extra_config, base_url, api_key_enc, models, group_name, group_names, priority, weight, status, created_at, updated_at, last_test_at, last_test_ok, key_strategy, key_failure_policy, key_cooldown_seconds`
 
 // channelRepository 是 model.ChannelRepository 的 SQL 实现。
 //
@@ -82,10 +82,12 @@ func (r *channelRepository) Create(ctx context.Context, ch *model.Channel) error
 
 	res, err := r.db.ExecContext(ctx, `
 		INSERT INTO channels
-			(name, type, type_key, extra_config, base_url, api_key_enc, models, group_name, priority, weight, status, created_at, updated_at, key_strategy, key_failure_policy, key_cooldown_seconds)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(name, type, type_key, extra_config, base_url, api_key_enc, models, group_name, group_names, priority, weight, status, created_at, updated_at, key_strategy, key_failure_policy, key_cooldown_seconds)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ch.Name, ch.Type, ch.TypeKey, encodeExtraConfig(ch.ExtraConfig), ch.BaseURL, encryptedKey, encodeModels(ch.Models),
-		ch.Group, ch.Priority, ch.Weight, int(ch.Status),
+		// 主分组与分组清单一并写入：group_name 用于展示与统计，group_names 是路由匹配依据。
+		// encodeModels 的行为（去空白、去重、CSV）与分组清单所需完全一致，故直接复用。
+		ch.Group, encodeModels(ch.Groups), ch.Priority, ch.Weight, int(ch.Status),
 		ch.CreatedAt.Unix(), ch.UpdatedAt.Unix(),
 		string(model.NormalizeKeyStrategy(string(ch.KeyStrategy))),
 		string(model.NormalizeKeyFailurePolicy(string(ch.KeyFailurePolicy))),
@@ -190,11 +192,11 @@ func (r *channelRepository) Update(ctx context.Context, ch *model.Channel) error
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE channels SET
 			name = ?, type = ?, type_key = ?, extra_config = ?, base_url = ?, api_key_enc = ?, models = ?,
-			group_name = ?, priority = ?, weight = ?, status = ?, updated_at = ?, key_strategy = ?,
+			group_name = ?, group_names = ?, priority = ?, weight = ?, status = ?, updated_at = ?, key_strategy = ?,
 			key_failure_policy = ?, key_cooldown_seconds = ?
 		WHERE id = ?`,
 		ch.Name, ch.Type, ch.TypeKey, encodeExtraConfig(ch.ExtraConfig), ch.BaseURL, encryptedKey, encodeModels(ch.Models),
-		ch.Group, ch.Priority, ch.Weight, int(ch.Status),
+		ch.Group, encodeModels(ch.Groups), ch.Priority, ch.Weight, int(ch.Status),
 		ch.UpdatedAt.Unix(), string(model.NormalizeKeyStrategy(string(ch.KeyStrategy))),
 		string(model.NormalizeKeyFailurePolicy(string(ch.KeyFailurePolicy))),
 		model.NormalizeKeyCooldownSeconds(ch.KeyCooldownSeconds),
@@ -242,8 +244,16 @@ func buildChannelWhere(q model.ChannelQuery) (string, []any) {
 		args       []any
 	)
 	if q.Group != "" {
-		conditions = append(conditions, "group_name = ?")
-		args = append(args, q.Group)
+		// 多分组匹配：请求分组命中「主分组」或「分组清单」中的任意一项即可路由。
+		//
+		// 为什么要同时判两处：group_names 为空表示"未显式配置多分组"，
+		// 此时必须回退到 group_name（既有数据与旧版前端都只写这一列），
+		// 否则升级后所有渠道都会因清单为空而匹配不上，直接全站 503。
+		//
+		// 清单匹配用「前后补逗号 + LIKE」实现：它把 CSV 变成 "…,free,aqua,…" 形式，
+		// 从而避免 free 命中 freebies 这类子串误判；SQLite 与 MySQL 都支持，无需方言分支。
+		conditions = append(conditions, "(group_name = ? OR (',' || group_names || ',') LIKE ?)")
+		args = append(args, q.Group, "%,"+q.Group+",%")
 	}
 	if q.Status != nil {
 		conditions = append(conditions, "status = ?")
@@ -337,6 +347,7 @@ func (r *channelRepository) scanChannel(sc rowScanner) (*model.Channel, error) {
 		encoded     string
 		modelsCSV   string
 		group       string
+		groupNames  string
 		priority    int
 		weight      int
 		status      int
@@ -351,7 +362,7 @@ func (r *channelRepository) scanChannel(sc rowScanner) (*model.Channel, error) {
 	)
 
 	if err := sc.Scan(&id, &name, &channelTy, &typeKey, &extraJSON, &baseURL, &encoded, &modelsCSV,
-		&group, &priority, &weight, &status, &createdAt, &updatedAt,
+		&group, &groupNames, &priority, &weight, &status, &createdAt, &updatedAt,
 		&lastTestAt, &lastTestOK, &keyStrategy,
 		&keyFailurePolicy, &keyCooldownSeconds); err != nil {
 		// sql.ErrNoRows 属于正常控制流，不额外包装，便于调用方用 errors.Is 判断
@@ -376,6 +387,7 @@ func (r *channelRepository) scanChannel(sc rowScanner) (*model.Channel, error) {
 		APIKey:      apiKey,
 		Models:      decodeModels(modelsCSV),
 		Group:       group,
+		Groups:      decodeModels(groupNames), // 与模型清单同为 CSV，解码规则一致故复用
 		Priority:    priority,
 		Weight:      weight,
 		Status:      model.ChannelStatus(status),

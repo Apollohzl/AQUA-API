@@ -641,8 +641,9 @@ func (s *Server) handleListAllModelMappings(c *gin.Context) {
 				ChannelID:     channel.ID,
 				ChannelName:   channel.Name,
 				ChannelStatus: int(channel.Status),
-				Group:         channel.Group,
-				ModelCount:    len(channel.Models),
+				// 渠道可服务多个分组，这里合并展示（界面上是一个 chip，逗号分隔即可读）
+				Group:      strings.Join(channel.GroupList(), ", "),
+				ModelCount: len(channel.Models),
 			})
 			continue
 		}
@@ -652,7 +653,8 @@ func (s *Server) handleListAllModelMappings(c *gin.Context) {
 				ChannelID:     channel.ID,
 				ChannelName:   channel.Name,
 				ChannelStatus: int(channel.Status),
-				Group:         channel.Group,
+				// 同上：多分组渠道合并展示，避免只显示主分组而造成误解
+				Group:         strings.Join(channel.GroupList(), ", "),
 				PublicModel:   m.PublicModel,
 				UpstreamModel: m.UpstreamModel,
 				Priority:      m.Priority,

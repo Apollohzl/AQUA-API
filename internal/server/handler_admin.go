@@ -160,12 +160,19 @@ func (s *Server) handleDashboard(c *gin.Context) {
 // 若用普通 string，就无法区分"没传"与"传了空串"，
 // 结果是管理员只改个名字就把渠道密钥清空了——这类事故很难排查。
 type channelUpsertRequest struct {
-	Name     string   `json:"name"`
-	Type     int      `json:"type"`
-	BaseURL  string   `json:"base_url"`
-	APIKey   *string  `json:"api_key"`
-	Models   []string `json:"models"`
-	Group    string   `json:"group"`
+	Name    string   `json:"name"`
+	Type    int      `json:"type"`
+	BaseURL string   `json:"base_url"`
+	APIKey  *string  `json:"api_key"`
+	Models  []string `json:"models"`
+	Group   string   `json:"group"`
+	// Groups 是本渠道可服务的分组清单（多选）。
+	//
+	// 与 Group 的关系：Groups 是权威值，主分组恒等于 Groups[0]。
+	// 未提交 Groups 时按单分组 Group 处理，兼容只认识 Group 的旧客户端。
+	// 之所以提供多选：同一上游常需同时服务多个用户分组，
+	// 只能选一个分组会让"没有候选渠道"变成 0ms 的 503。
+	Groups   []string `json:"groups"`
 	Priority int      `json:"priority"`
 	Weight   int      `json:"weight"`
 	Status   int      `json:"status"`
@@ -333,7 +340,6 @@ func (s *Server) handleCreateChannel(c *gin.Context) {
 		ExtraConfig: req.ExtraConfig,
 		BaseURL:     strings.TrimSpace(req.BaseURL),
 		Models:      req.Models,
-		Group:       defaultIfEmpty(strings.TrimSpace(req.Group), defaultChannelGroup),
 		Priority:    req.Priority,
 		Weight:      defaultIfZero(req.Weight, 1),
 		Status:      model.ChannelStatus(defaultIfZero(req.Status, int(model.ChannelStatusEnabled))),
@@ -348,6 +354,8 @@ func (s *Server) handleCreateChannel(c *gin.Context) {
 		}
 		channel.KeyCooldownSeconds = *req.KeyCooldownSeconds
 	}
+	// 分组：多选清单为准，主分组恒等于清单第一项（避免两个字段互相矛盾）。
+	channel.Groups, channel.Group = resolveChannelGroups(req.Groups, req.Group)
 	if req.APIKey != nil {
 		channel.APIKey = *req.APIKey
 	}
@@ -483,7 +491,7 @@ func (s *Server) handleUpdateChannel(c *gin.Context) {
 	channel.Type = req.Type
 	channel.BaseURL = strings.TrimSpace(req.BaseURL)
 	channel.Models = req.Models
-	channel.Group = defaultIfEmpty(strings.TrimSpace(req.Group), defaultChannelGroup)
+	channel.Groups, channel.Group = resolveChannelGroups(req.Groups, req.Group)
 	channel.Priority = req.Priority
 	channel.Weight = defaultIfZero(req.Weight, 1)
 	channel.Status = model.ChannelStatus(defaultIfZero(req.Status, int(model.ChannelStatusEnabled)))
@@ -951,6 +959,23 @@ func validateKeyCooldownSeconds(seconds int) error {
 			model.MaxKeyCooldownSeconds)
 	}
 	return nil
+}
+
+// resolveChannelGroups 解析渠道的分组清单，并给出主分组（清单第一项）。
+//
+// 规则（唯一真相，前端与文档据此对齐）：
+//   - 提交了 groups（多选）→ 以它为准，去空白去重、保持顺序；
+//   - 只提交 group（旧客户端）→ 等价于 groups = [group]；
+//   - 两者都没提交 → 落到默认分组 default（与改动前一致）。
+//
+// 返回值恒非空：一个不属于任何分组的渠道既不会被任何请求选中，
+// 也不会出现在任何分组页面里，属于"配了但永远不会生效"的静默失效，必须避免。
+func resolveChannelGroups(groups []string, single string) (list []string, primary string) {
+	normalized := model.NormalizeGroupNames(groups)
+	if len(normalized) == 0 {
+		normalized = []string{defaultIfEmpty(strings.TrimSpace(single), defaultChannelGroup)}
+	}
+	return normalized, normalized[0]
 }
 
 // probeChannel 向渠道发起一次最小请求，用于验证连通与凭据有效性。

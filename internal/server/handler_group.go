@@ -122,7 +122,12 @@ func (s *Server) groupReferenceCounts(ctx context.Context) (map[string]int, map[
 	if s.deps.Channels != nil {
 		if channels, err := s.deps.Channels.List(ctx, model.ChannelQuery{Limit: 500}); err == nil {
 			for _, channel := range channels {
-				channelCounts[channel.Group]++
+				// 一个渠道可服务多个分组，逐个计入（清单恒非空）。
+				// 若只记主分组，多分组渠道在"分组引用统计"里会少算，
+				// 站长可能据此误以为某个分组没有渠道而重复建渠道。
+				for _, name := range channel.GroupList() {
+					channelCounts[name]++
+				}
 			}
 		}
 	}
@@ -519,7 +524,12 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 			if modelGroups[name] == nil {
 				modelGroups[name] = make(map[string]struct{})
 			}
-			modelGroups[name][channel.Group] = struct{}{}
+			// 模型归属的分组 = 提供它的渠道所服务的全部分组。
+			// 多分组渠道必须逐个登记，否则模型广场会漏掉"这个模型在另一个分组也能用"，
+			// 使用者可能误以为在其它分组下不可用。
+			for _, groupName := range channel.GroupList() {
+				modelGroups[name][groupName] = struct{}{}
+			}
 			modelChannelCount[name]++
 		}
 	}
