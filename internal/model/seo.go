@@ -28,7 +28,7 @@ import (
 
 // SEOSettings 是搜索引擎优化相关的站点参数。
 type SEOSettings struct {
-	// SiteURL 是站点公开访问地址（如 https://aqua.ltzy.top），用于生成绝对链接。
+	// SiteURL 是站点公开访问地址（如 https://api.example.com），用于生成绝对链接。
 	SiteURL string
 	// Keywords 是 SEO 关键词。
 	Keywords []string

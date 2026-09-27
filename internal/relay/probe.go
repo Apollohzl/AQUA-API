@@ -107,7 +107,7 @@ func (r *Relay) ProbeChannel(ctx context.Context, ch *model.Channel, apiKey, mod
 	//     api-key / x-api-key / SigV4 / Bearer 都在这里决定）。
 	//
 	// 第 1 步极易被忽略但后果严重：漏了它，配了映射的渠道测活会把平台名原样发给上游，
-	// 得到一个与真实调用无关的 404（线上实测：AQUA/GLM-5.3-Flash 被原样发出，
+	// 得到一个与真实调用无关的 404（线上实测：带前缀的平台名被原样发出，
 	// 上游回 model_not_found，而真实转发是正常的）。
 	upstreamModel, outboundBody, _ := r.resolveUpstreamModel(ctx, ch.ID, modelName, body)
 	spec, outBody, built, err := prepareChannelUpstream(

@@ -341,15 +341,15 @@ func TestModelMappingOverview_聚合映射与无映射渠道(t *testing.T) {
 	ctx := context.Background()
 
 	mapped := &model.Channel{
-		Name: "AQUA自营", Type: 1, BaseURL: "https://tierflow.example.com", APIKey: "sk-x",
-		Models: []string{"AQUA/GLM-5.3-Flash"}, Group: "aqua",
+		Name: "示例自营渠道", Type: 1, BaseURL: "https://upstream.example.com", APIKey: "sk-x",
+		Models: []string{"vendor/model-a"}, Group: "aqua",
 		Priority: 1, Weight: 1, Status: model.ChannelStatusEnabled,
 	}
 	if err := fx.channels.Create(ctx, mapped); err != nil {
 		t.Fatalf("创建渠道失败: %v", err)
 	}
 	if err := fx.mappings.ReplaceForChannel(ctx, mapped.ID, []*model.ChannelModelMapping{
-		{UpstreamModel: "GLM-5.3-Flash", PublicModel: "AQUA/GLM-5.3-Flash", Enabled: true},
+		{UpstreamModel: "model-a", PublicModel: "vendor/model-a", Enabled: true},
 	}); err != nil {
 		t.Fatalf("写入映射失败: %v", err)
 	}
@@ -375,16 +375,16 @@ func TestModelMappingOverview_聚合映射与无映射渠道(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("items 应只有 1 条，实际 %d", len(items))
 	}
-	if v, _ := items[0]["channel_name"].(string); v != "AQUA自营" {
+	if v, _ := items[0]["channel_name"].(string); v != "示例自营渠道" {
 		t.Fatalf("应带上渠道名，实际 %q", v)
 	}
 	if v, _ := items[0]["group"].(string); v != "aqua" {
 		t.Fatalf("应带上分组，实际 %q", v)
 	}
-	if v, _ := items[0]["public_model"].(string); v != "AQUA/GLM-5.3-Flash" {
+	if v, _ := items[0]["public_model"].(string); v != "vendor/model-a" {
 		t.Fatalf("平台模型 ID 不符，实际 %q", v)
 	}
-	if v, _ := items[0]["upstream_model"].(string); v != "GLM-5.3-Flash" {
+	if v, _ := items[0]["upstream_model"].(string); v != "model-a" {
 		t.Fatalf("上游模型 ID 不符，实际 %q", v)
 	}
 

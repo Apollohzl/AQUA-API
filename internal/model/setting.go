@@ -113,7 +113,7 @@ const (
 	// 后端据此动态生成 sitemap.xml / robots.txt 并向 SPA 首页注入 meta 标签，
 	// 让站点能被搜索引擎正确收录并展示地域信息。
 
-	// SettingKeySEOSiteURL 站点公开访问地址（如 https://aqua.ltzy.top）。
+	// SettingKeySEOSiteURL 站点公开访问地址（如 https://api.example.com）。
 	//
 	// 用于生成 sitemap 的绝对链接与 canonical。留空时按请求推导，
 	// 但反向代理后推导出的可能是内网地址，因此生产环境建议显式配置。

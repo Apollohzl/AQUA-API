@@ -335,12 +335,12 @@ func TestMergeSEOSettings_校验(t *testing.T) {
 	}
 
 	// 合法：site_url 被规范化；关键词去重去空
-	siteURL := "aqua.ltzy.top/"
+	siteURL := "gateway.example.com/"
 	keywords := []string{"网关", "网关", "  ", "自托管"}
 	if err := mergeSEOSettings(&base.SEO, &seoSettingsDTO{SiteURL: &siteURL, Keywords: &keywords}); err != nil {
 		t.Fatalf("合法输入不应报错: %v", err)
 	}
-	if base.SEO.SiteURL != "https://aqua.ltzy.top" {
+	if base.SEO.SiteURL != "https://gateway.example.com" {
 		t.Errorf("site_url 应被规范化，实际 %q", base.SEO.SiteURL)
 	}
 	if len(base.SEO.Keywords) != 2 {
