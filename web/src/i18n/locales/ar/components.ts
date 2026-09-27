@@ -246,6 +246,7 @@ export default {
       logs: 'سجلات الاستخدام',
       audit: 'سجل عمليات الإدارة',
       announcements: 'الإعلانات',
+      sensitiveWords: 'أمان المحتوى',
       maintenanceMonitor: 'المراقبة والنسخ الاحتياطي',
       settings: 'الإعدادات',
     },

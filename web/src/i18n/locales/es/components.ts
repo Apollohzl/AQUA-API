@@ -253,6 +253,7 @@ export default {
       logs: 'Registros de uso',
       audit: 'Auditoría de administración',
       announcements: 'Anuncios',
+      sensitiveWords: 'Seguridad del contenido',
       maintenanceMonitor: 'Mantenimiento y copias',
       settings: 'Ajustes',
     },

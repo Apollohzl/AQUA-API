@@ -255,6 +255,15 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '站点公告' },
       },
       {
+        // 内容安全：敏感词过滤（词表 + 总开关）。
+        // 与"操作审计"同属合规域：一个记录"管理员做了什么"，
+        // 一个约束"用户提交了什么"，都需要站长随时可查可改。
+        path: 'sensitive-words',
+        name: 'admin-sensitive-words',
+        component: () => import('@/views/admin/SensitiveWordsView.vue'),
+        meta: { title: '内容安全' },
+      },
+      {
         // 运维监控：数据库体积/磁盘水位/调用健康度与备份导出，
         // 与"调用日志"分开放——它回答的是"这台服务器还健康吗"。
         path: 'maintenance',

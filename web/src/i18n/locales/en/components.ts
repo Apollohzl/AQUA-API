@@ -248,6 +248,7 @@ export default {
       logs: 'Usage Logs',
       audit: 'Admin Audit',
       announcements: 'Announcements',
+      sensitiveWords: 'Content Safety',
       maintenanceMonitor: 'Maintenance',
       settings: 'Settings',
     },

@@ -249,6 +249,7 @@ export default {
       logs: '调用日志',
       audit: '操作审计',
       announcements: '站点公告',
+      sensitiveWords: '内容安全',
       maintenanceMonitor: '运维监控',
       settings: '系统设置',
     },

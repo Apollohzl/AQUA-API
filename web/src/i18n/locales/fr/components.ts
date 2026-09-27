@@ -255,6 +255,7 @@ export default {
       logs: 'Journaux d’appels',
       audit: 'Journal d’administration',
       announcements: 'Annonces',
+      sensitiveWords: 'Sécurité du contenu',
       maintenanceMonitor: 'Supervision',
       settings: 'Paramètres',
     },

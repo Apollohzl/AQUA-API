@@ -826,6 +826,19 @@ export interface SiteSettings {
   payment_secrets: PaymentSecretStatus
   /** SEO 与站点收录配置 */
   seo: SeoSettings
+  /** 内容安全（合规过滤）配置 */
+  safeguard: SafeguardSettings
+}
+
+/** 内容安全（合规过滤）配置 */
+export interface SafeguardSettings {
+  /**
+   * 敏感词过滤总开关。
+   *
+   * 关闭时 /v1 入口不扫描请求正文；开启后命中词表即拒绝请求。
+   * 默认关闭：拦截会直接影响用户可用性，应由站长显式开启。
+   */
+  sensitive_filter_enabled: boolean
 }
 
 /**
@@ -857,7 +870,55 @@ export type UpdateSiteSettingsPayload = Partial<{
   default_group: string
   payment: PaymentSettings
   seo: UpdateSeoSettingsPayload
+  safeguard: Partial<SafeguardSettings>
 }>
+
+/* ────────────────────────── 敏感词（内容合规） ────────────────────────── */
+
+/**
+ * 敏感词条（GET /api/admin/sensitive-words）。
+ *
+ * 说明：word 落库时统一为「去首尾空白 + 小写」，匹配也不区分大小写；
+ * 因此界面上展示的即是实际参与匹配的形式。
+ */
+export interface SensitiveWord {
+  id: number
+  /** 词条（小写归一后的形式） */
+  word: string
+  /** 分类（如「违法违规」），可为空 */
+  category: string
+  /** 是否启用；停用即不参与匹配 */
+  enabled: boolean
+  remark: string
+  created_at: number
+  updated_at: number
+}
+
+/** POST/PUT /api/admin/sensitive-words 请求体 */
+export interface SensitiveWordPayload {
+  word?: string
+  category?: string
+  enabled?: boolean
+  remark?: string
+}
+
+/** GET /api/admin/sensitive-words 响应 */
+export interface SensitiveWordListResult {
+  items: SensitiveWord[]
+  total: number
+  /** 其中启用状态的条数（界面上直接显示"生效中 N 条"） */
+  enabled_total: number
+}
+
+/** POST /api/admin/sensitive-words/import 响应 */
+export interface SensitiveWordImportResult {
+  /** 实际新增的条数（重复的会被跳过） */
+  imported: number
+  /** 因长度不合法被跳过的行数 */
+  skipped_invalid: number
+  /** 解析出的候选词条总数 */
+  total: number
+}
 
 /* ────────────────────────── 查询参数 ────────────────────────── */
 

@@ -255,6 +255,7 @@ export default {
       logs: 'Журнал вызовов',
       audit: 'Журнал действий администратора',
       announcements: 'Объявления',
+      sensitiveWords: 'Безопасность контента',
       maintenanceMonitor: 'Мониторинг и резервные копии',
       settings: 'Настройки',
     },
