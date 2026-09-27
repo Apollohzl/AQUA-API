@@ -30,6 +30,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"gitee.com/xiaosu4610/aqua-api/internal/channeltype"
 	"gitee.com/xiaosu4610/aqua-api/internal/crypto"
 	"gitee.com/xiaosu4610/aqua-api/internal/mailer"
 	"gitee.com/xiaosu4610/aqua-api/internal/model"
@@ -381,7 +382,7 @@ func (s *Server) handleCreateChannel(c *gin.Context) {
 		return
 	}
 
-	if err := s.replaceChannelOAuthCredentials(ctx, channel.ID, req.OAuthTokensText, req.OAuthProvider); err != nil {
+	if err := s.replaceChannelOAuthCredentials(ctx, channel, req.OAuthTokensText, req.OAuthProvider); err != nil {
 		oai.WriteError(c.Writer, http.StatusBadRequest, err.Error(),
 			oai.TypeInvalidRequest, "invalid_oauth_tokens")
 		return
@@ -430,20 +431,80 @@ func (s *Server) replaceChannelKeys(ctx context.Context, channelID uint64, keys,
 //
 // 两类凭据分开导入的额外好处：ReplaceCredentials 只会增删"本次涉及的类型"，
 // 因此导入 API Key 不会影响已有的订阅账号，反之亦然。
-func (s *Server) replaceChannelOAuthCredentials(ctx context.Context, channelID uint64, tokensText, provider string) error {
+//
+// 参数 channel 用于判断该渠道是否为订阅类协议（Codex）：是的话会顺带
+// 确保内置 OAuth 提供方存在，并把凭据挂到它下面——站长因此不必知道
+// token_url / client_id 这些参数。
+func (s *Server) replaceChannelOAuthCredentials(ctx context.Context, channel *model.Channel, tokensText, provider string) error {
 	if strings.TrimSpace(tokensText) == "" {
 		return nil
 	}
 	if s.deps.ChannelKeys == nil {
 		return errors.New("凭据池功能未启用")
 	}
-
-	credentials := model.ParseCredentialList(tokensText, strings.TrimSpace(provider))
-	if len(credentials) == 0 {
-		return errors.New("未能从提交内容中解析出任何订阅账号凭据，请检查格式（每行一条 refresh_token）")
+	if channel == nil {
+		return errors.New("渠道不存在")
 	}
-	_, _, err := s.deps.ChannelKeys.ReplaceCredentials(ctx, channelID, credentials)
+
+	provider = strings.TrimSpace(provider)
+	if provider == "" && isCodexChannel(channel) {
+		// 订阅账号的刷新配置由程序内置，不需要站长填写；
+		// 首次导入时自动创建，后续导入复用同一条。
+		name, err := s.ensureCodexOAuthProvider(ctx)
+		if err != nil {
+			return err
+		}
+		provider = name
+	}
+
+	credentials := model.ParseCredentialList(tokensText, provider)
+	if len(credentials) == 0 {
+		return errors.New("未能从提交内容中解析出任何订阅账号凭据；" +
+			"可直接粘贴 Codex 的 auth.json，或每行一条 refresh_token")
+	}
+	_, _, err := s.deps.ChannelKeys.ReplaceCredentials(ctx, channel.ID, credentials)
 	return err
+}
+
+// isCodexChannel 判断渠道是否使用 Codex 订阅协议。
+//
+// 判据取渠道类型目录里的 Protocol，而不是硬编码 type_key 字符串：
+// 目录是"哪种类型走哪套协议"的唯一事实来源，硬编码会在目录调整后静默失配。
+func isCodexChannel(channel *model.Channel) bool {
+	if channel == nil {
+		return false
+	}
+	spec, ok := channeltype.Find(strings.TrimSpace(channel.TypeKey))
+	return ok && spec.Protocol == channeltype.ProtocolCodex
+}
+
+// ensureCodexOAuthProvider 确保内置的 Codex OAuth 提供方存在，并返回其名称。
+//
+// 幂等：已存在则直接返回（不覆盖管理员可能做过的调整）。
+// 仓储未注入时返回内置名称而不报错——那种部署下不会走到刷新，
+// 让导入先成功、把问题留到真正需要刷新时暴露会更友好。
+func (s *Server) ensureCodexOAuthProvider(ctx context.Context) (string, error) {
+	preset := model.CodexOAuthProviderPreset()
+	if s.deps.OAuthProviders == nil {
+		return preset.Name, nil
+	}
+
+	existing, err := s.deps.OAuthProviders.GetByName(ctx, preset.Name)
+	if err == nil && existing != nil {
+		return existing.Name, nil
+	}
+	if !errors.Is(err, model.ErrOAuthProviderNotFound) {
+		return "", fmt.Errorf("查询内置 OAuth 提供方失败: %w", err)
+	}
+
+	// 不存在则创建。并发导入时可能撞上唯一索引，此时按"已存在"处理即可。
+	if err := s.deps.OAuthProviders.Create(ctx, preset); err != nil {
+		if fallback, getErr := s.deps.OAuthProviders.GetByName(ctx, preset.Name); getErr == nil && fallback != nil {
+			return fallback.Name, nil
+		}
+		return "", fmt.Errorf("创建内置 OAuth 提供方失败: %w", err)
+	}
+	return preset.Name, nil
 }
 
 // channelDTOWithPool 组装带密钥池概览的渠道 DTO。
@@ -559,7 +620,7 @@ func (s *Server) handleUpdateChannel(c *gin.Context) {
 		return
 	}
 
-	if err := s.replaceChannelOAuthCredentials(ctx, channel.ID, req.OAuthTokensText, req.OAuthProvider); err != nil {
+	if err := s.replaceChannelOAuthCredentials(ctx, channel, req.OAuthTokensText, req.OAuthProvider); err != nil {
 		oai.WriteError(c.Writer, http.StatusBadRequest, err.Error(),
 			oai.TypeInvalidRequest, "invalid_oauth_tokens")
 		return

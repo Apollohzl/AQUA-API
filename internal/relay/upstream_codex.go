@@ -26,13 +26,12 @@
 package relay
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"gitee.com/xiaosu4610/aqua-api/internal/channeltype"
+	"gitee.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // Codex 订阅账号的出站端点（相对渠道 base_url）。
@@ -124,82 +123,21 @@ func applyCredentialHeaders(spec channeltype.Type, meta CredentialMeta, apiKey s
 	return nil
 }
 
-// codexJWTClaims 是 access_token / id_token 里我们需要的那部分 JWT 声明。
+// codexJWTClaims 已移至 model 层（导入解析与出站装配共用），这里只保留调用入口。
 //
-// OpenAI 把账号信息放在一个以 URL 为键的命名空间下（非标准 claim），
-// 因此这里用带命名空间的键名解析，而不是平铺到顶层。
-type codexJWTClaims struct {
-	OpenAIAuth *struct {
-		ChatGPTAccountID string `json:"chatgpt_account_id"`
-		ChatGPTPlanType  string `json:"chatgpt_plan_type"`
-		OrganizationID   string `json:"organization_id"`
-	} `json:"https://api.openai.com/auth"`
-	Exp int64 `json:"exp"`
-}
-
-// codexAccountIDFromToken 尽力从 JWT 形式的令牌里取出账号标识。
-//
-// 为什么不校验签名：这是"读自己刚拿到的令牌"的自用解析，不是授权决策——
-// 令牌来自上游的令牌端点，签名校验对我们没有新增安全价值，却会把
-// 每次请求都变成一次 RSA 验签。真正的授权决策仍在上游那一侧。
-//
-// 解析失败一律返回空串（而非报错）：调用方据此给出"缺少账号标识"的统一提示，
-// 不必区分"令牌格式不对"与"令牌里没有该字段"这两种用户无法处理的差异。
+// 之所以不在此处重复实现：JWT 解析是"账号身份"的领域知识，
+// 与协议装配无关；放在 model 层可以让导入路径也用同一份实现，
+// 避免两处对 claim 命名空间的理解出现偏差。
 func codexAccountIDFromToken(token string) string {
-	claims, ok := decodeCodexJWT(token)
-	if !ok || claims.OpenAIAuth == nil {
-		return ""
-	}
-	if id := strings.TrimSpace(claims.OpenAIAuth.ChatGPTAccountID); id != "" {
-		return id
-	}
-	// 少数令牌只在 organization 字段里带标识，作为次选。
-	return strings.TrimSpace(claims.OpenAIAuth.OrganizationID)
+	accountID, _, _ := model.DecodeCodexTokenClaims(token)
+	return accountID
 }
 
-// DecodeCodexTokenClaims 解析 Codex 令牌（access_token / id_token）的声明。
+// DecodeCodexTokenClaims 转发到 model 层实现（保留本包内的旧调用点可用）。
 //
-// 导出给上层使用：导入账号时要从令牌里补齐账号标识与套餐，避免让使用者手填。
-// 返回的第二个值表示解析是否成功。
+// Deprecated: 新代码请直接调用 model.DecodeCodexTokenClaims。
 func DecodeCodexTokenClaims(token string) (accountID, planType string, ok bool) {
-	claims, parsed := decodeCodexJWT(token)
-	if !parsed {
-		return "", "", false
-	}
-	if claims.OpenAIAuth != nil {
-		accountID = strings.TrimSpace(claims.OpenAIAuth.ChatGPTAccountID)
-		if accountID == "" {
-			accountID = strings.TrimSpace(claims.OpenAIAuth.OrganizationID)
-		}
-		planType = strings.TrimSpace(claims.OpenAIAuth.ChatGPTPlanType)
-	}
-	return accountID, planType, true
-}
-
-// decodeCodexJWT 解码 JWT 的 payload 段（不校验签名与过期）。
-func decodeCodexJWT(token string) (codexJWTClaims, bool) {
-	trimmed := strings.TrimSpace(token)
-	parts := strings.Split(trimmed, ".")
-	if len(parts) != 3 {
-		return codexJWTClaims{}, false
-	}
-	payload := parts[1]
-	// JWT 用无填充的 base64url；标准库要求补齐 '=' 才能解码。
-	switch len(payload) % 4 {
-	case 2:
-		payload += "=="
-	case 3:
-		payload += "="
-	}
-	decoded, err := base64.URLEncoding.DecodeString(payload)
-	if err != nil {
-		return codexJWTClaims{}, false
-	}
-	var claims codexJWTClaims
-	if err := json.Unmarshal(decoded, &claims); err != nil {
-		return codexJWTClaims{}, false
-	}
-	return claims, true
+	return model.DecodeCodexTokenClaims(token)
 }
 
 // codexModelListPath 返回 Codex 的模型清单路径。

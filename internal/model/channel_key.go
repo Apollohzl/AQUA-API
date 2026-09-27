@@ -30,6 +30,7 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -512,10 +513,20 @@ func (k *ChannelKey) IsOAuth() bool {
 //
 // 判定规则：
 //   - 非 OAuth 凭据永不刷新；
+//   - 没有 refresh_token 时不刷新（见下方说明）；
 //   - access_token 为空 → 必须刷新；
 //   - 剩余有效期不足 refreshAheadSeconds → 提前刷新。
 func (k *ChannelKey) NeedsRefresh(now time.Time) bool {
 	if !k.IsOAuth() {
+		return false
+	}
+	// 没有 refresh_token 就"没得刷"：这类凭据（例如只导入了短期 access_token）
+	// 只能用当前令牌去试，被上游拒绝后走正常的凭据失败流程（冷却而不是摘除）。
+	//
+	// 为什么不能在这里返回 true：刷新必然失败，调用方会把它记成
+	// "刷新令牌失败"并累计失败次数，一个本来只是过期需要重导的账号
+	// 会被当成坏凭据处理——那是误伤。
+	if strings.TrimSpace(k.RefreshToken) == "" {
 		return false
 	}
 	if strings.TrimSpace(k.AccessToken) == "" {
@@ -639,11 +650,17 @@ type CredentialInput struct {
 
 // IdentityHash 返回该凭据的去重标识。
 //
-// 规则：API Key 用密钥本身，OAuth 用 refresh_token——
-// 因为 refresh_token 才是账号的长期唯一标识（access_token 每次刷新都变）。
+// 规则：API Key 用密钥本身；OAuth 优先用 refresh_token（它是账号的长期唯一标识，
+// access_token 每次刷新都变），没有 refresh_token 时退化为用 access_token。
+//
+// 退化分支不可省略：只导入了短期令牌的账号若都按"空 refresh_token"计算摘要，
+// 会被整体判为重复，导入 N 个只留下 1 个。
 func (c CredentialInput) IdentityHash(sha256Hex func(string) string) string {
 	if c.Kind == CredentialKindOAuth {
-		return sha256Hex(strings.TrimSpace(c.RefreshToken))
+		if token := strings.TrimSpace(c.RefreshToken); token != "" {
+			return sha256Hex(token)
+		}
+		return sha256Hex("access:" + strings.TrimSpace(c.AccessToken))
 	}
 	return sha256Hex(strings.TrimSpace(c.APIKey))
 }
@@ -659,25 +676,43 @@ func (c CredentialInput) Validate() error {
 			return errors.New("API Key 不能为空")
 		}
 	case CredentialKindOAuth:
-		if strings.TrimSpace(c.RefreshToken) == "" {
-			return errors.New("OAuth 凭据必须提供 refresh_token")
+		// 两种 OAuth 形态都接受：带 refresh_token（可自动续期）
+		// 或只带 access_token（短期有效，过期后需重导）。
+		if strings.TrimSpace(c.RefreshToken) == "" && strings.TrimSpace(c.AccessToken) == "" {
+			return errors.New("OAuth 凭据必须提供 refresh_token 或 access_token")
 		}
 	}
 	return nil
 }
 
-// ParseCredentialList 解析批量粘贴的 OAuth 凭据文本。
+// ParseCredentialList 解析批量粘贴的订阅账号凭据文本。
 //
-// 输入格式（与密钥批量导入保持一致，降低使用者的记忆负担）：
+// 支持两种形态（可只用其中一种）：
 //
-//	每行一条：refresh_token [账号标识]
-//	支持空格、制表符或逗号分隔；
-//	以 # 开头的行视为注释；空行忽略；重复项自动去重。
+//	形态一：JSON —— Codex CLI 导出的 auth.json、JSON 数组、或每行一个 JSON 对象。
+//	  例：{"tokens":{"access_token":"...","refresh_token":"...","account_id":"..."}}
+//	  字段名兼容驼峰与下划线两种写法，账号标识与套餐会从令牌里自动补齐，
+//	  因此使用者只需粘贴文件内容，不必手工拆字段。
+//
+//	形态二：纯文本行 —— 每行 "refresh_token [账号标识]"。
+//	  支持空格、制表符或逗号分隔；以 # 开头的行视为注释；空行忽略；重复项自动去重。
+//
+// 为什么不只留纯文本：站长手上有的是 Codex CLI 导出的 auth.json，
+// 要求他先把 refresh_token 抽出来再粘贴，既费事又极易粘错一个字符——
+// 而粘错的表现是"账号莫名 401"，排查成本极高。
 //
 // provider 会写入每条凭据，便于刷新时找到对应的 OAuth 提供方配置。
 func ParseCredentialList(raw, provider string) []CredentialInput {
-	tokens, labels := ParseKeyList(raw)
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
 
+	if inputs, ok := parseCodexJSONCredentials(trimmed, provider); ok && len(inputs) > 0 {
+		return inputs
+	}
+
+	tokens, labels := ParseKeyList(raw)
 	inputs := make([]CredentialInput, 0, len(tokens))
 	for i, token := range tokens {
 		label := ""
@@ -697,6 +732,172 @@ func ParseCredentialList(raw, provider string) []CredentialInput {
 		})
 	}
 	return inputs
+}
+
+// parseCodexJSONCredentials 解析 JSON 形态的订阅账号凭据。
+//
+// 第二个返回值为 false 表示"这段文本不是 JSON"（调用方应回退到按行解析）。
+// 之所以用 json.Decoder 循环解码而不是一次 Unmarshal：
+// 实际文件里常见"多个 JSON 对象首尾相连"与 JSONL（每行一个对象）两种写法，
+// 循环解码能把它们一并读出来。
+func parseCodexJSONCredentials(raw, provider string) ([]CredentialInput, bool) {
+	if !strings.HasPrefix(raw, "{") && !strings.HasPrefix(raw, "[") {
+		return nil, false
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	inputs := make([]CredentialInput, 0, 4)
+	decodedAny := false
+
+	for {
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			break
+		}
+		decodedAny = true
+		for _, entry := range flattenCredentialEntries(value) {
+			if input, ok := credentialFromJSONEntry(entry, provider); ok {
+				inputs = append(inputs, input)
+			}
+		}
+	}
+
+	if !decodedAny {
+		return nil, false
+	}
+	return inputs, true
+}
+
+// flattenCredentialEntries 把"一个 JSON 值"摊平成若干账号对象。
+//
+// 支持形态：单个对象、对象数组、以及 { "accounts": [...] } 这类包一层的写法。
+func flattenCredentialEntries(value any) []map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		// 常见包装：把账号清单放在 accounts / items / data 里
+		for _, key := range []string{"accounts", "items", "data"} {
+			if list, ok := typed[key].([]any); ok {
+				return flattenCredentialEntries(list)
+			}
+		}
+		return []map[string]any{typed}
+	case []any:
+		entries := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if object, ok := item.(map[string]any); ok {
+				entries = append(entries, object)
+			}
+		}
+		return entries
+	default:
+		return nil
+	}
+}
+
+// credentialFromJSONEntry 从一个 JSON 对象里抽取一条订阅账号凭据。
+//
+// 字段名兼容多种写法（tokens.access_token / access_token / accessToken 等）：
+// 这些都是社区工具实际导出过的形态，只认一种会让一半人的文件导不进来。
+// 账号标识与套餐在缺失时会从 id_token / access_token 的 JWT 里补齐。
+func credentialFromJSONEntry(entry map[string]any, provider string) (CredentialInput, bool) {
+	tokens, _ := entry["tokens"].(map[string]any)
+	if tokens == nil {
+		tokens = map[string]any{}
+	}
+
+	accessToken := firstNonEmptyString(
+		stringValue(tokens, "access_token"), stringValue(tokens, "accessToken"),
+		stringValue(entry, "access_token"), stringValue(entry, "accessToken"),
+		stringValue(entry, "token"),
+	)
+	refreshToken := firstNonEmptyString(
+		stringValue(tokens, "refresh_token"), stringValue(tokens, "refreshToken"),
+		stringValue(entry, "refresh_token"), stringValue(entry, "refreshToken"),
+	)
+	idToken := firstNonEmptyString(
+		stringValue(tokens, "id_token"), stringValue(tokens, "idToken"),
+		stringValue(entry, "id_token"), stringValue(entry, "idToken"),
+	)
+	if accessToken == "" && refreshToken == "" {
+		// 既没有访问令牌也没有刷新令牌：这条不是账号，跳过而不是报错——
+		// 导出文件里常混着无关字段（时间戳、版本号），报错会让整批导入失败。
+		return CredentialInput{}, false
+	}
+
+	accountID := firstNonEmptyString(
+		stringValue(entry, "chatgpt_account_id"), stringValue(entry, "chatgptAccountId"),
+		stringValue(entry, "account_id"), stringValue(entry, "accountId"),
+		stringValue(tokens, "account_id"), stringValue(tokens, "accountId"),
+	)
+	planType := firstNonEmptyString(
+		stringValue(entry, "plan_type"), stringValue(entry, "planType"),
+		stringValue(tokens, "plan_type"), stringValue(tokens, "planType"),
+	)
+	if nested, ok := entry["account"].(map[string]any); ok {
+		accountID = firstNonEmptyString(
+			accountID,
+			stringValue(nested, "id"), stringValue(nested, "account_id"), stringValue(nested, "chatgpt_account_id"),
+		)
+	}
+
+	// 从令牌里补齐账号标识、套餐与过期时间：让使用者不必手工查找这些字段。
+	for _, token := range []string{idToken, accessToken} {
+		if token == "" {
+			continue
+		}
+		tokenAccountID, tokenPlanType, ok := DecodeCodexTokenClaims(token)
+		if !ok {
+			continue
+		}
+		if accountID == "" {
+			accountID = tokenAccountID
+		}
+		if planType == "" {
+			planType = tokenPlanType
+		}
+	}
+
+	accountHint := firstNonEmptyString(
+		stringValue(entry, "email"), stringValue(entry, "label"),
+		stringValue(entry, "name"), stringValue(entry, "account_hint"),
+	)
+	label := firstNonEmptyString(stringValue(entry, "label"), accountHint)
+
+	input := CredentialInput{
+		Kind:         CredentialKindOAuth,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		AccountHint:  accountHint,
+		AccountID:    accountID,
+		PlanType:     planType,
+		Label:        label,
+		Provider:     provider,
+		Balance:      BalanceUnknown,
+	}
+	// 令牌自带过期时间时用它，省去一次"导入即过期"的误判
+	if expires := CodexTokenExpiry(accessToken); expires > 0 {
+		input.ExpiresAt = time.Unix(expires, 0)
+	}
+	return input, true
+}
+
+// stringValue 读取对象里的字符串字段（非字符串一律视为不存在）。
+func stringValue(entry map[string]any, key string) string {
+	value, ok := entry[key].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+// firstNonEmptyString 返回第一个非空字符串。
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 // ChannelKeyRepository 定义密钥池的持久化操作。
