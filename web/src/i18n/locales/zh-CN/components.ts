@@ -54,6 +54,7 @@ export default {
   },
   logTable: {
     scrollHint: '表格列较多，可左右滑动查看完整内容。',
+    upstreamHint: '箭头后为本次实际发给上游的模型名（经渠道模型映射改写）；未配置映射时不显示。',
     col: {
       time: '时间',
       user: '用户',

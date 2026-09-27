@@ -51,6 +51,7 @@ export default {
   },
   logTable: {
     scrollHint: 'Esta tabla tiene muchas columnas; desplázate horizontalmente para verlo todo.',
+    upstreamHint: 'El nombre tras la flecha es el que se envió realmente al proveedor (tras el mapeo del canal). Se oculta si no aplica ningún mapeo.',
     col: {
       time: 'Hora',
       user: 'Usuario',

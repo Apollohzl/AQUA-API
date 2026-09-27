@@ -225,6 +225,8 @@ export interface UsageLog {
   channel_id?: number
   channel_name?: string
   model: string
+  /** 本次实际发给上游的模型名（经渠道映射改写）；空串/缺省表示与 model 相同 */
+  upstream_model?: string
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number

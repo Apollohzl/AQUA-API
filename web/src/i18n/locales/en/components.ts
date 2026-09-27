@@ -53,6 +53,7 @@ export default {
   },
   logTable: {
     scrollHint: 'This table has many columns; scroll horizontally to see everything.',
+    upstreamHint: 'The name after the arrow is what was actually sent upstream (after channel model mapping). Hidden when no mapping applies.',
     col: {
       time: 'Time',
       user: 'User',

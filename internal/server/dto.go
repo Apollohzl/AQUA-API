@@ -368,6 +368,13 @@ type usageLogDTO struct {
 	ChannelID        uint64 `json:"channel_id"`
 	ChannelName      string `json:"channel_name"`
 	Model            string `json:"model"`
+	// UpstreamModel 是本次【实际发给上游】的模型名（渠道级映射改写后的名字）。
+	//
+	// 为什么要把它暴露出来：站长配置了"平台模型 ID → 上游模型 ID"的映射后，
+	// 最关心的一件事就是"上游到底收到了哪个名字"。没有这个字段时，只能靠抓包
+	// 或猜，一旦上游报"模型不存在"就无从判断是映射没生效还是上游真没有该模型。
+	// 空串表示未经过映射（上游收到的与对外名一致）。
+	UpstreamModel    string `json:"upstream_model"`
 	PromptTokens     int    `json:"prompt_tokens"`
 	CompletionTokens int    `json:"completion_tokens"`
 	TotalTokens      int    `json:"total_tokens"`
@@ -397,6 +404,7 @@ func toUsageLogDTO(log *model.UsageLog, usernames map[uint64]string, channelName
 		ChannelID:        log.ChannelID,
 		ChannelName:      channelNames[log.ChannelID],
 		Model:            log.Model,
+		UpstreamModel:    log.UpstreamModel,
 		PromptTokens:     log.PromptTokens,
 		CompletionTokens: log.CompletionTokens,
 		TotalTokens:      log.TotalTokens,

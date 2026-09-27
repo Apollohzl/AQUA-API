@@ -51,6 +51,7 @@ export default {
   },
   logTable: {
     scrollHint: 'Ce tableau comporte de nombreuses colonnes ; faites défiler horizontalement pour tout voir.',
+    upstreamHint: 'Le nom après la flèche est celui réellement envoyé en amont (après mappage du modèle du canal). Masqué si aucun mappage ne s’applique.',
     col: {
       time: 'Heure',
       user: 'Utilisateur',

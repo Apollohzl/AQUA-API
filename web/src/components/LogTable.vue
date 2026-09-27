@@ -113,6 +113,18 @@ function isOk(log: UsageLog): boolean {
 
             <td class="whitespace-nowrap" :data-label="$t('components.logTable.col.model')">
               <span class="chip" dir="ltr">{{ log.model || '—' }}</span>
+              <!--
+                上游模型名：仅当本次请求经过了「平台模型 ID → 上游模型 ID」映射时才显示。
+                这是管理员核对映射是否真的生效的唯一直接证据（上游收到的到底是哪个名字）。
+              -->
+              <span
+                v-if="log.upstream_model"
+                class="ms-1 text-[11px] text-ink-500"
+                dir="ltr"
+                :title="$t('components.logTable.upstreamHint')"
+              >
+                → {{ log.upstream_model }}
+              </span>
             </td>
 
             <td v-if="showChannel" class="whitespace-nowrap text-ink-200" :data-label="$t('components.logTable.col.channel')">
