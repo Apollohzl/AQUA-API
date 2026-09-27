@@ -139,6 +139,32 @@ func (b *Billing) WithQuotaRepository(quota model.QuotaRepository) *Billing {
 	return b
 }
 
+// DefaultGroup 返回"请求未指定分组时"本组件使用的分组。
+//
+// 存在意义：路由侧（relay.Options.Group）与计费侧各有一个默认分组，
+// 两者必须相等，否则不带分组的令牌会"按 A 组选渠道、按 B 组查价格"——
+// 而查不到价格的模型会被判为【不计费】，表现为"收费模型被免费调用"，
+// 站长在账单上完全看不出异常。relay.New 会据此做一致性校验并告警。
+func (b *Billing) DefaultGroup() string {
+	if b == nil {
+		return ""
+	}
+	return b.group
+}
+
+// SetDefaultGroup 覆盖"请求未指定分组时"使用的分组。
+//
+// 只应由装配代码（relay.New）在启动阶段调用一次：它存在的意义是保证计费的
+// 默认分组与路由的默认分组一致（见 relay.New 的一致性对齐），运行期不应改动。
+// 调用发生在任何请求之前，因此这里不加锁；缓存按分组隔离，
+// 改这个值也不会污染已缓存的其他分组。
+func (b *Billing) SetDefaultGroup(group string) {
+	if b == nil || strings.TrimSpace(group) == "" {
+		return
+	}
+	b.group = group
+}
+
 // Invalidate 清空【全部分组】的价格与倍率缓存。
 //
 // 调用时机：后台新增/修改/删除计价规则或分组倍率之后。

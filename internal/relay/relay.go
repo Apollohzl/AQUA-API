@@ -32,6 +32,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -164,6 +165,21 @@ func New(channels model.ChannelRepository, opts Options) *Relay {
 	var mappingCache *channelMappingCache
 	if opts.ChannelModelMappings != nil {
 		mappingCache = newChannelMappingCache(defaultMappingCacheTTL, defaultMappingCacheMax)
+	}
+
+	// 默认分组一致性对齐（防回归）。
+	//
+	// 路由用本函数的 group 选渠道，而计费组件用它自己的默认分组查价格；
+	// 两者若不同，不带分组的令牌就会"按 A 组选渠道、按 B 组查价格"——
+	// 查不到价格的模型会被判为【不计费】，于是收费模型被免费调用
+	// （余额 0 也能调），而账单上看不出任何异常。
+	//
+	// 这里直接【对齐】而不是只告警：这是启动期的一次性装配，对齐后系统状态自洽，
+	// 从根上消除这一类故障；同时打错误日志，配置问题依然可见。
+	if opts.Billing != nil && opts.Billing.DefaultGroup() != group {
+		slog.Error("计费默认分组与路由默认分组不一致，已按路由分组对齐",
+			"relay_group", group, "billing_group", opts.Billing.DefaultGroup())
+		opts.Billing.SetDefaultGroup(group)
 	}
 
 	return &Relay{

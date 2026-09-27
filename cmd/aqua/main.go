@@ -369,7 +369,13 @@ func run() error {
 	// 价格规则缓存在内存中（后台改价后会主动失效），避免每次转发都查库。
 	// 注入额度预留台账后，鉴权阶段会"请求前预扣"、响应后"多退少补"，
 	// 从而堵住并发请求全部通过检查、各自后扣费导致超支的漏洞。
-	billing := relay.NewBilling(modelPrices, modelGroups, tokens, users, "").
+	//
+	// 最后一个参数【必须】与下面 relayEngine 的默认分组取同一个值（cfg.RelayGroup）：
+	// 路由用它选渠道、计费用它查价格，两者一旦不同，不带分组的令牌就会
+	// "按 A 组选渠道、按 B 组查价格"，而查不到价格的模型一律被视为【不计费】——
+	// 结果是收费模型被免费调用（余额 0 也能调），账单上还看不出异常。
+	// 历史上这里曾写死空串（回退常量 "default"），而 relay_group 被配成 free，正是这个错配。
+	billing := relay.NewBilling(modelPrices, modelGroups, tokens, users, cfg.RelayGroup).
 		WithQuotaRepository(quotaReservations)
 
 	// 订阅账号令牌刷新器：让 OAuth 凭据在 access_token 过期前自动续期
