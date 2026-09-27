@@ -1324,6 +1324,7 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
               </td>
             </tr>
           </template>
+          </template>
         </tbody>
       </table>
 
