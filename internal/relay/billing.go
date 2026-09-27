@@ -319,8 +319,26 @@ func (b *Billing) Quote(ctx context.Context, group, modelName string,
 		return 0
 	}
 	return applyRatio(
-		price.ComputeQuotaWithCache(promptTokens, completionTokens, cachedTokens),
+		chargeBaseForCall(price, promptTokens, completionTokens, cachedTokens),
 		b.ratioFor(ctx, group))
+}
+
+// chargeBaseForCall 按价格规则的有效计费方式，算出"一次同步调用"的基础额度。
+//
+// 为什么同步链路也必须识别按次（重要）：
+//
+//	按次模型的三个 token 单价必然全为 0（价格只填在 PerCallPrice 上），
+//	若仍按 token 公式计算必然得到 0 —— 表现为"该模型调用全程免费"（漏扣）。
+//	因此这里与 EstimateReserve 保持同一口径：按次 → 按"一次"计。
+//
+// 口径对齐说明：EstimateReserve 在按 token 算出 0 时会退化为 ComputePerCallQuota(1)，
+// Quote 与 Charge 必须与之对齐，否则会出现"按次预留了、结算时却退成 0"的错账。
+func chargeBaseForCall(price *model.ModelPrice, promptTokens, completionTokens, cachedTokens int64) int64 {
+	if price.EffectiveBillingMode() == model.BillingModePerCall {
+		// 同步链路一次请求固定按 1 次计；异步任务的多份数走 QuoteOnce/ChargeOnce。
+		return price.ComputePerCallQuota(1)
+	}
+	return price.ComputeQuotaWithCache(promptTokens, completionTokens, cachedTokens)
 }
 
 // QuoteOnce 计算"调用一次该模型"应扣的额度（只算不扣）。
@@ -441,7 +459,7 @@ func (b *Billing) Charge(ctx context.Context, group string, userID, tokenID uint
 	}
 
 	quota := applyRatio(
-		price.ComputeQuotaWithCache(promptTokens, completionTokens, cachedTokens),
+		chargeBaseForCall(price, promptTokens, completionTokens, cachedTokens),
 		b.ratioFor(ctx, group))
 	if quota <= 0 {
 		return 0

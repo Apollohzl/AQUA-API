@@ -146,6 +146,35 @@ func TestBilling_Quote_按倍率计价(t *testing.T) {
 	}
 }
 
+// TestBilling_同步链路_按次模型按一次计费 是"同步链路漏扣按次模型"缺陷的回归。
+//
+// 背景：按次模型的三个 token 单价必然全为 0，若 Quote/Charge 仍按 token 公式计算
+// 就会恒为 0 —— 表现为该模型在 /v1/chat/completions 等同步链路上完全免费。
+func TestBilling_同步链路_按次模型按一次计费(t *testing.T) {
+	ctx := context.Background()
+
+	// 自动判定（未显式填 BillingMode）：PerCallPrice>0 且三个 token 价全 0 → 按次。
+	auto := newTestBilling(100, 0, 0, 500)
+	if got := auto.Quote(ctx, "", "test-model", 1000, 500, 0); got != 500 {
+		t.Fatalf("自动按次模型同步调用应扣 500，实际 %d", got)
+	}
+	if got := auto.Charge(ctx, "", 0, 0, "test-model", 1000, 500, 0); got != 500 {
+		t.Fatalf("自动按次模型 Charge 应扣 500，实际 %d", got)
+	}
+
+	// 倍率对按次同样生效：2.0 倍 → 1000。
+	priced := newTestBilling(200, 0, 0, 500)
+	if got := priced.Quote(ctx, "", "test-model", 1000, 500, 0); got != 1000 {
+		t.Fatalf("2.0 倍下按次模型同步调用应扣 1000，实际 %d", got)
+	}
+
+	// 口径不漂移：一旦填了 token 单价，就回到按量计算，不能误按次。
+	tokenBased := newTestBilling(100, 1_000_000, 0, 900)
+	if got := tokenBased.Quote(ctx, "", "test-model", 1000, 0, 0); got != 1000 {
+		t.Fatalf("填了 token 单价后应仍按量计 1000，实际 %d", got)
+	}
+}
+
 func TestBilling_Quote_缓存命中按缓存价计费(t *testing.T) {
 	ctx := context.Background()
 
