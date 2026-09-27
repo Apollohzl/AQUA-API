@@ -248,16 +248,16 @@ func writeAdaptedError(w http.ResponseWriter, adapter Adapter, status int, messa
 func (r *Relay) writeAdapted(w http.ResponseWriter, req *http.Request, resp *http.Response,
 	adapter Adapter, sniffer *usageSniffer, requestBody []byte) {
 
-	// 上游返回错误：不管客户端要的是不是流式，都用一次性错误响应
-	// （流式协议下的错误同样是一个完整的错误对象，没有"增量错误"的概念）
+	// 上游返回重定向/错误：一律脱敏为本站定制错误，绝不把上游的状态码与响应原文
+	// 交给下游。
+	//
+	// 注意：4xx/5xx 已在 forwardChat 的上游错误出口处理并 return，正常情况不会走到这里；
+	// 保留此分支是纵深防御——万一将来新增转发路径忘了拦截，此处仍能兜住，
+	// 避免上游原文从适配层漏出。3xx 同样按"上游请求失败"归入本站 502。
 	if resp.StatusCode >= http.StatusMultipleChoices {
-		raw, _ := readAllLimited(resp.Body, maxAdaptedBodyBytes)
-		_, _ = sniffer.Write(raw)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(resp.StatusCode)
-		if _, err := w.Write(adapter.EncodeError(resp.StatusCode, raw)); err != nil {
-			return
-		}
+		// 先把响应体读空：既释放连接，也避免上游原因丢失（它只进本站日志）。
+		_, _ = readAllLimited(resp.Body, maxAdaptedBodyBytes)
+		writeSanitizedUpstreamError(w, adapter, resp.StatusCode)
 		return
 	}
 

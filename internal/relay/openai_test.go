@@ -291,11 +291,12 @@ func TestServeChatCompletions_StreamingFlushesIncrementally(t *testing.T) {
 	}
 }
 
-// TestServeChatCompletions_UpstreamErrorPassedThrough 验证上游错误原样透传。
+// TestServeChatCompletions_UpstreamErrorSanitized 验证上游错误被脱敏为本站定制错误码。
 //
-// 为什么重要：客户端需要区分"我的密钥无效(401)"与"上游限流(429)"，
-// 若网关把上游错误统一改写为 500，调用方将完全无法自助排查。
-func TestServeChatCompletions_UpstreamErrorPassedThrough(t *testing.T) {
+// 为什么重要：站长要求"绝对不暴露上游的报错码"。上游的 429 归入本站语义化的
+// 限流错误（对外仍返回 429 以保证 SDK 兼容），但响应体只含本站文案与错误码，
+// 绝不含上游厂商名与上游原始错误文本。
+func TestServeChatCompletions_UpstreamErrorSanitized(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -318,11 +319,14 @@ func TestServeChatCompletions_UpstreamErrorPassedThrough(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Errorf("状态码 = %d，期望原样透传 429", resp.StatusCode)
+		t.Errorf("状态码 = %d，期望 429（上游限流映射为本站限流语义）", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "rate limit exceeded") {
-		t.Errorf("上游错误体未被透传: %s", body)
+	if !strings.Contains(string(body), "upstream_rate_limited") {
+		t.Errorf("应采用本站错误码 upstream_rate_limited，实际: %s", body)
+	}
+	if strings.Contains(string(body), "rate limit exceeded") {
+		t.Errorf("响应体绝不能出现上游原文，实际: %s", body)
 	}
 }
 
@@ -587,6 +591,8 @@ func TestForward_FailoverOnRetryableStatus(t *testing.T) {
 //
 // 意义：请求本身有问题（参数错、模型不存在）时换渠道结果相同，
 // 重试只会放大上游压力与首字延迟。
+// 注意：4xx 虽不重试，但回给下游的仍是本站脱敏错误（502 / upstream_request_failed），
+// 上游的 400 与原文不会出现在响应体里。
 func TestForward_NoRetryOnClientError(t *testing.T) {
 	var secondChannelCalled bool
 
@@ -609,8 +615,16 @@ func TestForward_NoRetryOnClientError(t *testing.T) {
 	gateway := newGateway(t, newRelay(repo))
 	resp := postChat(t, gateway.URL, `{"model":"any-model"}`)
 
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("状态码 = %d，期望原样透传 400", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("状态码 = %d，期望 502（上游 400 脱敏为本站上游请求失败）", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if !strings.Contains(string(body), "upstream_request_failed") {
+		t.Errorf("应采用本站错误码 upstream_request_failed，实际: %s", body)
+	}
+	if strings.Contains(string(body), "bad request") {
+		t.Errorf("响应体绝不能出现上游原文，实际: %s", body)
 	}
 	if secondChannelCalled {
 		t.Error("400 不应触发换渠道重试，但第二个渠道被调用了")

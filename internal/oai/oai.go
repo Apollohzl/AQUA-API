@@ -91,8 +91,20 @@ const (
 	CodeMissingModel          = "missing_model"           // 缺少 model 字段
 	CodeRequestTooLarge       = "request_too_large"       // 请求体超过上限
 	CodeNoAvailableChannel    = "no_available_channel"    // 无可用上游渠道
-	CodeUpstreamRequestFailed = "upstream_request_failed" // 上游请求失败
+	CodeUpstreamRequestFailed = "upstream_request_failed" // 上游请求失败（含"其余上游错误"的兜底归类）
 	CodeInternal              = "internal_error"          // 网关内部错误
+	// CodeUpstreamUnavailable 表示上游服务故障或过载（本站语义化错误码）。
+	//
+	// 为什么单独设码而不复用 CodeUpstreamRequestFailed：下游客户端需要据此判断
+	// "是上游暂时挂了，稍后重试即可"，从而做退避重试；与"请求被上游拒绝"区分开。
+	// 注意：这是【本站】错误码，与上游原始状态码无关——上游的 500/529 一律映射到它，
+	// 绝不把上游的码透给下游（见 relay.sanitizeUpstreamError）。
+	CodeUpstreamUnavailable = "upstream_unavailable"
+	// CodeUpstreamRateLimited 表示上游限流或额度受限（本站语义化错误码）。
+	//
+	// 同样与上游原始码解耦：上游的 429 映射到它。客户端 SDK 普遍识别 rate_limit_error，
+	// 会按约定退避重试，因此本站对外仍返回 429 状态码（而非 502），以保持兼容。
+	CodeUpstreamRateLimited = "upstream_rate_limited"
 	// CodeSensitiveWordBlocked 表示请求内容命中站点配置的敏感词黑名单。
 	CodeSensitiveWordBlocked = "sensitive_word_blocked"
 )

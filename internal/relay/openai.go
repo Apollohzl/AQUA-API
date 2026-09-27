@@ -322,18 +322,14 @@ retryLoop:
 		}
 	}
 
-	// 所有尝试都用尽：优先把上游最后一次的真实响应透传出去。
+	// 所有尝试都用尽：把上游最后一次失败的原因写进本站日志，并向客户端回本站定制错误。
 	//
-	// 为什么不统一回 502：多账号密钥池下最常见的失败是
-	// "该模型在池内所有账号上都没有授权"，上游已经明确说了原因
-	// （如 NVIDIA 的 "Not found for account"）。
-	// 把它换成含糊的"所有候选渠道均请求失败"，会让用户与管理员
-	// 都无从判断该换渠道、换模型还是换账号。
+	// 为什么不再透传上游原始响应：上游错误体里含上游厂商名、账号标识与原始错误码，
+	// 透传会把"我们用了哪家上游、渠道怎么组织"暴露给下游（站长已确认采用语义化脱敏）。
+	// 但上游的真实原因必须留下——它正是排障的关键证据（"该模型在池内所有账号上都没有
+	// 授权"这类判断只能靠它），因此只写进本站调用日志，绝不出网关。
 	if lastFailure.status != 0 {
 		message := extractUpstreamErrorMessage(lastFailure.body)
-		if message == "" {
-			message = fmt.Sprintf("上游返回 HTTP %d", lastFailure.status)
-		}
 
 		r.recordUsage(req.Context(), usageEntry{
 			UserID:     identityFromRequest(req.Context()).UserID,
@@ -342,19 +338,11 @@ retryLoop:
 			Model:      modelName,
 			IsStream:   oai.PeekStream(body),
 			StatusCode: lastFailure.status,
-			ErrorText:  truncateReason(message),
+			ErrorText:  truncateReason(upstreamErrorLogText(lastFailure.status, message)),
 		})
 
-		if adapter == nil {
-			// 直通路径：状态码与响应体原样透传，客户端可自助排查
-			copyResponseHeaders(w.Header(), lastFailure.header)
-			w.WriteHeader(lastFailure.status)
-			_, _ = w.Write(lastFailure.body)
-			return
-		}
-		// 转换路径：按下游协议生成错误（各协议的 Content-Type 不同）
-		writeAdaptedError(w, adapter, lastFailure.status, message,
-			oai.TypeInvalidRequest, oai.CodeUpstreamRequestFailed)
+		// 无论直通还是转换路径，一律回本站脱敏错误码。
+		writeSanitizedUpstreamError(w, adapter, lastFailure.status)
 		return
 	}
 
@@ -532,13 +520,12 @@ const (
 
 // upstreamFailure 记录"最后一次上游失败"的原始信息。
 //
-// 为什么需要它：当所有重试都用尽时，若只回一句"所有候选渠道均请求失败"（502），
-// 用户与管理员都无从判断到底是模型不存在、账号没权限、还是上游故障。
-// 把上游最后一次响应（状态码 + 响应头 + 响应体片段）留存下来原样透传，
-// 才能让人一眼看懂"该模型在当前账号池里确实不可用"。
+// 为什么需要它：当所有重试都用尽时，上游的真实原因（状态码 + 响应体片段）必须留下，
+// 否则管理员无从判断到底是模型不存在、账号没权限、还是上游故障。
+// 但这份原始信息只写进本站调用日志，绝不透传给下游——下游拿到的是本站语义化错误码
+// （见 upstream_error.go 的 sanitizeUpstreamError）。
 type upstreamFailure struct {
 	status int
-	header http.Header
 	body   []byte
 }
 
@@ -675,15 +662,14 @@ func (r *Relay) classifyKeyFailure(resp *http.Response) (keyFailureKind, string,
 	return keyFailureNone, "", nil
 }
 
-// saveFailure 记录一次上游失败响应，供后续"所有重试都用尽"时透传真实原因。
+// saveFailure 记录一次上游失败响应，供后续"所有重试都用尽"时写入本站日志。
 //
-// 复制响应头而不是直接引用：响应体关闭后引用仍可用，但复制能避免调用方误改。
+// snippet 是已读出的响应体片段（由调用方通过 peekBody 取得并还原响应体）。
 func saveFailure(lastFailure *upstreamFailure, resp *http.Response, snippet []byte) {
 	if lastFailure == nil || resp == nil || len(snippet) == 0 {
 		return
 	}
 	lastFailure.status = resp.StatusCode
-	lastFailure.header = resp.Header.Clone()
 	lastFailure.body = snippet
 }
 
@@ -903,9 +889,37 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 	// 同时把内容喂给抓取器，用于事后解析 usage（token 数）。
 	sniffer := newUsageSniffer()
 
+	// 上游返回错误状态：绝不把上游的错误码与错误原文透传给下游。
+	//
+	// 走到这里意味着"本次尝试已判定不再重试"——换密钥 / 换渠道的分支都在上方提前
+	// 返回了，所以这里是上游错误的最终出口，也是脱敏的唯一入口。处置三步：
+	//   1. 读走错误体：其一，读出上游真实原因写进本站日志（"读取它的报错码"）；
+	//      其二，读完才能复用 TCP 连接，避免每次错误都重新建连；
+	//   2. 按本站语义化错误码回写下游（见 sanitizeUpstreamError，绝不含上游标识）；
+	//   3. 本站日志保留上游真实状态码与原因，供站长排障（下游看不到这些）。
+	if resp.StatusCode >= http.StatusBadRequest {
+		raw, _ := readAllLimited(resp.Body, maxAdaptedBodyBytes)
+		upstreamMessage := extractUpstreamErrorMessage(raw)
+		identity := identityFromRequest(req.Context())
+		r.recordUsage(req.Context(), usageEntry{
+			UserID:        identity.UserID,
+			TokenID:       identity.TokenID,
+			Group:         group,
+			ChannelID:     ch.ID,
+			ChannelKeyID:  target.keyID,
+			Model:         modelName,
+			UpstreamModel: upstreamModelForLog(upstreamModel, modelRewritten),
+			IsStream:      wantStream,
+			// 日志记上游真实状态码：站长看到的是"上游 401"，而非被脱敏后的 502。
+			StatusCode: resp.StatusCode,
+			ErrorText:  truncateReason(upstreamErrorLogText(resp.StatusCode, upstreamMessage)),
+		})
+		writeSanitizedUpstreamError(w, adapter, resp.StatusCode)
+		return forwardResponded
+	}
+
 	if adapter == nil {
-		// 直通路径：入站与上游同为 OpenAI 协议，状态码与响应体原样透传
-		// （上游的错误状态码如 401/403 一并透传，便于客户端自助排查）。
+		// 直通路径：入站与上游同为 OpenAI 协议，成功响应原样透传。
 		copyResponseHeaders(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		flushCopy(w, resp.Body, sniffer)

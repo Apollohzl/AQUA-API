@@ -207,7 +207,7 @@ func TestForward_密钥池自动换密钥_请求最终成功(t *testing.T) {
 	}
 }
 
-func TestForward_密钥池全部失效_透传上游错误并累计失败(t *testing.T) {
+func TestForward_密钥池全部失效_返回本站脱敏错误并累计失败(t *testing.T) {
 	channels, keys := newTestRepos(t)
 	ctx := context.Background()
 
@@ -226,13 +226,16 @@ func TestForward_密钥池全部失效_透传上游错误并累计失败(t *test
 	body, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 
-	// 池内密钥全部失效且没有其他渠道：应把 401 原样透传，
-	// 而不是丢掉上游错误再返回含义模糊的 502
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("无退路时应透传 401，实际 %d：%s", resp.StatusCode, body)
+	// 池内密钥全部失效且没有其他渠道：回本站脱敏错误（502 / upstream_request_failed），
+	// 绝不把上游的 401 与"invalid api key"原文交给下游。
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("上游 401 应脱敏为本站 502，实际 %d：%s", resp.StatusCode, body)
 	}
-	if !strings.Contains(string(body), "invalid api key") {
-		t.Fatalf("错误体应原样透传，实际：%s", body)
+	if !strings.Contains(string(body), "upstream_request_failed") {
+		t.Fatalf("应采用本站错误码 upstream_request_failed，实际：%s", body)
+	}
+	if strings.Contains(string(body), "invalid api key") {
+		t.Fatalf("响应体绝不能出现上游原文，实际：%s", body)
 	}
 
 	// 两把密钥都应被记上一次失败（连续失败达阈值后会被自动摘除）

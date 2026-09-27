@@ -75,10 +75,10 @@ func TestClassifyKeyFailure_识别账号无此模型并还原响应体(t *testin
 		t.Fatalf("失败原因应说明是账号无权限，实际 %q", reason)
 	}
 	if len(snippet) == 0 {
-		t.Fatal("应同时返回响应体片段，供所有重试用尽时透传上游真实原因")
+		t.Fatal("应同时返回响应体片段，供所有重试用尽时写入本站调用日志")
 	}
 
-	// 关键：判定过程中读过响应体，必须还原，否则透传路径会读到残缺内容
+	// 关键：判定过程中读过响应体，必须还原，否则后续读取会拿到残缺内容
 	restored, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("读取还原后的响应体失败: %v", err)
@@ -137,16 +137,17 @@ func TestExtractUpstreamErrorMessage_兼容RFC7807(t *testing.T) {
 	}
 }
 
-// TestForward_账号无此模型_不换密钥且立即透传 是本文件的核心用例。
+// TestForward_账号无此模型_不换密钥且返回本站脱敏错误 是本文件的核心用例。
 //
 // 场景：池里 8 把密钥来自【同质的免费账号】，某模型不在免费范围内。
 //
 // 期望（依据实测结论）：
 //   - 断言只向上游发起了 1 次请求：既然所有账号授权一致，换密钥不可能成功，
 //     多试只会让用户白等（此前 50 次重试实测耗时约 4 秒，纯属浪费）；
-//   - 把上游的 404 与原因原样透传回去：使用者能立刻看懂
-//     "该模型不在当前账号的可用范围内"，而不是拿到含糊的 502。
-func TestForward_账号无此模型_不换密钥且立即透传(t *testing.T) {
+//   - 回本站脱敏错误（502 / upstream_request_failed），绝不把上游的 404、
+//     厂商名与账号标识交给下游（站长已确认：对外一律不暴露上游错误码）。
+//     上游的真实原因（"Not found for account"）改写入本站调用日志，供站长排障。
+func TestForward_账号无此模型_不换密钥且返回本站脱敏错误(t *testing.T) {
 	channels, keys := newTestRepos(t)
 	ctx := context.Background()
 
@@ -173,11 +174,14 @@ func TestForward_账号无此模型_不换密钥且立即透传(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("应透传上游 404，实际 %d：%s", resp.StatusCode, body)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("上游 404 应脱敏为本站 502，实际 %d：%s", resp.StatusCode, body)
 	}
-	if !strings.Contains(string(body), "Not found for account") {
-		t.Fatalf("应透传上游的真实原因，实际：%s", body)
+	if !strings.Contains(string(body), "upstream_request_failed") {
+		t.Fatalf("应采用本站错误码 upstream_request_failed，实际：%s", body)
+	}
+	if strings.Contains(string(body), "Not found for account") || strings.Contains(string(body), "404") {
+		t.Fatalf("响应体绝不能出现上游原文或上游状态码，实际：%s", body)
 	}
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Fatalf("同质账号池下「无此模型」不该换密钥重试，期望 1 次上游请求，实际 %d 次", got)
@@ -297,12 +301,11 @@ func TestServeEmbeddings_缺少model应报400(t *testing.T) {
 	}
 }
 
-// TestForward_全池均无该模型_透传上游404 兜底用例。
+// TestForward_全池均无该模型_返回本站脱敏错误 兜底用例。
 //
 // 场景：池里所有账号都没有该模型的授权。
-// 期望：把上游的 404 原样透传（让用户看到"该模型在当前账号不可用"），
-// 而不是换成含义模糊的 502。
-func TestForward_全池均无该模型_透传上游404(t *testing.T) {
+// 期望：回本站 502 / upstream_request_failed，绝不透传上游的 404 与账号原文。
+func TestForward_全池均无该模型_返回本站脱敏错误(t *testing.T) {
 	channels, keys := newTestRepos(t)
 	ctx := context.Background()
 
@@ -320,10 +323,13 @@ func TestForward_全池均无该模型_透传上游404(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("无退路时应透传上游 404，实际 %d：%s", resp.StatusCode, body)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("上游 404 应脱敏为本站 502，实际 %d：%s", resp.StatusCode, body)
 	}
-	if !strings.Contains(string(body), "Not found for account") {
-		t.Fatalf("上游错误体应被完整透传（含还原后的响应体），实际：%s", body)
+	if !strings.Contains(string(body), "upstream_request_failed") {
+		t.Fatalf("应采用本站错误码 upstream_request_failed，实际：%s", body)
+	}
+	if strings.Contains(string(body), "Not found for account") {
+		t.Fatalf("响应体绝不能出现上游原文，实际：%s", body)
 	}
 }
