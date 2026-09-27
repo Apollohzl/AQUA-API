@@ -16,7 +16,7 @@
  *   balance 的语义固定为：-1=未录入，>=0=已知余额（0 表示已用尽）。
  */
 import { api } from './client'
-import type { ChannelKey } from './types'
+import type { ChannelKey, ChannelKeyQuota } from './types'
 
 /**
  * 带余额字段的密钥。
@@ -61,6 +61,22 @@ export function listChannelKeysWithBalance(
   return api.get<ChannelKeyListResponse>(
     `/admin/channels/${channelId}/keys${reveal ? '?reveal=1' : ''}`,
   )
+}
+
+/**
+ * POST /api/admin/channels/{id}/keys/{keyId}/quota
+ *
+ * 查询某个订阅账号（如 ChatGPT/Codex）的上游额度窗口并落库。
+ *
+ * 为什么按需触发而不是自动轮询：查询会对上游产生真实请求，
+ * 而站长只在"怀疑某个账号快满了"时才需要它；
+ * 落库后调度会自动跳过已用满的账号，所以一次查询足够用很久。
+ */
+export function probeChannelKeyQuota(
+  channelId: number,
+  keyId: number,
+): Promise<ChannelKeyQuota> {
+  return api.post<ChannelKeyQuota>(`/admin/channels/${channelId}/keys/${keyId}/quota`, {})
 }
 
 /**

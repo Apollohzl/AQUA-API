@@ -202,6 +202,23 @@ type channelKeyDTO struct {
 	BalanceUnknown   bool  `json:"balance_unknown"`
 	BalanceExhausted bool  `json:"balance_exhausted"`
 	BalanceUpdatedAt int64 `json:"balance_updated_at"`
+
+	// 订阅账号维度字段（迁移 0028）。对 API Key 型凭据一律为空/未知。
+	//
+	//   - account_id 是上游账号标识，出站时必须随请求带上（缺了上游直接拒绝）；
+	//   - plan_type 是套餐标识（plus / pro / team…），仅用于展示；
+	//   - quota_used_percent / quota_reset_at / quota_checked_at 是上游额度窗口快照，
+	//     由「查询额度」或转发过程中的限流反馈写入；
+	//   - quota_known / quota_exhausted 是给前端直接判定的派生布尔，
+	//     避免前端自己实现"-1 表示未探测""重置时间已过视为已恢复"这两条规则
+	//     （规则只在领域层维护一处，见 model.ChannelKey.QuotaExhausted）。
+	AccountID        string `json:"account_id"`
+	PlanType         string `json:"plan_type"`
+	QuotaUsedPercent int    `json:"quota_used_percent"`
+	QuotaResetAt     int64  `json:"quota_reset_at"`
+	QuotaCheckedAt   int64  `json:"quota_checked_at"`
+	QuotaKnown       bool   `json:"quota_known"`
+	QuotaExhausted   bool   `json:"quota_exhausted"`
 }
 
 // toChannelKeyDTO 把凭据模型转为对外 DTO。
@@ -243,6 +260,14 @@ func toChannelKeyDTO(key *model.ChannelKey, reveal bool) channelKeyDTO {
 		BalanceUnknown:   key.Balance == model.BalanceUnknown,
 		BalanceExhausted: key.BalanceExhausted(),
 		BalanceUpdatedAt: unixOrZero(key.BalanceUpdatedAt),
+
+		AccountID:        key.AccountID,
+		PlanType:         key.PlanType,
+		QuotaUsedPercent: key.QuotaUsedPercent,
+		QuotaResetAt:     unixOrZero(key.QuotaResetAt),
+		QuotaCheckedAt:   unixOrZero(key.QuotaCheckedAt),
+		QuotaKnown:       key.QuotaKnown(),
+		QuotaExhausted:   key.QuotaExhausted(time.Now()),
 	}
 }
 

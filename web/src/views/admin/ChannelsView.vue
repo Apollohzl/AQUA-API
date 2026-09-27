@@ -46,6 +46,7 @@ import {
 } from '@/api/admin'
 import {
   listChannelKeysWithBalance,
+  probeChannelKeyQuota,
   updateChannelKeyBalance,
   type ChannelKeyWithBalance,
 } from '@/api/channel'
@@ -527,6 +528,13 @@ interface ChannelForm {
    * 只填 api_key 走单密钥模式；只填批量密钥走池化轮询模式。
    */
   keysText: string
+  /**
+   * 批量订阅账号凭据文本（订阅类渠道用）。
+   *
+   * 可直接粘贴 Codex CLI 导出的 auth.json，或每行一条 refresh_token；
+   * 留空表示不修改已有订阅账号池。
+   */
+  oauthTokensText: string
   modelText: string
   /**
    * 本渠道可服务的分组清单（多选，至少一项；第一项是「主分组」）。
@@ -560,6 +568,7 @@ function emptyChannelForm(): ChannelForm {
     base_url: '',
     api_key: '',
     keysText: '',
+    oauthTokensText: '',
     modelText: '',
     groups: ['default'],
     priority: 10,
@@ -622,6 +631,7 @@ async function openEdit(channel: Channel): Promise<void> {
     base_url: channel.base_url,
     api_key: '',
     keysText: '',
+    oauthTokensText: '',
     modelText: joinModelList(channel.models),
     groups: channel.groups?.length ? [...channel.groups] : [channel.group || 'default'],
     priority: channel.priority,
@@ -647,6 +657,7 @@ async function openEdit(channel: Channel): Promise<void> {
       base_url: detail.base_url,
       api_key: '',
       keysText: '',
+    oauthTokensText: '',
       modelText: joinModelList(detail.models),
       groups: detail.groups?.length ? [...detail.groups] : [detail.group || 'default'],
       priority: detail.priority,
@@ -669,9 +680,14 @@ function validateForm(): string | null {
   if (!form.value.name.trim()) return '请填写渠道名称'
   if (!form.value.base_url.trim()) return '请填写上游 Base URL'
   if (!/^https?:\/\//i.test(form.value.base_url.trim())) return 'Base URL 需以 http:// 或 https:// 开头'
-  // 新建时必须至少提供一种密钥：单密钥或批量密钥池
-  if (!editing.value && !form.value.api_key.trim() && !form.value.keysText.trim()) {
-    return '新建渠道必须填写密钥（单密钥或批量密钥至少填一项）'
+  // 新建时必须至少提供一种凭据：单密钥 / 批量密钥池 / 订阅账号
+  if (
+    !editing.value &&
+    !form.value.api_key.trim() &&
+    !form.value.keysText.trim() &&
+    !form.value.oauthTokensText.trim()
+  ) {
+    return '新建渠道必须填写凭据（单密钥、批量密钥或订阅账号至少填一项）'
   }
   if (form.value.priority < 0) return '优先级不能为负数'
   if (form.value.weight <= 0) return '权重必须大于 0'
@@ -952,6 +968,65 @@ function keyColumnText(channel: Channel): string {
   return channel.masked_key || '未配置'
 }
 
+/* ── 订阅账号额度（ChatGPT/Codex 等） ───────────────────────────── */
+
+/** 正在查询额度的凭据 ID；0 表示没有进行中的查询 */
+const probingQuotaId = ref(0)
+
+/**
+ * 订阅账号的额度文案。
+ *
+ * 三态必须分开显示："未探测"与"已用 0%"含义完全不同——
+ * 前者是"我们没问过"，后者是"额度充足"。混在一起会让站长误判。
+ */
+function quotaText(key: ChannelKeyWithBalance): string {
+  if (!key.quota_known) return '未探测'
+  return `${key.quota_used_percent}%`
+}
+
+/** 额度文案的徽标样式：用满高亮告警，未探测保持中性 */
+function quotaClass(key: ChannelKeyWithBalance): string {
+  if (!key.quota_known) return 'badge badge-off'
+  if (key.quota_exhausted) return 'badge badge-warn'
+  if (key.quota_used_percent >= 80) return 'badge badge-warn'
+  return 'badge badge-ok'
+}
+
+/** 额度窗口的恢复时间提示（仅在已用满且已知重置时间时有意义） */
+function quotaResetText(key: ChannelKeyWithBalance): string {
+  if (!key.quota_reset_at) return ''
+  return `${formatDateTime(key.quota_reset_at)} 恢复`
+}
+
+/**
+ * 查询该账号的上游额度并就地刷新那一行。
+ *
+ * 为什么只刷一行而不是重拉整表：查询是按需触发的，重拉整表会打断
+ * 站长正在做的其它编辑（比如刚输入的余额草稿）。
+ */
+async function probeQuota(key: ChannelKeyWithBalance): Promise<void> {
+  const channel = keysOfChannel.value
+  if (!channel || probingQuotaId.value) return
+  probingQuotaId.value = key.id
+  try {
+    const result = await probeChannelKeyQuota(channel.id, key.id)
+    if (result.used_percent >= 0) {
+      key.quota_used_percent = result.used_percent
+      key.quota_known = true
+    }
+    key.quota_reset_at = result.reset_at || 0
+    key.quota_checked_at = Math.floor(Date.now() / 1000)
+    // 与后端 QuotaExhausted 的口径保持一致：已用满且重置时间未到才算耗尽
+    key.quota_exhausted = result.used_percent >= 100 && key.quota_reset_at * 1000 > Date.now()
+    if (result.plan_type) key.plan_type = result.plan_type
+    toastSuccess(result.note || '额度快照已更新')
+  } catch (err) {
+    toastError(err instanceof ApiError ? err.message : '额度查询失败')
+  } finally {
+    probingQuotaId.value = 0
+  }
+}
+
 async function submitForm(): Promise<void> {
   const invalid = validateForm()
   if (invalid) {
@@ -990,6 +1065,9 @@ async function submitForm(): Promise<void> {
   if (form.value.api_key.trim()) payload.api_key = form.value.api_key.trim()
   // 批量密钥同理：留空即不动密钥池，防止"只改个名字却清空了 500 把密钥"
   if (form.value.keysText.trim()) payload.keys_text = form.value.keysText
+  // 订阅账号与 API Key 分开提交：后端按类型分别做差集增删，
+  // 因此导入订阅账号不会影响已有密钥池，反之亦然。
+  if (form.value.oauthTokensText.trim()) payload.oauth_tokens_text = form.value.oauthTokensText
 
   saving.value = true
   formError.value = ''
@@ -1604,6 +1682,25 @@ sk-yyyyyyyyyyyy</pre>
           </p>
         </div>
 
+        <!-- 订阅账号（ChatGPT/Codex 等）：与 API Key 分开导入。
+             两类凭据的增删互不影响，因此"补一批账号"不会动到密钥池。 -->
+        <div>
+          <label class="label" for="channel-oauth-tokens">订阅账号（OAuth 凭据）</label>
+          <textarea
+            id="channel-oauth-tokens"
+            v-model="form.oauthTokensText"
+            class="input input-mono h-32 resize-y"
+            placeholder="直接粘贴 Codex 的 auth.json 即可（也支持 JSON 数组 / 每行一个 JSON）。&#10;或每行一条 refresh_token 备注文字"
+          />
+          <p class="hint">
+            适用于 <strong>ChatGPT / Codex 订阅账号</strong>这类需要 OAuth 的渠道：
+            粘贴官方 CLI 导出的 <code>auth.json</code> 就会自动识别 access_token / refresh_token / 账号标识与套餐，
+            过期时由网关自动续期——你不需要知道 token 端点或客户端 ID。
+            以 <code>#</code> 开头的行会被忽略。
+            <span v-if="editing" class="text-amber-700">编辑时留空表示不修改已有订阅账号。</span>
+          </p>
+        </div>
+
         <!-- ── 模型与模型 ID 映射（两块）────────────────────────────
              把两个名字的职责直接写在界面上，避免"到底哪个名字会发给上游"这类误解：
                平台模型 ID（对外）= 用户 / SDK 调用时使用的名字，也是模型广场展示的名字；
@@ -1940,6 +2037,7 @@ sk-yyyyyyyyyyyy</pre>
                 <th>备注</th>
                 <th>可用性</th>
                 <th>余额</th>
+                <th>套餐 / 额度</th>
                 <th class="text-right">连续失败</th>
                 <th class="text-right">权重</th>
                 <th class="text-right">优先级</th>
@@ -2002,6 +2100,41 @@ sk-yyyyyyyyyyyy</pre>
                       {{ key.balance_updated_at ? '更新于 ' + formatDateTime(key.balance_updated_at) : '未录入' }}
                     </span>
                   </div>
+                </td>
+
+                <!-- 套餐 / 额度：只对订阅账号有意义（API Key 没有上游额度窗口）。
+                     "未探测"与"已用 0%"必须区分显示——前者是没问过，后者是额度充足。 -->
+                <td data-label="套餐 / 额度">
+                  <div v-if="key.kind === 'oauth'" class="flex flex-col gap-1">
+                    <div class="flex items-center gap-1.5">
+                      <span :class="quotaClass(key)">{{ quotaText(key) }}</span>
+                      <span v-if="key.plan_type" class="chip">{{ key.plan_type }}</span>
+                      <button
+                        type="button"
+                        class="btn btn-row"
+                        title="向上游查询该账号的额度窗口（已用满的账号会自动退出调度）"
+                        :disabled="probingQuotaId === key.id"
+                        @click="probeQuota(key)"
+                      >
+                        <span
+                          v-if="probingQuotaId === key.id"
+                          class="mx-auto block h-3.5 w-3.5 animate-spin rounded-full border-2 border-ink-600 border-t-brand-400"
+                        />
+                        <AppIcon v-else name="refresh" :size="14" />
+                      </button>
+                    </div>
+                    <span v-if="key.quota_exhausted && quotaResetText(key)" class="text-xs text-amber-700">
+                      {{ quotaResetText(key) }}
+                    </span>
+                    <span v-else-if="key.quota_checked_at" class="text-xs text-ink-300">
+                      查询于 {{ formatDateTime(key.quota_checked_at) }}
+                    </span>
+                    <!-- 账号标识缺失时上游会直接拒绝请求，提前提示比等 401 更好 -->
+                    <span v-if="!key.account_id" class="text-xs text-amber-700">
+                      缺少账号标识，请重新导入该账号
+                    </span>
+                  </div>
+                  <span v-else class="text-ink-400">—</span>
                 </td>
 
                 <td class="cell-num" data-label="连续失败">{{ key.fail_count }}</td>

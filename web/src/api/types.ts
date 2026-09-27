@@ -421,6 +421,10 @@ export interface KeyPoolSummary {
 /** 密钥池内的单把密钥（只含掩码，明文永不返回） */
 export interface ChannelKey {
   id: number
+  /** 凭据类型：api_key（静态密钥）/ oauth（订阅账号）；后端 channelKeyDTO.kind */
+  kind: string
+  /** 凭据类型的中文名（"API Key" / "订阅账号"），由后端下发，前端不硬编码 */
+  kind_text: string
   label: string
   masked_key: string
   status: number
@@ -439,6 +443,39 @@ export interface ChannelKey {
   in_flight: number
   /** 冷却截止时间的 Unix 秒（0 = 无冷却）；只读，由前端换算剩余时间 */
   cooldown_until: number
+  /**
+   * 以下为订阅账号（如 ChatGPT/Codex）专有字段（迁移 0028）。
+   *
+   * 对 API Key 型凭据一律为空/未知：account_id 为空串、quota_used_percent 为 -1。
+   */
+  account_id: string
+  /** 套餐标识（plus / pro / team…）；空串表示未知 */
+  plan_type: string
+  /** 上游额度窗口已用百分比；-1 表示尚未探测 */
+  quota_used_percent: number
+  /** 额度窗口重置时间的 Unix 秒（0 = 未知） */
+  quota_reset_at: number
+  /** 上次探测额度的 Unix 秒（0 = 从未探测） */
+  quota_checked_at: number
+  /** 是否已探测过额度（后端派生，避免前端自己实现 -1 的规则） */
+  quota_known: boolean
+  /** 额度是否已用满（后端已考虑"重置时间已过视为已恢复"） */
+  quota_exhausted: boolean
+}
+
+/** POST /api/admin/channels/{id}/keys/{keyId}/quota 响应 */
+export interface ChannelKeyQuota {
+  key_id: number
+  plan_type: string
+  /** 已用百分比；-1 表示上游未提供额度窗口 */
+  used_percent: number
+  /** 重置时间（Unix 秒，0 = 未知） */
+  reset_at: number
+  email: string
+  /** 上游是否明确告知"当前已触顶" */
+  limit_reached: boolean
+  /** 后端给出的说明文案（成功/未提供额度窗口），前端直接展示 */
+  note: string
 }
 
 /** PUT /api/admin/keys/{keyId} 请求体：状态与调度参数均可选，仅提交变更项 */
@@ -549,6 +586,20 @@ export interface ChannelPayload {
    * 留空表示"不修改密钥池"（避免只改个名字就把几百把密钥清空）。
    */
   keys_text?: string
+  /**
+   * 批量订阅账号凭据文本（ChatGPT/Codex 等 OAuth 账号）。
+   *
+   * 可直接粘贴 Codex CLI 导出的 auth.json（JSON 数组 / JSONL 也支持），
+   * 或每行一条 refresh_token。留空表示"不修改订阅账号池"。
+   * 与 keys_text 分开提交：两类凭据的增删互不影响。
+   */
+  oauth_tokens_text?: string
+  /**
+   * 订阅账号的 OAuth 提供方名称；留空时由后端按渠道类型自动选择内置预设。
+   *
+   * 站长通常不需要填——刷新所需的 token 端点与 client_id 是内置的。
+   */
+  oauth_provider?: string
 }
 
 /** POST /api/admin/channels/{id}/test 响应 */
