@@ -260,7 +260,9 @@ func TestToken_MaskedKey(t *testing.T) {
 	}{
 		{name: "空 KEY", key: "", want: ""},
 		{name: "过短完全遮蔽", key: "sk-ab", want: "*****"},
-		{name: "标准 KEY 保留前后段", key: "sk-0123456789abcdefghij", want: "sk-012****ghij"},
+		// 短于下限（24）一律全遮蔽：否则露出的字符几乎等于明文
+		{name: "短于下限完全遮蔽", key: "sk-0123456789abc", want: "****************"},
+		{name: "标准 KEY 保留前后段", key: "sk-abcdef1234567890abcdef1234567890abcdef1234567890", want: "sk-abc****7890"},
 	}
 
 	for _, tc := range cases {

@@ -121,7 +121,10 @@ func TestChannel_MaskedAPIKey(t *testing.T) {
 		{name: "空密钥返回空", key: "", want: ""},
 		{name: "短密钥完全遮蔽", key: "short", want: "*****"},
 		{name: "恰好等于保留长度时完全遮蔽", key: "0123456789", want: "**********"},
-		{name: "正常密钥保留前后缀", key: "sk-abcdefghijklmnop", want: "sk-abc****mnop"},
+		// 11 位密钥若按"前后各留一段"处理，会露出 10 位（几乎等于明文）：
+		// 这条用例把"短于下限一律全遮蔽"钉死，防止有人把下限改回去。
+		{name: "略长于保留长度仍完全遮蔽", key: "01234567890", want: "***********"},
+		{name: "达到下限才保留前后缀", key: "sk-abcdefghijklmnopq", want: "sk-abc****nopq"},
 		{name: "NVIDIA 风格密钥", key: "nvapi-0123456789abcdefghij", want: "nvapi-****ghij"},
 	}
 

@@ -516,8 +516,11 @@ func (k *ChannelKey) Masked() string {
 	const (
 		keepPrefix = 8
 		keepSuffix = 4
+		// minMaskableLen 见 Channel.MaskedAPIKey 的同类说明：
+		// 露出的 8+4=12 个字符必须在密钥里只占一小部分，否则脱敏等于没做。
+		minMaskableLen = 24
 	)
-	if len(key) <= keepPrefix+keepSuffix {
+	if len(key) < minMaskableLen {
 		return strings.Repeat("*", len(key))
 	}
 	return key[:keepPrefix] + "****" + key[len(key)-keepSuffix:]

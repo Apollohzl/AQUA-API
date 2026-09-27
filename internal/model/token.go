@@ -294,14 +294,19 @@ func (t *Token) EffectiveStatus(now time.Time) TokenStatus {
 //
 // 脱敏规则：保留前缀与末 4 位，例如 "sk-abcdef12...cdef" → "sk-abc****cdef"。
 // 目的：让使用者能辨认是哪把令牌，同时不足以被直接盗用。
+//
+// 长度下限：见 Channel.MaskedAPIKey 的同类说明——露出的字符必须在密钥里
+// 只占一小部分。令牌恒由 GenerateTokenKey 生成 51 位，此下限只为防御性兜底，
+// 避免有人把测试值或外部导入的短密钥塞进 Token.Key 时脱敏退化为全暴露。
 func (t *Token) MaskedKey() string {
-	const keepSuffix = 4
+	const (
+		keepSuffix = 4
+		// minMaskableLen = 露出的 (前缀+3) + 4 个字符仍只占少数
+		minMaskableLen = 24
+	)
 
 	key := t.Key
-	if key == "" {
-		return ""
-	}
-	if len(key) <= len(TokenKeyPrefix)+keepSuffix {
+	if len(key) < minMaskableLen {
 		return strings.Repeat("*", len(key))
 	}
 	return key[:len(TokenKeyPrefix)+3] + "****" + key[len(key)-keepSuffix:]

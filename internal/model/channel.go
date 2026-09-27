@@ -283,17 +283,19 @@ func (c *Channel) HasModel(name string) bool {
 // 脱敏规则：保留前 6 位与后 4 位，中间用 **** 替代。
 // 例如 "nvapi-abcdefghijklmn" → "nvapi-****klmn"。
 // 说明：截断展示既能帮助运维辨认是"哪把钥匙"，又不足以被直接盗用。
+//
+// 长度下限（minMaskableLen）：保留 6+4=10 个字符，因此只有当密钥明显长于它时
+// 才值得露片段。否则 11 位的密钥会露出 10 位（几乎等于明文）——
+// 短密钥本身强度就弱，脱敏的意义恰恰在这里最大，所以宁可不露。
 func (c *Channel) MaskedAPIKey() string {
 	const (
 		keepPrefix = 6
 		keepSuffix = 4
+		// minMaskableLen 是"允许露出前后缀"的最小密钥长度（20 位时恰好露一半）
+		minMaskableLen = 20
 	)
 	key := c.APIKey
-	// 过短的密钥一律完全遮蔽，避免脱敏后仍可推断
-	if len(key) <= keepPrefix+keepSuffix {
-		if key == "" {
-			return ""
-		}
+	if len(key) < minMaskableLen {
 		return strings.Repeat("*", len(key))
 	}
 	return key[:keepPrefix] + "****" + key[len(key)-keepSuffix:]
