@@ -52,22 +52,40 @@ const (
 //     （可能包含上游地址或密钥片段）；
 //   - RequestID 用于与客户端日志对账，排查"客户端说失败、服务端说成功"这类问题。
 type UsageLog struct {
-	ID               uint64    // 主键
-	UserID           uint64    // 调用者用户 ID（0 表示未认证或系统调用）
-	TokenID          uint64    // 使用的访问令牌 ID
-	ChannelID        uint64    // 命中的上游渠道 ID
-	Model            string    // 请求的模型名（对外模型名）
-	UpstreamModel    string    // 实际发给上游的模型名（经渠道映射改写）；空串表示与 Model 相同
-	PromptTokens     int       // 输入 token 数
-	CompletionTokens int       // 输出 token 数
-	TotalTokens      int       // 总 token 数
-	Quota            int64     // 本次消耗额度（内部单位）
-	LatencyMS        int       // 总耗时（毫秒）
-	IsStream         bool      // 是否流式请求
-	StatusCode       int       // 回写给客户端的状态码
-	Error            string    // 失败原因（已脱敏、简短）
-	RequestID        string    // 请求标识
-	CreatedAt        time.Time // 记录时间
+	ID               uint64 // 主键
+	UserID           uint64 // 调用者用户 ID（0 表示未认证或系统调用）
+	TokenID          uint64 // 使用的访问令牌 ID
+	ChannelID        uint64 // 命中的上游渠道 ID
+	Model            string // 请求的模型名（对外模型名）
+	UpstreamModel    string // 实际发给上游的模型名（经渠道映射改写）；空串表示与 Model 相同
+	PromptTokens     int    // 输入 token 数
+	CompletionTokens int    // 输出 token 数
+	TotalTokens      int    // 总 token 数
+	// CachedTokens 是输入中命中上游缓存的 token 数（迁移 0026）。
+	//
+	// 为什么单独记：这部分通常按更低价计费，是核对账单与评估
+	// "提示词前缀复用"效果的唯一依据；0 表示上游未返回该字段（不是"没有命中"）。
+	CachedTokens int
+	// ReasoningTokens 是输出中属于"推理过程"的 token 数（迁移 0026）。
+	//
+	// 它计入输出但用户看不到，出账时最容易引起争议，必须单独可查。
+	ReasoningTokens int
+	// FirstTokenMS 是首个响应字节的到达时间（TTFB，毫秒；0 = 未采集/非流式）。
+	//
+	// 只对非流式请求没有意义：那种情况响应一次性返回，不存在"首 token 延迟"。
+	FirstTokenMS int
+	// TokensPerSecond 是输出速率（tokens/s；0 表示无法计算）。
+	//
+	// 计算口径：CompletionTokens / (总耗时 − 首 token 延迟)。
+	// 用总耗时会随回答变长而低估生成速度，因此必须扣除排队与首包时间。
+	TokensPerSecond float64
+	Quota           int64     // 本次消耗额度（内部单位）
+	LatencyMS       int       // 总耗时（毫秒）
+	IsStream        bool      // 是否流式请求
+	StatusCode      int       // 回写给客户端的状态码
+	Error           string    // 失败原因（已脱敏、简短）
+	RequestID       string    // 请求标识
+	CreatedAt       time.Time // 记录时间
 }
 
 // Validate 校验日志的必要字段。
@@ -114,6 +132,30 @@ type UsageSummary struct {
 	Success  int64 // 成功数（2xx）
 	Tokens   int64 // token 总量
 	Quota    int64 // 额度总量
+	// PromptTokens / CompletionTokens 把总量拆成"输入"与"输出"。
+	//
+	// 为什么必须拆：两者的成本与优化手段完全不同（输入可缓存复用、输出受生成速度限制），
+	// 只看 total 无法回答"成本涨在输入还是输出上"。
+	PromptTokens     int64
+	CompletionTokens int64
+	// CachedTokens 是输入中命中上游缓存的 token 总量（评估缓存收益的依据）。
+	CachedTokens int64
+	// ReasoningTokens 是输出中的推理 token 总量（出账争议的主要来源）。
+	ReasoningTokens int64
+	// LatencySumMS 是总耗时之和与成功请求数，用于算平均总延迟。
+	LatencySumMS int64
+	// FirstTokenSumMS / FirstTokenSamples 用于算平均首 token 延迟（TTFB）。
+	//
+	// 单独统计样本数而不是复用 Requests：非流式请求不产生 TTFB（值为 0），
+	// 若把它算进平均会把"平均首 token 延迟"拉低成没有意义的数字。
+	FirstTokenSumMS   int64
+	FirstTokenSamples int64
+	// TPSSum / TPSSamples 用于算平均输出速率。
+	//
+	// 同样单独计样本：速率只在"有输出 token 且时长可算"时才存在，
+	// 用请求总数做分母会得到偏低且不可解释的平均值。
+	TPSSum     float64
+	TPSSamples int64
 }
 
 // SuccessRate 返回成功率（0~1）；无请求时返回 0。
@@ -124,12 +166,52 @@ func (s UsageSummary) SuccessRate() float64 {
 	return float64(s.Success) / float64(s.Requests)
 }
 
+// CacheHitRate 返回输入缓存命中率（0~1）；输入为 0 时返回 0。
+//
+// 口径：CachedTokens / PromptTokens。上游把"命中缓存的输入"算在 PromptTokens 内，
+// 因此这个比值就是"输入里有多大比例是复用的"。
+func (s UsageSummary) CacheHitRate() float64 {
+	if s.PromptTokens <= 0 {
+		return 0
+	}
+	return float64(s.CachedTokens) / float64(s.PromptTokens)
+}
+
+// AvgLatencyMS 返回平均总耗时（毫秒）；无请求时返回 0。
+func (s UsageSummary) AvgLatencyMS() int64 {
+	if s.Requests <= 0 {
+		return 0
+	}
+	return s.LatencySumMS / s.Requests
+}
+
+// AvgFirstTokenMS 返回平均首 token 延迟（毫秒）；无样本时返回 0。
+func (s UsageSummary) AvgFirstTokenMS() int64 {
+	if s.FirstTokenSamples <= 0 {
+		return 0
+	}
+	return s.FirstTokenSumMS / s.FirstTokenSamples
+}
+
+// AvgTokensPerSecond 返回平均输出速率（tokens/s）；无样本时返回 0。
+func (s UsageSummary) AvgTokensPerSecond() float64 {
+	if s.TPSSamples <= 0 {
+		return 0
+	}
+	return s.TPSSum / float64(s.TPSSamples)
+}
+
 // DailyUsage 是单日用量，用于趋势图。
 type DailyUsage struct {
 	Date     string // 日期，格式 2006-01-02
 	Requests int64  // 请求数
 	Tokens   int64  // token 数
 	Quota    int64  // 额度
+	// CachedTokens 是当日输入中命中上游缓存的 token 数。
+	//
+	// 放进趋势而不仅仅放汇总：缓存命中率的"趋势"比单点数字更有价值——
+	// 它反映提示词前缀复用是否在持续生效，掉下去往往意味着代码改动破坏了前缀。
+	CachedTokens int64
 }
 
 // ModelUsage 是单个模型的用量，用于排行榜。

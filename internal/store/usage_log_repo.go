@@ -42,7 +42,8 @@ const defaultSeriesDays = 7
 
 // usageLogColumns 集中定义查询列，顺序必须与 scanUsageLog 的扫描顺序严格一致。
 const usageLogColumns = `id, user_id, token_id, channel_id, model, upstream_model, prompt_tokens, completion_tokens,
-	total_tokens, quota, latency_ms, is_stream, status_code, error, request_id, created_at`
+	total_tokens, cached_tokens, reasoning_tokens, first_token_ms, tokens_per_second,
+	quota, latency_ms, is_stream, status_code, error, request_id, created_at`
 
 // usageLogRepository 是 model.UsageLogRepository 的 SQL 实现，并发安全。
 type usageLogRepository struct {
@@ -69,10 +70,12 @@ func (r *usageLogRepository) Create(ctx context.Context, log *model.UsageLog) er
 	res, err := r.db.ExecContext(ctx, `
 		INSERT INTO usage_logs
 			(user_id, token_id, channel_id, model, upstream_model, prompt_tokens, completion_tokens, total_tokens,
+			 cached_tokens, reasoning_tokens, first_token_ms, tokens_per_second,
 			 quota, latency_ms, is_stream, status_code, error, request_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		log.UserID, log.TokenID, log.ChannelID, log.Model, log.UpstreamModel,
 		log.PromptTokens, log.CompletionTokens, log.TotalTokens,
+		log.CachedTokens, log.ReasoningTokens, log.FirstTokenMS, log.TokensPerSecond,
 		log.Quota, log.LatencyMS, boolToInt(log.IsStream), log.StatusCode,
 		log.Error, log.RequestID, log.CreatedAt.Unix(),
 	)
@@ -147,13 +150,26 @@ func (r *usageLogRepository) Count(ctx context.Context, q model.UsageLogQuery) (
 func (r *usageLogRepository) Summary(ctx context.Context, q model.UsageLogQuery) (*model.UsageSummary, error) {
 	where, args := buildUsageWhere(q)
 
-	// 用 CASE WHEN 统计成功数，避免为"成功率"再发一次查询
+	// 用 CASE WHEN 统计成功数，避免为"成功率"再发一次查询。
+	//
+	// 平均延迟/首 token/速率都按"有样本才算"的口径求和：
+	//   - TTFB 只在流式且确有首包时才有值，用请求总数当分母会把它拉低成无意义的数字；
+	//   - 输出速率只在"有输出且时长可算"时才有值，同理单独计样本。
 	sb := strings.Builder{}
 	sb.WriteString(`SELECT
 			COUNT(1),
 			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(total_tokens), 0),
-			COALESCE(SUM(quota), 0)
+			COALESCE(SUM(quota), 0),
+			COALESCE(SUM(prompt_tokens), 0),
+			COALESCE(SUM(completion_tokens), 0),
+			COALESCE(SUM(cached_tokens), 0),
+			COALESCE(SUM(reasoning_tokens), 0),
+			COALESCE(SUM(latency_ms), 0),
+			COALESCE(SUM(CASE WHEN first_token_ms > 0 THEN first_token_ms ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN first_token_ms > 0 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN tokens_per_second > 0 THEN tokens_per_second ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN tokens_per_second > 0 THEN 1 ELSE 0 END), 0)
 		FROM usage_logs`)
 	if where != "" {
 		sb.WriteString(" WHERE " + where)
@@ -161,7 +177,12 @@ func (r *usageLogRepository) Summary(ctx context.Context, q model.UsageLogQuery)
 
 	var summary model.UsageSummary
 	if err := r.db.QueryRowContext(ctx, sb.String(), args...).Scan(
-		&summary.Requests, &summary.Success, &summary.Tokens, &summary.Quota); err != nil {
+		&summary.Requests, &summary.Success, &summary.Tokens, &summary.Quota,
+		&summary.PromptTokens, &summary.CompletionTokens,
+		&summary.CachedTokens, &summary.ReasoningTokens,
+		&summary.LatencySumMS,
+		&summary.FirstTokenSumMS, &summary.FirstTokenSamples,
+		&summary.TPSSum, &summary.TPSSamples); err != nil {
 		return nil, fmt.Errorf("store: 汇总用量失败: %w", err)
 	}
 	return &summary, nil
@@ -188,7 +209,8 @@ func (r *usageLogRepository) DailySeries(ctx context.Context, q model.UsageLogQu
 			` + r.dialect.DayBucket("created_at") + ` AS day,
 			COUNT(1),
 			COALESCE(SUM(total_tokens), 0),
-			COALESCE(SUM(quota), 0)
+			COALESCE(SUM(quota), 0),
+			COALESCE(SUM(cached_tokens), 0)
 		FROM usage_logs`)
 	if where != "" {
 		sb.WriteString(" WHERE " + where)
@@ -205,7 +227,7 @@ func (r *usageLogRepository) DailySeries(ctx context.Context, q model.UsageLogQu
 	byDay := make(map[string]model.DailyUsage)
 	for rows.Next() {
 		var item model.DailyUsage
-		if err := rows.Scan(&item.Date, &item.Requests, &item.Tokens, &item.Quota); err != nil {
+		if err := rows.Scan(&item.Date, &item.Requests, &item.Tokens, &item.Quota, &item.CachedTokens); err != nil {
 			return nil, fmt.Errorf("store: 读取按天聚合结果失败: %w", err)
 		}
 		byDay[item.Date] = item
@@ -357,6 +379,10 @@ func scanUsageLog(sc rowScanner) (*model.UsageLog, error) {
 		promptTokens     int
 		completionTokens int
 		totalTokens      int
+		cachedTokens     int
+		reasoningTokens  int
+		firstTokenMS     int
+		tokensPerSecond  float64
 		quota            int64
 		latencyMS        int
 		isStream         int
@@ -367,7 +393,9 @@ func scanUsageLog(sc rowScanner) (*model.UsageLog, error) {
 	)
 
 	if err := sc.Scan(&id, &userID, &tokenID, &channelID, &modelName, &upstreamModel,
-		&promptTokens, &completionTokens, &totalTokens, &quota, &latencyMS,
+		&promptTokens, &completionTokens, &totalTokens,
+		&cachedTokens, &reasoningTokens, &firstTokenMS, &tokensPerSecond,
+		&quota, &latencyMS,
 		&isStream, &statusCode, &errMsg, &requestID, &createdAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
@@ -385,6 +413,10 @@ func scanUsageLog(sc rowScanner) (*model.UsageLog, error) {
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 		TotalTokens:      totalTokens,
+		CachedTokens:     cachedTokens,
+		ReasoningTokens:  reasoningTokens,
+		FirstTokenMS:     firstTokenMS,
+		TokensPerSecond:  tokensPerSecond,
 		Quota:            quota,
 		LatencyMS:        latencyMS,
 		IsStream:         isStream != 0,

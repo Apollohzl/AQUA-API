@@ -844,6 +844,15 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 	// 只要上游返回过就能取到（旧实现受 256KB 上限影响，长回答会被整段丢弃而记 0）。
 	usage, hasUsage := sniffer.Usage()
 	identity := identityFromRequest(req.Context())
+	// 用时与速率指标：在响应已完整回传后计算，不影响客户端可见延迟。
+	//
+	// 首 token 延迟（TTFB）取抓取器记录的首个非空分片时刻；
+	// 非流式请求没有 TTFB（响应一次性返回），此时记 0，展示层会显示「—」。
+	totalMS := int(time.Since(start).Milliseconds())
+	firstTokenMS := 0
+	if first := sniffer.FirstByteAt(); !first.IsZero() {
+		firstTokenMS = int(first.Sub(start).Milliseconds())
+	}
 	entry := usageEntry{
 		UserID:    identity.UserID,
 		TokenID:   identity.TokenID,
@@ -851,11 +860,13 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 		ChannelID: ch.ID,
 		Model:     modelName,
 		// 仅当映射改写了模型名时才记录上游名（否则为空串，表示与对外名一致）。
-		UpstreamModel: upstreamModelForLog(upstreamModel, modelRewritten),
-		Usage:         usage,
-		LatencyMS:     int(time.Since(start).Milliseconds()),
-		IsStream:      oai.PeekStream(body),
-		StatusCode:    resp.StatusCode,
+		UpstreamModel:   upstreamModelForLog(upstreamModel, modelRewritten),
+		Usage:           usage,
+		LatencyMS:       totalMS,
+		FirstTokenMS:    firstTokenMS,
+		TokensPerSecond: tokensPerSecond(usage.CompletionTokens, totalMS, firstTokenMS),
+		IsStream:        oai.PeekStream(body),
+		StatusCode:      resp.StatusCode,
 	}
 	if !hasUsage {
 		// 上游确实没返回 usage：token 只能记 0，但必须留下标注，

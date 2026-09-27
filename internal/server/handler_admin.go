@@ -138,6 +138,16 @@ func (s *Server) handleDashboard(c *gin.Context) {
 			"tokens":       todaySummary.Tokens,
 			"quota":        todaySummary.Quota,
 			"success_rate": todaySummary.SuccessRate(),
+			// 用量细节：把总量拆成输入/输出/缓存/推理，站长才能回答
+			// "成本涨在输入还是输出""缓存到底省了多少"。
+			"prompt_tokens":         todaySummary.PromptTokens,
+			"completion_tokens":     todaySummary.CompletionTokens,
+			"cached_tokens":         todaySummary.CachedTokens,
+			"reasoning_tokens":      todaySummary.ReasoningTokens,
+			"cache_hit_rate":        todaySummary.CacheHitRate(),
+			"avg_latency_ms":        todaySummary.AvgLatencyMS(),
+			"avg_first_token_ms":    todaySummary.AvgFirstTokenMS(),
+			"avg_tokens_per_second": todaySummary.AvgTokensPerSecond(),
 		},
 		"recent_days": toDailyUsageDTOList(series),
 		"top_models":  toModelUsageDTOList(topModels),

@@ -407,12 +407,26 @@ type usageLogDTO struct {
 	PromptTokens     int    `json:"prompt_tokens"`
 	CompletionTokens int    `json:"completion_tokens"`
 	TotalTokens      int    `json:"total_tokens"`
-	Quota            int64  `json:"quota"`
-	LatencyMS        int    `json:"latency_ms"`
-	IsStream         bool   `json:"is_stream"`
-	StatusCode       int    `json:"status_code"`
-	Error            string `json:"error"`
-	CreatedAt        int64  `json:"created_at"`
+	// CachedTokens / ReasoningTokens 是上游回报的用量细节（0 = 上游未提供）。
+	//
+	// 它们决定"这条记录为什么扣这么多/为什么便宜"：
+	//   - 缓存命中部分通常按更低价计费，是核对账单与评估提示词复用的依据；
+	//   - 推理 token 计入输出但使用者看不到，是出账争议的主要来源。
+	CachedTokens    int `json:"cached_tokens"`
+	ReasoningTokens int `json:"reasoning_tokens"`
+	// FirstTokenMS 是首 token 延迟（毫秒，0 = 非流式/未采集）；
+	// TokensPerSecond 是输出速率（0 = 无法计算）。
+	//
+	// 这两个是"模型快不快"的核心指标：总耗时 30 秒可能只是回答长，
+	// 首包 3 秒与 20 秒的体验完全不同，必须分开看。
+	FirstTokenMS    int     `json:"first_token_ms"`
+	TokensPerSecond float64 `json:"tokens_per_second"`
+	Quota           int64   `json:"quota"`
+	LatencyMS       int     `json:"latency_ms"`
+	IsStream        bool    `json:"is_stream"`
+	StatusCode      int     `json:"status_code"`
+	Error           string  `json:"error"`
+	CreatedAt       int64   `json:"created_at"`
 }
 
 // toUsageLogDTO 把日志模型转为对外 DTO。
@@ -437,6 +451,10 @@ func toUsageLogDTO(log *model.UsageLog, usernames map[uint64]string, channelName
 		PromptTokens:     log.PromptTokens,
 		CompletionTokens: log.CompletionTokens,
 		TotalTokens:      log.TotalTokens,
+		CachedTokens:     log.CachedTokens,
+		ReasoningTokens:  log.ReasoningTokens,
+		FirstTokenMS:     log.FirstTokenMS,
+		TokensPerSecond:  log.TokensPerSecond,
 		Quota:            log.Quota,
 		LatencyMS:        log.LatencyMS,
 		IsStream:         log.IsStream,
@@ -456,6 +474,8 @@ type dailyUsageDTO struct {
 	Requests int64  `json:"requests"`
 	Tokens   int64  `json:"tokens"`
 	Quota    int64  `json:"quota"`
+	// CachedTokens 是当日命中的缓存 token（用于画缓存命中趋势）
+	CachedTokens int64 `json:"cached_tokens"`
 }
 
 // toDailyUsageDTOList 批量转换趋势数据。
@@ -463,10 +483,11 @@ func toDailyUsageDTOList(items []model.DailyUsage) []dailyUsageDTO {
 	result := make([]dailyUsageDTO, 0, len(items))
 	for _, item := range items {
 		result = append(result, dailyUsageDTO{
-			Date:     item.Date,
-			Requests: item.Requests,
-			Tokens:   item.Tokens,
-			Quota:    item.Quota,
+			Date:         item.Date,
+			Requests:     item.Requests,
+			Tokens:       item.Tokens,
+			Quota:        item.Quota,
+			CachedTokens: item.CachedTokens,
 		})
 	}
 	return result

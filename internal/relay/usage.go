@@ -48,6 +48,15 @@ type openAIUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	// CachedTokens 是输入中命中上游缓存的 token 数（0 表示上游未提供该维度）。
+	//
+	// 单独采集的原因：这部分通常按更低价计费，是核对账单与评估
+	// "提示词前缀复用"收益的唯一依据。
+	CachedTokens int `json:"cached_tokens"`
+	// ReasoningTokens 是输出中属于推理过程的 token 数（0 表示上游未提供）。
+	//
+	// 它计入输出但使用者看不到，是出账争议的主要来源，必须单独可查。
+	ReasoningTokens int `json:"reasoning_tokens"`
 }
 
 // rawUsage 是 usage 对象的宽松表示，用于兼容不同上游的字段命名：
@@ -62,6 +71,18 @@ type rawUsage struct {
 	TotalTokens      int `json:"total_tokens"`
 	InputTokens      int `json:"input_tokens"`
 	OutputTokens     int `json:"output_tokens"`
+	// 嵌套明细：各上游的字段位置并不统一（OpenAI 放 prompt_tokens_details，
+	// DeepSeek 等也放同一处；Anthropic 则直接给 cache_read_input_tokens），
+	// 因此两处都解析，取到非零值即采用。
+	PromptTokensDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+	CompletionTokensDetails struct {
+		ReasoningTokens int `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details"`
+	// Anthropic 口径的缓存命中字段（写在 usage 顶层）。
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 }
 
 // normalize 把宽松表示归一化为内部口径。
@@ -84,6 +105,12 @@ func (r rawUsage) normalize() (openAIUsage, bool) {
 	if usage.TotalTokens == 0 {
 		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	}
+	// 缓存命中：优先 OpenAI 的嵌套字段，其次 Anthropic 的顶层字段
+	usage.CachedTokens = r.PromptTokensDetails.CachedTokens
+	if usage.CachedTokens == 0 {
+		usage.CachedTokens = r.CacheReadInputTokens
+	}
+	usage.ReasoningTokens = r.CompletionTokensDetails.ReasoningTokens
 	if usage.PromptTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0 {
 		return openAIUsage{}, false
 	}
@@ -124,6 +151,11 @@ type usageSniffer struct {
 	tail  []byte      // 尚未解析完的尾部（可能含未闭合的 usage 对象）
 	usage openAIUsage // 最后一次解析到的非空 usage
 	found bool
+	// firstByteAt 是首个非空数据块到达的时刻（TTFB）。
+	//
+	// 为什么在这里记：抓取器是响应体流经网关的唯一必经之处，
+	// 在这里打点不需要改动转发主循环，也不会漏掉任何一个分片。
+	firstByteAt time.Time
 }
 
 // newUsageSniffer 创建抓取器。
@@ -136,9 +168,18 @@ func (u *usageSniffer) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
+	// 首个非空分片即"首字节"：TTFB 的语义就是"上游多久开始吐内容"。
+	if u.firstByteAt.IsZero() {
+		u.firstByteAt = time.Now()
+	}
 	u.tail = append(u.tail, p...)
 	u.scan()
 	return len(p), nil
+}
+
+// FirstByteAt 返回首个非空分片的时刻；零值表示没有任何响应体。
+func (u *usageSniffer) FirstByteAt() time.Time {
+	return u.firstByteAt
 }
 
 // Usage 返回解析到的最佳用量：最后一次非空 usage；found 为 false 表示整段响应里没有用量。
@@ -315,6 +356,33 @@ func withStreamUsageOption(body []byte, enabled bool) []byte {
 // 成功/失败统计依据的是 status_code，不受影响）。
 const usageMissingNote = "未取得 usage（上游未返回用量，token 记 0）"
 
+// tokensPerSecond 计算输出速率（tokens/s）。
+//
+// 口径：输出 token / (总耗时 − 首 token 延迟)。
+//
+// 为什么要扣掉首包时间：首包时长由上游排队与预填充决定，与"生成速度"无关。
+// 若用总耗时做分母，同一个模型在长回答上会显示得更慢，
+// 指标就失去可比性（这也是 new-api 等同类站点的通行口径）。
+//
+// 返回 0 表示无法计算：
+//   - 没有输出 token（例如纯工具调用或失败响应）；
+//   - 或扣除首包后剩余时长不足 1ms（响应在一个分片内返回完，无从测速）。
+func tokensPerSecond(completionTokens, totalMS, firstTokenMS int) float64 {
+	if completionTokens <= 0 || totalMS <= 0 {
+		return 0
+	}
+	generateMS := totalMS
+	// 仅当首包时间合理（>0 且小于总时长）时才扣除：
+	// 非流式请求首包时间为 0，此时总耗时本身就是生成时长。
+	if firstTokenMS > 0 && totalMS > firstTokenMS {
+		generateMS = totalMS - firstTokenMS
+	}
+	if generateMS <= 0 {
+		return 0
+	}
+	return float64(completionTokens) * 1000 / float64(generateMS)
+}
+
 // usageEntry 描述一条待记录的用量。
 type usageEntry struct {
 	UserID  uint64
@@ -335,9 +403,13 @@ type usageEntry struct {
 	UpstreamModel string
 	Usage         openAIUsage
 	LatencyMS     int
-	IsStream      bool
-	StatusCode    int
-	ErrorText     string
+	// FirstTokenMS 是首个响应分片的到达时间（TTFB）；0 = 未采集（无响应体）。
+	FirstTokenMS int
+	// TokensPerSecond 是输出速率；0 = 无法计算（无输出 token 或时长不可用）。
+	TokensPerSecond float64
+	IsStream        bool
+	StatusCode      int
+	ErrorText       string
 }
 
 // recordUsage 记录调用用量。
@@ -363,6 +435,10 @@ func (r *Relay) recordUsage(ctx context.Context, entry usageEntry) {
 		PromptTokens:     entry.Usage.PromptTokens,
 		CompletionTokens: entry.Usage.CompletionTokens,
 		TotalTokens:      entry.Usage.TotalTokens,
+		CachedTokens:     entry.Usage.CachedTokens,
+		ReasoningTokens:  entry.Usage.ReasoningTokens,
+		FirstTokenMS:     entry.FirstTokenMS,
+		TokensPerSecond:  entry.TokensPerSecond,
 		LatencyMS:        entry.LatencyMS,
 		IsStream:         entry.IsStream,
 		StatusCode:       entry.StatusCode,
