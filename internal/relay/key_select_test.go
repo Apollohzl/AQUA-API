@@ -427,13 +427,18 @@ func TestClassifyCredentialFailure_冷却与摘除分界(t *testing.T) {
 	}
 }
 
-func TestApplyCredentialFailure_冷却与摘除的分界(t *testing.T) {
+// TestApplyCredentialFailure_默认策略只冷却不摘除 验证新增的默认策略。
+//
+// 这是本次改造的核心：默认策略下凭据【永不自动摘除】，
+// 即便上游明确指出"密钥已吊销"，也只给一次冷却。
+// 理由见 model.KeyFailurePolicy 的说明（免费额度池的密钥被误杀会导致大面积 503）。
+func TestApplyCredentialFailure_默认策略只冷却不摘除(t *testing.T) {
 	channels, keys, ch, pool := addTestChannel(t, []string{"k1", "k2", "k3"})
 	ctx := context.Background()
 	r := New(channels, Options{Keys: keys})
 
-	// 429：冷却，但【不摘除】（这是本次改造的核心：临时失败不再永久移出池子）
-	r.applyCredentialFailure(ctx, pool[0].ID, 0, http.StatusTooManyRequests, nil)
+	// 429：冷却，但【不摘除】（临时失败不应把凭据永久移出池子）
+	r.applyCredentialFailure(ctx, ch, pool[0].ID, 0, http.StatusTooManyRequests, nil)
 	got := loadPool(t, keys, ctx, ch.ID)
 	if got[0].Status != model.ChannelKeyStatusEnabled {
 		t.Fatalf("429 不应摘除凭据，实际状态 %s", got[0].Status)
@@ -443,7 +448,7 @@ func TestApplyCredentialFailure_冷却与摘除的分界(t *testing.T) {
 	}
 
 	// 401 但响应体无永久无效特征：长冷却，仍不摘除
-	r.applyCredentialFailure(ctx, pool[1].ID, 0, http.StatusUnauthorized, []byte(`{"error":{"message":"unauthorized"}}`))
+	r.applyCredentialFailure(ctx, ch, pool[1].ID, 0, http.StatusUnauthorized, []byte(`{"error":{"message":"unauthorized"}}`))
 	got = loadPool(t, keys, ctx, ch.ID)
 	if got[1].Status != model.ChannelKeyStatusEnabled {
 		t.Fatalf("401 不应摘除凭据，实际状态 %s", got[1].Status)
@@ -452,11 +457,67 @@ func TestApplyCredentialFailure_冷却与摘除的分界(t *testing.T) {
 		t.Fatal("401 应设置长冷却")
 	}
 
-	// 401 且响应体明确指出已吊销：摘除
-	r.applyCredentialFailure(ctx, pool[2].ID, 0, http.StatusUnauthorized, []byte(`{"error":{"message":"api key revoked"}}`))
+	// 401 且响应体明确指出已吊销：默认策略下仍【不摘除】，降级为冷却
+	r.applyCredentialFailure(ctx, ch, pool[2].ID, 0, http.StatusUnauthorized, []byte(`{"error":{"message":"api key revoked"}}`))
 	got = loadPool(t, keys, ctx, ch.ID)
-	if got[2].Status != model.ChannelKeyStatusAutoRemoved {
-		t.Fatalf("明确永久无效应摘除凭据，实际状态 %s", got[2].Status)
+	if got[2].Status != model.ChannelKeyStatusEnabled {
+		t.Fatalf("默认策略下不应摘除凭据，实际状态 %s", got[2].Status)
+	}
+	if got[2].CooldownUntil.IsZero() {
+		t.Fatal("默认策略下应把摘除降级为冷却，实际未设置冷却")
+	}
+}
+
+// TestApplyCredentialFailure_自动摘除策略 验证显式选择 auto_remove 时保留旧行为。
+func TestApplyCredentialFailure_自动摘除策略(t *testing.T) {
+	channels, keys, ch, pool := addTestChannel(t, []string{"k1", "k2"})
+	ctx := context.Background()
+	r := New(channels, Options{Keys: keys})
+	// 站长按上游性质显式选择"密钥真的会死"的策略
+	ch.KeyFailurePolicy = model.KeyFailurePolicyAutoRemove
+
+	r.applyCredentialFailure(ctx, ch, pool[0].ID, 0, http.StatusUnauthorized,
+		[]byte(`{"error":{"message":"api key revoked"}}`))
+	got := loadPool(t, keys, ctx, ch.ID)
+	if got[0].Status != model.ChannelKeyStatusAutoRemoved {
+		t.Fatalf("auto_remove 策略下明确永久无效应摘除，实际状态 %s", got[0].Status)
+	}
+
+	// 普通 401（无永久无效特征）在该策略下依然只是长冷却
+	r.applyCredentialFailure(ctx, ch, pool[1].ID, 0, http.StatusUnauthorized,
+		[]byte(`{"error":{"message":"unauthorized"}}`))
+	got = loadPool(t, keys, ctx, ch.ID)
+	if got[1].Status != model.ChannelKeyStatusEnabled {
+		t.Fatalf("无永久无效特征的 401 不应摘除，实际状态 %s", got[1].Status)
+	}
+}
+
+// TestApplyCredentialFailure_渠道统一冷却时长 验证"进冷却池多久由站长决定"。
+func TestApplyCredentialFailure_渠道统一冷却时长(t *testing.T) {
+	channels, keys, ch, pool := addTestChannel(t, []string{"k1", "k2"})
+	ctx := context.Background()
+	r := New(channels, Options{Keys: keys})
+	// 站长指定：所有凭据级失败统一冷却 45 秒（覆盖内置分级退避）
+	ch.KeyCooldownSeconds = 45
+
+	before := time.Now()
+	r.applyCredentialFailure(ctx, ch, pool[0].ID, 0, http.StatusTooManyRequests, nil)
+	got := loadPool(t, keys, ctx, ch.ID)
+	// 允许 5 秒误差，避免测试机器负载导致的偶发失败
+	if delta := got[0].CooldownUntil.Sub(before); delta < 40*time.Second || delta > 50*time.Second {
+		t.Fatalf("冷却时长应约等于 45 秒，实际 %v", delta)
+	}
+
+	// 即使上游明确说吊销，也只冷却指定时长且不摘除
+	before = time.Now()
+	r.applyCredentialFailure(ctx, ch, pool[1].ID, 0, http.StatusUnauthorized,
+		[]byte(`{"error":{"message":"api key revoked"}}`))
+	got = loadPool(t, keys, ctx, ch.ID)
+	if got[1].Status != model.ChannelKeyStatusEnabled {
+		t.Fatalf("统一冷却时长下不应摘除凭据，实际状态 %s", got[1].Status)
+	}
+	if delta := got[1].CooldownUntil.Sub(before); delta < 40*time.Second || delta > 50*time.Second {
+		t.Fatalf("吊销特征也应按渠道配置冷却 45 秒，实际 %v", delta)
 	}
 }
 

@@ -116,8 +116,21 @@ type Channel struct {
 	// 空值在落库时由仓储归一为 DefaultKeyStrategy()（最少在途），
 	// 因此读取回来的值恒为合法策略；取值与语义见 KeyStrategy 常量。
 	KeyStrategy KeyStrategy
-	CreatedAt   time.Time // 创建时间
-	UpdatedAt   time.Time // 更新时间
+	// KeyFailurePolicy 是本渠道凭据失败后的处置策略（落库于 channels.key_failure_policy）。
+	//
+	// 空值在落库时由仓储归一为 DefaultKeyFailurePolicy()（只冷却不摘除）。
+	// 取值与语义见 KeyFailurePolicy 常量——它决定的是一件很有运营后果的事：
+	// "一把密钥失败后是回到池子，还是永久退出"。
+	KeyFailurePolicy KeyFailurePolicy
+	// KeyCooldownSeconds 是本渠道凭据失败后的统一冷却时长（秒）。
+	//
+	// 0 表示使用内置的分级指数退避（见 relay 的 backoff）；
+	// >0 表示所有凭据级失败统一冷却该秒数——站长想表达"进冷却池多久"时用这个。
+	// 上限见 MaxKeyCooldownSeconds：过长的冷却等价于"事实摘除"，
+	// 会让站长以为自己没设摘除策略却观察到密钥不回来。
+	KeyCooldownSeconds int
+	CreatedAt          time.Time // 创建时间
+	UpdatedAt          time.Time // 更新时间
 
 	// LastTestAt 是最近一次测活时间；零值表示从未测活。
 	LastTestAt time.Time
@@ -171,6 +184,15 @@ func (c *Channel) Validate() error {
 	if c.KeyStrategy != "" && !c.KeyStrategy.IsValid() {
 		return fmt.Errorf("渠道凭据调度策略非法: %q（可选：%s）",
 			string(c.KeyStrategy), KeyStrategyOptionText())
+	}
+	// 同理：失败策略为空 = 未指定，由仓储归一为默认（只冷却不摘除）。
+	if c.KeyFailurePolicy != "" && !c.KeyFailurePolicy.IsValid() {
+		return fmt.Errorf("密钥失败策略非法: %q（可选：%s）",
+			string(c.KeyFailurePolicy), KeyFailurePolicyOptionText())
+	}
+	if c.KeyCooldownSeconds < 0 || c.KeyCooldownSeconds > MaxKeyCooldownSeconds {
+		return fmt.Errorf("密钥冷却时长必须在 0 ~ %d 秒之间（当前 %d；0 表示使用系统默认的分级退避）",
+			MaxKeyCooldownSeconds, c.KeyCooldownSeconds)
 	}
 	return nil
 }

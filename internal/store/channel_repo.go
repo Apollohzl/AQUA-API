@@ -46,7 +46,7 @@ const (
 // channelColumns 集中定义查询列，避免各处手写列名导致顺序错乱。
 //
 // 注意：列顺序必须与 scanChannel 的 Scan 参数顺序严格一致。
-const channelColumns = `id, name, type, type_key, extra_config, base_url, api_key_enc, models, group_name, priority, weight, status, created_at, updated_at, last_test_at, last_test_ok, key_strategy`
+const channelColumns = `id, name, type, type_key, extra_config, base_url, api_key_enc, models, group_name, priority, weight, status, created_at, updated_at, last_test_at, last_test_ok, key_strategy, key_failure_policy, key_cooldown_seconds`
 
 // channelRepository 是 model.ChannelRepository 的 SQL 实现。
 //
@@ -82,12 +82,14 @@ func (r *channelRepository) Create(ctx context.Context, ch *model.Channel) error
 
 	res, err := r.db.ExecContext(ctx, `
 		INSERT INTO channels
-			(name, type, type_key, extra_config, base_url, api_key_enc, models, group_name, priority, weight, status, created_at, updated_at, key_strategy)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(name, type, type_key, extra_config, base_url, api_key_enc, models, group_name, priority, weight, status, created_at, updated_at, key_strategy, key_failure_policy, key_cooldown_seconds)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ch.Name, ch.Type, ch.TypeKey, encodeExtraConfig(ch.ExtraConfig), ch.BaseURL, encryptedKey, encodeModels(ch.Models),
 		ch.Group, ch.Priority, ch.Weight, int(ch.Status),
 		ch.CreatedAt.Unix(), ch.UpdatedAt.Unix(),
 		string(model.NormalizeKeyStrategy(string(ch.KeyStrategy))),
+		string(model.NormalizeKeyFailurePolicy(string(ch.KeyFailurePolicy))),
+		model.NormalizeKeyCooldownSeconds(ch.KeyCooldownSeconds),
 	)
 	if err != nil {
 		return fmt.Errorf("store: 新增渠道失败: %w", err)
@@ -188,11 +190,15 @@ func (r *channelRepository) Update(ctx context.Context, ch *model.Channel) error
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE channels SET
 			name = ?, type = ?, type_key = ?, extra_config = ?, base_url = ?, api_key_enc = ?, models = ?,
-			group_name = ?, priority = ?, weight = ?, status = ?, updated_at = ?, key_strategy = ?
+			group_name = ?, priority = ?, weight = ?, status = ?, updated_at = ?, key_strategy = ?,
+			key_failure_policy = ?, key_cooldown_seconds = ?
 		WHERE id = ?`,
 		ch.Name, ch.Type, ch.TypeKey, encodeExtraConfig(ch.ExtraConfig), ch.BaseURL, encryptedKey, encodeModels(ch.Models),
 		ch.Group, ch.Priority, ch.Weight, int(ch.Status),
-		ch.UpdatedAt.Unix(), string(model.NormalizeKeyStrategy(string(ch.KeyStrategy))), ch.ID,
+		ch.UpdatedAt.Unix(), string(model.NormalizeKeyStrategy(string(ch.KeyStrategy))),
+		string(model.NormalizeKeyFailurePolicy(string(ch.KeyFailurePolicy))),
+		model.NormalizeKeyCooldownSeconds(ch.KeyCooldownSeconds),
+		ch.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("store: 更新渠道 %d 失败: %w", ch.ID, err)
@@ -339,11 +345,15 @@ func (r *channelRepository) scanChannel(sc rowScanner) (*model.Channel, error) {
 		lastTestAt  int64
 		lastTestOK  int
 		keyStrategy string
+		// 密钥失败策略（迁移 0024）：策略标识 + 统一冷却秒数
+		keyFailurePolicy   string
+		keyCooldownSeconds int
 	)
 
 	if err := sc.Scan(&id, &name, &channelTy, &typeKey, &extraJSON, &baseURL, &encoded, &modelsCSV,
 		&group, &priority, &weight, &status, &createdAt, &updatedAt,
-		&lastTestAt, &lastTestOK, &keyStrategy); err != nil {
+		&lastTestAt, &lastTestOK, &keyStrategy,
+		&keyFailurePolicy, &keyCooldownSeconds); err != nil {
 		// sql.ErrNoRows 属于正常控制流，不额外包装，便于调用方用 errors.Is 判断
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
@@ -375,6 +385,9 @@ func (r *channelRepository) scanChannel(sc rowScanner) (*model.Channel, error) {
 		LastTestOK:  lastTestOK != 0,
 
 		KeyStrategy: model.NormalizeKeyStrategy(keyStrategy),
+
+		KeyFailurePolicy:   model.NormalizeKeyFailurePolicy(keyFailurePolicy),
+		KeyCooldownSeconds: model.NormalizeKeyCooldownSeconds(keyCooldownSeconds),
 	}, nil
 }
 

@@ -489,20 +489,81 @@ func backoff(base time.Duration, failCount int, max time.Duration) time.Duration
 	return d
 }
 
-// applyCredentialFailure 依据失败分类，对凭据执行冷却或摘除。
+// applyCredentialFailure 依据失败分类与【渠道策略】，对凭据执行冷却或摘除。
+//
+// 渠道策略（channels.key_failure_policy）在这里生效：
+//   - cooldown_only（默认）：把"摘除"降级为冷却，凭据永不自动退出池子，
+//     到期自动回到调度；只有站长手动禁用才会退出。
+//   - auto_remove：保留原有的"上游明确判定永久无效即摘除"。
+//
+// 渠道级统一冷却时长（key_cooldown_seconds）> 0 时，覆盖内置的分级退避：
+// 站长的意图是"进冷却池多久由我决定"，此时继续套用内部分级会与界面上的承诺不符。
 //
 // 刻意忽略仓储错误：这是自愈与统计用途，不应影响对客户端的响应。
-func (r *Relay) applyCredentialFailure(ctx context.Context, keyID uint64, failCount, status int, body []byte) {
+func (r *Relay) applyCredentialFailure(ctx context.Context, ch *model.Channel, keyID uint64, failCount, status int, body []byte) {
 	if r.keys == nil || keyID == 0 {
 		return
 	}
+	policy, cooldownSeconds := channelKeyFailurePolicy(ch)
 	action := classifyCredentialFailure(status, body, failCount)
+
+	// 统一冷却时长优先：站长显式指定即以此为准（含"上游说密钥永久无效"的情形）。
+	if cooldownSeconds > 0 {
+		action.Cooldown = time.Duration(cooldownSeconds) * time.Second
+		if action.Reason == "" {
+			action.Reason = fmt.Sprintf("上游返回 HTTP %d，按渠道配置冷却 %d 秒", status, cooldownSeconds)
+		}
+	}
+
+	// 只冷却策略：永不摘除。上游即便明确说密钥已吊销，也只给一次冷却
+	// （无显式时长时用鉴权失败的默认长冷却），避免好密钥被瞬时风控误杀。
+	if policy == model.KeyFailurePolicyCooldownOnly && action.Remove {
+		action.Remove = false
+		if action.Cooldown <= 0 {
+			action.Cooldown = cooldownAuthFailure
+		}
+		action.Reason += "（当前渠道为「只冷却不摘除」，已改为冷却）"
+	}
+
 	switch {
 	case action.Remove:
 		_ = r.keys.MarkPermanentFailure(ctx, keyID, truncateReason(action.Reason))
 	case action.Cooldown > 0:
 		_ = r.keys.SetCooldown(ctx, keyID, time.Now().Add(action.Cooldown), truncateReason(action.Reason))
 	}
+}
+
+// markCredentialHardFailure 处理"凭据本身不可用"的失败（OAuth 刷新失败、凭据内容为空）。
+//
+// 与 applyCredentialFailure 分开的原因：这两类失败没有上游 HTTP 状态码可依据，
+// 属于网关侧就能判定的"这条凭据有问题"。但它们同样受渠道策略约束——
+// 若站长选择「只冷却不摘除」，就不应该在后台看到凭据被摘掉。
+func (r *Relay) markCredentialHardFailure(ctx context.Context, ch *model.Channel, keyID uint64, reason string) {
+	if r.keys == nil || keyID == 0 {
+		return
+	}
+	policy, cooldownSeconds := channelKeyFailurePolicy(ch)
+	if policy == model.KeyFailurePolicyCooldownOnly {
+		cooldown := time.Duration(cooldownSeconds) * time.Second
+		if cooldown <= 0 {
+			cooldown = cooldownAuthFailure
+		}
+		_ = r.keys.SetCooldown(ctx, keyID, time.Now().Add(cooldown), truncateReason(reason))
+		return
+	}
+	_ = r.keys.MarkFailure(ctx, keyID, truncateReason(reason))
+}
+
+// channelKeyFailurePolicy 从渠道上读出（并归一）失败策略与统一冷却时长。
+//
+// 渠道为 nil（例如凭据未绑定渠道的边界场景）时返回默认策略与 0：
+// 默认策略是"只冷却不摘除"，即最保守、最不容易造成池子萎缩的选择。
+func channelKeyFailurePolicy(ch *model.Channel) (model.KeyFailurePolicy, int) {
+	if ch == nil {
+		return model.DefaultKeyFailurePolicy(), 0
+	}
+	return model.NormalizeKeyFailurePolicy(string(ch.KeyFailurePolicy)),
+		model.NormalizeKeyCooldownSeconds(ch.KeyCooldownSeconds)
 }
 
 // ---- 会话粘性 ----

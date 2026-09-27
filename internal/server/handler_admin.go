@@ -184,6 +184,17 @@ type channelUpsertRequest struct {
 	// 留空表示"不修改"：更新接口据此刻意不覆盖已有策略，
 	// 否则前端只提交部分字段（如仅切换状态）就会把策略重置回默认值。
 	KeyStrategy string `json:"key_strategy"`
+	// KeyFailurePolicy 是密钥失败处置策略标识（cooldown_only / auto_remove）。
+	//
+	// 留空表示"不修改"：与 KeyStrategy 同样的保护理由——
+	// 前端只提交部分字段（如仅切换启停）时不应把策略重置回默认值。
+	KeyFailurePolicy string `json:"key_failure_policy"`
+	// KeyCooldownSeconds 是密钥失败后的统一冷却时长（秒）。
+	//
+	// 用指针区分"未提交"（nil，不修改）与"显式提交 0"（改回内置分级退避）：
+	// 站长把自定义时长改回 0 是一个合法且常见的操作，若用零值表示"不修改"，
+	// 这个操作就永远做不成。
+	KeyCooldownSeconds *int `json:"key_cooldown_seconds"`
 	// KeysText 是"批量密钥"文本框内容：每行一把密钥，行内可用空格或逗号附加备注。
 	//
 	// 为什么用文本而不是 []string：
@@ -307,6 +318,14 @@ func (s *Server) handleCreateChannel(c *gin.Context) {
 		return
 	}
 
+	// 密钥失败策略：同上，非法值直接 400 而不静默兜底——
+	// 它决定"密钥失败后是进冷却池还是被摘除"，与站长的运营预期直接相关。
+	failurePolicy, err := parseKeyFailurePolicy(req.KeyFailurePolicy)
+	if err != nil {
+		oai.WriteError(c.Writer, http.StatusBadRequest, err.Error(), oai.TypeInvalidRequest, "invalid_key_failure_policy")
+		return
+	}
+
 	channel := &model.Channel{
 		Name:        strings.TrimSpace(req.Name),
 		Type:        req.Type,
@@ -319,6 +338,15 @@ func (s *Server) handleCreateChannel(c *gin.Context) {
 		Weight:      defaultIfZero(req.Weight, 1),
 		Status:      model.ChannelStatus(defaultIfZero(req.Status, int(model.ChannelStatusEnabled))),
 		KeyStrategy: strategy,
+
+		KeyFailurePolicy: failurePolicy,
+	}
+	if req.KeyCooldownSeconds != nil {
+		if err := validateKeyCooldownSeconds(*req.KeyCooldownSeconds); err != nil {
+			oai.WriteError(c.Writer, http.StatusBadRequest, err.Error(), oai.TypeInvalidRequest, "invalid_key_cooldown_seconds")
+			return
+		}
+		channel.KeyCooldownSeconds = *req.KeyCooldownSeconds
 	}
 	if req.APIKey != nil {
 		channel.APIKey = *req.APIKey
@@ -478,6 +506,23 @@ func (s *Server) handleUpdateChannel(c *gin.Context) {
 			return
 		}
 		channel.KeyStrategy = strategy
+	}
+	// 密钥失败策略同样"留空即不修改"；显式提交则校验合法性。
+	if strings.TrimSpace(req.KeyFailurePolicy) != "" {
+		policy, err := parseKeyFailurePolicy(req.KeyFailurePolicy)
+		if err != nil {
+			oai.WriteError(c.Writer, http.StatusBadRequest, err.Error(), oai.TypeInvalidRequest, "invalid_key_failure_policy")
+			return
+		}
+		channel.KeyFailurePolicy = policy
+	}
+	// 冷却时长：nil 表示不修改；显式提交（含 0）则按提交值生效。
+	if req.KeyCooldownSeconds != nil {
+		if err := validateKeyCooldownSeconds(*req.KeyCooldownSeconds); err != nil {
+			oai.WriteError(c.Writer, http.StatusBadRequest, err.Error(), oai.TypeInvalidRequest, "invalid_key_cooldown_seconds")
+			return
+		}
+		channel.KeyCooldownSeconds = *req.KeyCooldownSeconds
 	}
 	if req.APIKey != nil {
 		channel.APIKey = *req.APIKey
@@ -848,6 +893,64 @@ func parseKeyStrategy(raw string) (model.KeyStrategy, error) {
 		return "", fmt.Errorf("凭据调度策略非法: %q（可选：%s）", trimmed, model.KeyStrategyOptionText())
 	}
 	return strategy, nil
+}
+
+// ---------------------------------------------------------------------------
+// 密钥失败处置策略目录
+// ---------------------------------------------------------------------------
+
+// handleListKeyFailurePolicies 返回全部密钥失败处置策略。
+//
+// 与调度策略目录同理：文案由后端领域层下发，前端不硬编码，
+// 新增策略时只改后端一处即可让界面跟随。
+func (s *Server) handleListKeyFailurePolicies(c *gin.Context) {
+	policies := model.KeyFailurePolicyAll()
+	items := make([]keyStrategyDTO, 0, len(policies))
+	for _, policy := range policies {
+		items = append(items, keyStrategyDTO{
+			Key:         string(policy),
+			Label:       policy.String(),
+			Description: policy.Description(),
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"items": items,
+		"total": len(items),
+		// 明确下发上限与默认值：前端据此限制输入并给出"留 0 用系统默认"的提示，
+		// 避免站长填一个 999999 秒然后困惑"密钥怎么再也不回来了"。
+		"max_cooldown_seconds":   model.MaxKeyCooldownSeconds,
+		"default_failure_policy": string(model.DefaultKeyFailurePolicy()),
+	})
+}
+
+// parseKeyFailurePolicy 解析并校验密钥失败处置策略。
+//
+// 空值取默认策略（只冷却不摘除）；非法值返回带可选值的错误，
+// 由调用方转成 400 反馈给管理员。
+func parseKeyFailurePolicy(raw string) (model.KeyFailurePolicy, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return model.DefaultKeyFailurePolicy(), nil
+	}
+	policy := model.KeyFailurePolicy(trimmed)
+	if !policy.IsValid() {
+		return "", fmt.Errorf("密钥失败策略非法: %q（可选：%s）", trimmed, model.KeyFailurePolicyOptionText())
+	}
+	return policy, nil
+}
+
+// validateKeyCooldownSeconds 校验管理员显式提交的冷却时长。
+//
+// 为什么这里是 400 而不是"夹到上限"：仓储层的归一（NormalizeKeyCooldownSeconds）
+// 是给历史脏数据兜底的，属于"读取时的容错"；而管理员显式提交一个越界值
+// 是输入错误，静默改成别的数字会让他以为设置生效了，实际却不是他要的值。
+// 两者目的不同，因此读取夹取、写入报错。
+func validateKeyCooldownSeconds(seconds int) error {
+	if seconds < 0 || seconds > model.MaxKeyCooldownSeconds {
+		return fmt.Errorf("密钥冷却时长必须在 0 ~ %d 秒之间（0 表示使用系统内置的分级退避）",
+			model.MaxKeyCooldownSeconds)
+	}
+	return nil
 }
 
 // probeChannel 向渠道发起一次最小请求，用于验证连通与凭据有效性。

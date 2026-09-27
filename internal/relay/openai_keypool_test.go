@@ -251,22 +251,29 @@ func TestForward_密钥池全部失效_透传上游错误并累计失败(t *test
 	}
 }
 
-func TestForward_密钥连续失败达阈值_自动摘除不再使用(t *testing.T) {
+// TestForward_密钥反复失败_默认只冷却不摘除 验证默认策略下凭据永不自动退出池子。
+//
+// 这是「英伟达式免费密钥池」的核心诉求：密钥本身不会死，失败多为限流/瞬时故障；
+// 若自动摘除，池子会被逐批误杀，最终表现为用户侧大面积 503。
+func TestForward_密钥反复失败_默认只冷却不摘除(t *testing.T) {
 	channels, keys := newTestRepos(t)
 	ctx := context.Background()
 
 	upstream, _ := newKeyAwareUpstream(t, nil) // 全部实效
 
 	ch := addChannel(t, channels, upstream.URL, "", []string{"test-model"}, 10)
-	// 池里只放一把：它会被反复选中，从而快速达到摘除阈值
+	// 池里只放一把：它会被反复选中
 	if _, _, err := keys.ReplaceAll(ctx, ch.ID, []string{"nvapi-doomed"}, nil); err != nil {
 		t.Fatalf("导入失败: %v", err)
+	}
+	// 默认策略（不显式设置即为 cooldown_only）：反复失败也不应摘除。
+	if got := model.NormalizeKeyFailurePolicy(string(ch.KeyFailurePolicy)); got != model.KeyFailurePolicyCooldownOnly {
+		t.Fatalf("新建渠道的默认策略应为只冷却不摘除，实际 %s", got)
 	}
 
 	r := New(channels, Options{Keys: keys, MaxAttempts: 1})
 	gateway := newGateway(t, r)
 
-	// 反复请求直到该密钥被自动摘除（阈值 3 次连续失败）
 	for i := 0; i < model.KeyAutoRemoveThreshold+1; i++ {
 		resp := postChat(t, gateway.URL, `{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`)
 		_ = resp.Body.Close()
@@ -279,13 +286,52 @@ func TestForward_密钥连续失败达阈值_自动摘除不再使用(t *testing
 	if len(pool) != 1 {
 		t.Fatalf("池内应有 1 把密钥，实际 %d", len(pool))
 	}
-	if pool[0].Status != model.ChannelKeyStatusAutoRemoved {
-		t.Fatalf("连续失败达 %d 次后应自动摘除，实际状态 %s",
-			model.KeyAutoRemoveThreshold, pool[0].Status)
+	if pool[0].Status != model.ChannelKeyStatusEnabled {
+		t.Fatalf("默认策略下不应摘除凭据，实际状态 %s", pool[0].Status)
+	}
+	if pool[0].CooldownUntil.IsZero() {
+		t.Fatal("失败后应处于冷却状态（到期自动回到调度）")
+	}
+}
+
+// TestForward_密钥反复失败_选择自动摘除时摘除 验证显式选 auto_remove 时保留原行为。
+func TestForward_密钥反复失败_选择自动摘除时摘除(t *testing.T) {
+	channels, keys := newTestRepos(t)
+	ctx := context.Background()
+
+	upstream, _ := newKeyAwareUpstream(t, nil)
+
+	ch := addChannel(t, channels, upstream.URL, "", []string{"test-model"}, 10)
+	if _, _, err := keys.ReplaceAll(ctx, ch.ID, []string{"nvapi-doomed"}, nil); err != nil {
+		t.Fatalf("导入失败: %v", err)
+	}
+	// 站长按上游性质显式换成"失败自动摘除"
+	ch.KeyFailurePolicy = model.KeyFailurePolicyAutoRemove
+	if err := channels.Update(ctx, ch); err != nil {
+		t.Fatalf("更新渠道策略失败: %v", err)
 	}
 
-	// 摘除后该渠道不再有可用密钥：请求应返回 503（无可用渠道），
-	// 而不是继续拿失效密钥去撞上游
+	r := New(channels, Options{Keys: keys, MaxAttempts: 1})
+	gateway := newGateway(t, r)
+
+	for i := 0; i < model.KeyAutoRemoveThreshold+1; i++ {
+		resp := postChat(t, gateway.URL, `{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`)
+		_ = resp.Body.Close()
+	}
+
+	pool, err := keys.ListByChannel(ctx, ch.ID)
+	if err != nil {
+		t.Fatalf("查询密钥池失败: %v", err)
+	}
+	if len(pool) != 1 {
+		t.Fatalf("池内应有 1 把密钥，实际 %d", len(pool))
+	}
+	// 注意：auto_remove 下若上游响应含"永久无效"特征会立刻摘除；
+	// 否则要连续失败达阈值。两种路径的终态都是"不再参与调度"。
+	if pool[0].Status != model.ChannelKeyStatusAutoRemoved {
+		t.Fatalf("auto_remove 策略下失败达阈值应自动摘除，实际状态 %s", pool[0].Status)
+	}
+
 	usable, err := keys.ListUsable(ctx, ch.ID)
 	if err != nil {
 		t.Fatalf("查询可用密钥失败: %v", err)

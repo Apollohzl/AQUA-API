@@ -33,6 +33,7 @@ import type {
   FetchModelsPayload,
   FetchModelsResult,
   KeyStrategyCatalog,
+  KeyFailurePolicyCatalog,
   LogQuery,
   ModelGroup,
   ModelGroupPayload,
@@ -306,6 +307,16 @@ export function updateChannelKey(keyId: number, payload: UpdateChannelKeyPayload
  */
 export function fetchKeyStrategies(): Promise<KeyStrategyCatalog> {
   return api.get<KeyStrategyCatalog>('/admin/key-strategies')
+}
+
+/**
+ * GET /api/admin/key-failure-policies：密钥失败处置策略目录。
+ *
+ * 同时返回冷却时长上限与默认策略，供表单限制输入并给出准确提示
+ * （避免站长填一个过长时长，把"只冷却"变成事实上的摘除）。
+ */
+export function fetchKeyFailurePolicies(): Promise<KeyFailurePolicyCatalog> {
+  return api.get<KeyFailurePolicyCatalog>('/admin/key-failure-policies')
 }
 
 /* ── 模型分组 ───────────────────────────────────────────── */

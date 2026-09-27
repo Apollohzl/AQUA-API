@@ -384,9 +384,9 @@ func (r *Relay) resolveChatKey(ctx context.Context, ch *model.Channel, used map[
 				if r.oauth != nil && picked.NeedsRefresh(now) {
 					fresh, refreshErr := r.oauth.EnsureFresh(ctx, picked)
 					if refreshErr != nil {
-						// 刷新失败：计入连续失败（达阈值会被自动摘除），
+						// 刷新失败：按渠道策略处置（只冷却不摘除时不会摘掉凭据），
 						// 标记为本次已用过并换下一条凭据
-						_ = r.keys.MarkFailure(ctx, picked.ID, truncateReason("刷新令牌失败: "+refreshErr.Error()))
+						r.markCredentialHardFailure(ctx, ch, picked.ID, "刷新令牌失败: "+refreshErr.Error())
 						used[picked.ID] = struct{}{}
 						continue
 					}
@@ -395,8 +395,9 @@ func (r *Relay) resolveChatKey(ctx context.Context, ch *model.Channel, used map[
 
 				if strings.TrimSpace(value) == "" {
 					// 凭据内容为空（配置错误）：跳过并计一次失败，
-					// 否则它会一直占着池子却永远发不出请求
-					_ = r.keys.MarkFailure(ctx, picked.ID, "凭据内容为空")
+					// 否则它会一直占着池子却永远发不出请求。
+					// 同样受渠道策略约束（见 markCredentialHardFailure）。
+					r.markCredentialHardFailure(ctx, ch, picked.ID, "凭据内容为空")
 					used[picked.ID] = struct{}{}
 					continue
 				}
@@ -753,7 +754,7 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 		//   - 429 走冷却、401/403/402 走长冷却（都【不】摘除，等待自动恢复）；
 		//   - 仅当上游明确表示凭据永久无效（如已吊销）才摘除。
 		// 注意：升级为 channel_keys 的临时状态，绝不因一次 429 把好凭据移出池子。
-		r.applyCredentialFailure(req.Context(), target.keyID, target.keyFailCount, resp.StatusCode, snippet)
+		r.applyCredentialFailure(req.Context(), ch, target.keyID, target.keyFailCount, resp.StatusCode, snippet)
 		// 留存响应，供后续所有重试都失败时透传真实原因
 		saveFailure(lastFailure, resp, snippet)
 
@@ -787,7 +788,7 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 		if isRetryableStatus(resp.StatusCode) {
 			// 上游 5xx / 超时属渠道级故障，但也给本次使用的凭据一个短冷却：
 			// 故障期间不要反复把同一把凭据推到上游。冷却会自动到期，不改变凭据状态。
-			r.applyCredentialFailure(req.Context(), target.keyID, target.keyFailCount, resp.StatusCode, nil)
+			r.applyCredentialFailure(req.Context(), ch, target.keyID, target.keyFailCount, resp.StatusCode, nil)
 		}
 		if isRetryableStatus(resp.StatusCode) && target.hasSpareChannel {
 			// 上游故障/过载，且还有别的渠道可试

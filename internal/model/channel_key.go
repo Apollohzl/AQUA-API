@@ -206,6 +206,126 @@ func (s KeyStrategy) Description() string {
 // DefaultKeyStrategy 返回渠道未显式配置时使用的默认策略。
 func DefaultKeyStrategy() KeyStrategy { return KeyStrategyLeastInFlight }
 
+// MaxKeyCooldownSeconds 是渠道级"统一冷却时长"的上限（24 小时）。
+//
+// 为什么要设上限：冷却时长过长等价于"事实上的摘除"——
+// 站长明明选了"只冷却不摘除"，却观察到某把密钥好几天不回来，
+// 会得出"策略没生效"的错误结论。24 小时足以覆盖任何真实的上游风控窗口，
+// 同时保证"密钥总会自己回来"，与"只冷却"的承诺一致。
+const MaxKeyCooldownSeconds = 24 * 60 * 60
+
+// KeyFailurePolicy 表示渠道级「凭据失败处置策略」（落库于 channels.key_failure_policy）。
+//
+// 为什么必须做成可配置，而不是给所有渠道一套策略：
+//
+//	"密钥失败之后该怎么办"高度依赖上游的性质，两类上游的正确答案是相反的：
+//	  1) 密钥真的会死（付费账号被停用、密钥被吊销）：必须摘除，
+//	     否则每次请求都会随机撞上这把死密钥，白等一次超时。
+//	  2) 密钥不会死（如 NVIDIA NIM 的免费额度池）：失败几乎都是限流/瞬时 5xx/
+//	     临时风控，密钥本身仍然有效。此时若自动摘除，池子会随时间被"误杀"到
+//	     没有可用密钥——表现就是用户侧大面积 503，而站长从界面上只看到
+//	     "可用 481 / 500"这种缓慢流失，极难归因。
+//
+//	因此策略放在渠道上，由站长按上游性质自行选择。
+type KeyFailurePolicy string
+
+const (
+	// KeyFailurePolicyCooldownOnly 只冷却、永不自动摘除（默认）。
+	//
+	// 失败后只设置 cooldown_until，到期自动回到调度；
+	// 上游即便明确说"密钥已吊销"，也只会得到一次较长冷却而不是被摘除。
+	// 唯一能让密钥退出池子的动作是站长手动禁用/下架。
+	KeyFailurePolicyCooldownOnly KeyFailurePolicy = "cooldown_only"
+	// KeyFailurePolicyAutoRemove 保留自动摘除（连续失败达阈值或上游明确判定永久无效）。
+	//
+	// 适用：密钥确实会死的上游。被摘除的密钥可在密钥池明细里手动恢复。
+	KeyFailurePolicyAutoRemove KeyFailurePolicy = "auto_remove"
+)
+
+// IsValid 判断策略取值是否合法（用于校验外部输入）。
+func (p KeyFailurePolicy) IsValid() bool {
+	return p == KeyFailurePolicyCooldownOnly || p == KeyFailurePolicyAutoRemove
+}
+
+// String 返回策略中文名，便于日志与界面展示。
+func (p KeyFailurePolicy) String() string {
+	switch p {
+	case KeyFailurePolicyCooldownOnly:
+		return "只冷却不摘除"
+	case KeyFailurePolicyAutoRemove:
+		return "失败自动摘除"
+	default:
+		return string(p)
+	}
+}
+
+// Description 返回策略的一句话说明，供后台渲染帮助文案。
+//
+// 文字放在领域层而不是前端：新增策略时只改这里，界面自动跟随，
+// 避免"后端加了策略、前端忘了加说明"的漏配。
+func (p KeyFailurePolicy) Description() string {
+	switch p {
+	case KeyFailurePolicyCooldownOnly:
+		return "密钥失败后只进入冷却池，到期自动回到调度，永不自动摘除。" +
+			"适合密钥不会失效的上游（如免费额度池）：避免好密钥被瞬时故障误杀导致池子空掉。"
+	case KeyFailurePolicyAutoRemove:
+		return "密钥连续失败达阈值，或上游明确判定密钥永久无效时自动摘除，需人工恢复。" +
+			"适合密钥真的会被吊销/停用的上游。"
+	default:
+		return ""
+	}
+}
+
+// NormalizeKeyFailurePolicy 把库中读到的原始字符串归一为合法策略。
+//
+// 空值或未知值一律退回默认策略（只冷却不摘除）：
+// "永不自动摘除"是更安全的默认——被误杀的好密钥会直接造成用户侧 503，
+// 而一把失效密钥留在池里最坏也只是偶尔浪费一次尝试（且它会持续处于冷却）。
+func NormalizeKeyFailurePolicy(raw string) KeyFailurePolicy {
+	p := KeyFailurePolicy(strings.TrimSpace(raw))
+	if p.IsValid() {
+		return p
+	}
+	return DefaultKeyFailurePolicy()
+}
+
+// KeyFailurePolicyAll 返回全部合法策略，顺序与后台下拉展示一致。
+func KeyFailurePolicyAll() []KeyFailurePolicy {
+	return []KeyFailurePolicy{
+		KeyFailurePolicyCooldownOnly,
+		KeyFailurePolicyAutoRemove,
+	}
+}
+
+// KeyFailurePolicyOptionText 返回策略标识的顿号连接串，用于错误提示中的"可选值"。
+func KeyFailurePolicyOptionText() string {
+	options := KeyFailurePolicyAll()
+	parts := make([]string, 0, len(options))
+	for _, p := range options {
+		parts = append(parts, string(p))
+	}
+	return strings.Join(parts, " / ")
+}
+
+// DefaultKeyFailurePolicy 返回渠道未显式配置时使用的默认策略。
+func DefaultKeyFailurePolicy() KeyFailurePolicy { return KeyFailurePolicyCooldownOnly }
+
+// NormalizeKeyCooldownSeconds 把库中读到的原始秒数归一到合法区间。
+//
+// 语义：0 = 使用内置的分级指数退避；>0 = 统一冷却该秒数。
+// 越界值一律夹到 [0, MaxKeyCooldownSeconds]：
+// 负数会让 cooldown_until 落到过去时刻（等价于不冷却，静默失效），
+// 过大的值则等价于"事实摘除"，两者都会让站长的预期与实际行为不一致。
+func NormalizeKeyCooldownSeconds(seconds int) int {
+	if seconds < 0 {
+		return 0
+	}
+	if seconds > MaxKeyCooldownSeconds {
+		return MaxKeyCooldownSeconds
+	}
+	return seconds
+}
+
 // CredentialKind 表示凭据类型。
 //
 // 两类凭据的调度语义完全一致（池内轮询、失败摘除、记录最近使用），

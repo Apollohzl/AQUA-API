@@ -299,6 +299,15 @@ export interface Channel {
    * least_recent / least_in_flight）。后端保证恒为合法值。
    */
   key_strategy: string
+  /**
+   * 密钥失败处置策略标识（cooldown_only / auto_remove）。后端保证恒为合法值。
+   *
+   * cooldown_only 表示密钥失败后只进冷却池、到期自动恢复，永不自动摘除；
+   * 这是默认值，适合"密钥不会死"的上游（如免费额度池）。
+   */
+  key_failure_policy: string
+  /** 密钥失败后的统一冷却时长（秒）；0 表示使用系统内置的分级退避 */
+  key_cooldown_seconds: number
   status: number
   status_text?: string
   last_test_at?: number
@@ -436,6 +445,21 @@ export interface KeyStrategyCatalog {
   total: number
 }
 
+/**
+ * 密钥失败处置策略目录（GET /api/admin/key-failure-policies）。
+ *
+ * 除策略列表外还下发上限与默认值：前端据此限制冷却时长输入，
+ * 避免站长填一个天文数字然后困惑"密钥怎么再也不回来了"。
+ */
+export interface KeyFailurePolicyCatalog {
+  items: KeyStrategyOption[]
+  total: number
+  /** 冷却时长上限（秒）；超过它会被后端夹到上限，等价于事实摘除 */
+  max_cooldown_seconds: number
+  /** 后端默认策略标识（只冷却不摘除） */
+  default_failure_policy: string
+}
+
 /** 密钥状态：与后端 model.ChannelKeyStatus 一一对应 */
 export const KEY_STATUS_ENABLED = 1
 export const KEY_STATUS_DISABLED = 2
@@ -471,6 +495,22 @@ export interface ChannelPayload {
    * 取值来自 GET /api/admin/key-strategies。
    */
   key_strategy?: string
+  /**
+   * 密钥失败处置策略标识：cooldown_only（只冷却不摘除，默认）/ auto_remove（失败自动摘除）。
+   *
+   * 留空表示「不修改」。它决定"密钥失败后是回到池子还是永久退出"，
+   * 对"密钥不会死"的上游（如免费额度池）必须选 cooldown_only，
+   * 否则好密钥会被瞬时故障逐批误杀，最终表现为大面积 503。
+   */
+  key_failure_policy?: string
+  /**
+   * 密钥失败后的统一冷却时长（秒）。
+   *
+   * 0 表示使用系统内置的分级指数退避；>0 表示统一按该时长冷却。
+   * 注意：更新接口用指针语义区分"未提交"与"显式改为 0"，
+   * 因此前端必须始终提交该字段（不要因为值为 0 就省略）。
+   */
+  key_cooldown_seconds?: number
   /**
    * 批量密钥文本：每行一把，行内可用空格或逗号附加备注。
    *

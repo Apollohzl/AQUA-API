@@ -32,6 +32,7 @@ import {
   createChannel,
   deleteChannel,
   fetchChannelTypes,
+  fetchKeyFailurePolicies,
   fetchKeyStrategies,
   fetchUpstreamModels,
   getChannel,
@@ -60,6 +61,7 @@ import {
   type ChannelType,
   type ChannelTypeCategory,
   type FetchModelsPayload,
+  type KeyFailurePolicyCatalog,
   type KeyStrategyOption,
   type ModelGroup,
 } from '@/api/types'
@@ -271,6 +273,7 @@ onMounted(async () => {
   void loadGroupOptions()
   void loadChannelTypes()
   void loadKeyStrategies()
+  void loadFailurePolicies()
   // 冷却剩余时间需要"随时间推进"的当前时刻，否则展示会一直停在打开抽屉那一刻。
   clockTimer = window.setInterval(() => {
     now.value = Date.now()
@@ -313,6 +316,50 @@ async function loadKeyStrategies(): Promise<void> {
 const selectedStrategyDesc = computed(
   () => keyStrategies.value.find((item) => item.key === form.value.key_strategy)?.description ?? '',
 )
+
+/* ── 密钥失败处置策略目录 ─────────────────────────────── */
+/**
+ * 失败策略目录：由后端下发两种策略的名称与说明，以及冷却时长上限。
+ *
+ * 为什么连"上限"一起下发：冷却时长过长等价于"事实摘除"，
+ * 与"只冷却不摘除"的承诺相矛盾；界面上限与后端夹取规则取自同一处，
+ * 避免前端自己写一个数字而后端是另一个。
+ */
+const failurePolicies = ref<KeyFailurePolicyCatalog | null>(null)
+
+async function loadFailurePolicies(): Promise<void> {
+  try {
+    failurePolicies.value = await fetchKeyFailurePolicies()
+  } catch {
+    // 目录加载失败只影响帮助文案与上限提示，不阻断表单
+    failurePolicies.value = null
+  }
+}
+
+/** 当前选中失败策略的说明文案 */
+const selectedFailurePolicyDesc = computed(
+  () => failurePolicies.value?.items.find((item) => item.key === form.value.key_failure_policy)?.description ?? '',
+)
+
+/** 冷却时长上限（秒）：目录未加载时退回 24 小时（与后端常量一致） */
+const maxCooldownSeconds = computed(() => failurePolicies.value?.max_cooldown_seconds ?? 86400)
+
+/** 冷却时长是否越界（越界时前端先提示，不必白跑一次请求） */
+const cooldownSecondsInvalid = computed(
+  () =>
+    !Number.isInteger(Number(form.value.keyCooldownSeconds)) ||
+    Number(form.value.keyCooldownSeconds) < 0 ||
+    Number(form.value.keyCooldownSeconds) > maxCooldownSeconds.value,
+)
+
+/** 把秒数换成"人话"（如 3600 → 1 小时），便于站长核对填写值 */
+function humanizeSeconds(seconds: number): string {
+  const value = Number(seconds) || 0
+  if (value <= 0) return '系统默认（按失败类型分级退避）'
+  if (value % 3600 === 0) return `${value / 3600} 小时`
+  if (value % 60 === 0) return `${value / 60} 分钟`
+  return `${value} 秒`
+}
 
 /**
  * 分组候选：来源于「模型分组」页。
@@ -457,6 +504,15 @@ interface ChannelForm {
   status: number
   /** 凭据池调度策略标识（来自 GET /api/admin/key-strategies） */
   key_strategy: string
+  /**
+   * 密钥失败处置策略标识（来自 GET /api/admin/key-failure-policies）。
+   *
+   * cooldown_only（默认）= 失败只进冷却池、到期自动回池，永不自动摘除；
+   * auto_remove = 连续失败达阈值或上游明确判定永久无效时摘除。
+   */
+  key_failure_policy: string
+  /** 密钥失败后的统一冷却时长（秒）；0 表示用系统内置的分级退避 */
+  keyCooldownSeconds: number
 }
 
 /** 表单默认值：优先级 10、权重 1、启用、最少在途调度，符合常见「默认可用」预期 */
@@ -474,6 +530,10 @@ function emptyChannelForm(): ChannelForm {
     status: STATUS_ENABLED,
     // 与后端默认策略一致（least_in_flight）：新建渠道时默认就选中它。
     key_strategy: 'least_in_flight',
+    // 与后端默认策略一致（cooldown_only）：失败只进冷却池，避免好密钥被误杀。
+    key_failure_policy: 'cooldown_only',
+    // 0 = 使用系统内置的分级退避（限流/5xx/鉴权失败各有一档时长）
+    keyCooldownSeconds: 0,
   }
 }
 
@@ -531,6 +591,8 @@ async function openEdit(channel: Channel): Promise<void> {
     weight: channel.weight,
     status: channel.status,
     key_strategy: channel.key_strategy || 'least_in_flight',
+    key_failure_policy: channel.key_failure_policy || 'cooldown_only',
+    keyCooldownSeconds: channel.key_cooldown_seconds ?? 0,
   }
   formError.value = ''
   // 先清空映射并置为加载中，避免残留上一个渠道的映射行被误提交
@@ -554,6 +616,8 @@ async function openEdit(channel: Channel): Promise<void> {
       weight: detail.weight,
       status: detail.status,
       key_strategy: detail.key_strategy || 'least_in_flight',
+      key_failure_policy: detail.key_failure_policy || 'cooldown_only',
+      keyCooldownSeconds: detail.key_cooldown_seconds ?? 0,
     }
   } catch (err) {
     // 取详情失败不阻断编辑：至少列表数据可用，但提示用户
@@ -574,6 +638,9 @@ function validateForm(): string | null {
   }
   if (form.value.priority < 0) return '优先级不能为负数'
   if (form.value.weight <= 0) return '权重必须大于 0'
+  if (cooldownSecondsInvalid.value) {
+    return `密钥冷却时长必须在 0 ~ ${maxCooldownSeconds.value} 秒之间（当前 ${form.value.keyCooldownSeconds}）`
+  }
   return null
 }
 
@@ -825,6 +892,10 @@ async function submitForm(): Promise<void> {
     weight: Number(form.value.weight) || 1,
     status: form.value.status,
     key_strategy: form.value.key_strategy,
+    key_failure_policy: form.value.key_failure_policy,
+    // 始终提交冷却时长：后端用"字段缺失 = 不修改"的语义，
+    // 若因为值为 0 就省略，站长将永远改不回"使用系统默认退避"。
+    key_cooldown_seconds: Number(form.value.keyCooldownSeconds) || 0,
   }
   // 编辑时密钥留空表示「不修改」，因此不发送该字段（避免把密钥覆盖为空）
   if (form.value.api_key.trim()) payload.api_key = form.value.api_key.trim()
@@ -1560,6 +1631,57 @@ sk-yyyyyyyyyyyy</pre>
           </select>
           <p v-if="selectedStrategyDesc" class="hint">{{ selectedStrategyDesc }}</p>
           <p v-else class="hint">决定该渠道的密钥池按什么规则选取凭据。</p>
+        </div>
+
+        <!-- 密钥失败处置策略：决定"密钥失败后是回池子，还是永久退出" -->
+        <div class="rounded-lg border border-ink-800 bg-ink-950/40 p-3.5">
+          <label class="label" for="channel-key-failure-policy">密钥失败后怎么办</label>
+          <select
+            id="channel-key-failure-policy"
+            v-model="form.key_failure_policy"
+            class="input max-w-[20rem]"
+          >
+            <option v-for="policy in failurePolicies?.items ?? []" :key="policy.key" :value="policy.key">
+              {{ policy.label }}
+            </option>
+            <!-- 目录尚未加载时至少保证默认项可选中，避免下拉为空 -->
+            <option v-if="!failurePolicies" value="cooldown_only">只冷却不摘除</option>
+          </select>
+          <p v-if="selectedFailurePolicyDesc" class="hint">{{ selectedFailurePolicyDesc }}</p>
+          <p v-else class="hint">
+            「只冷却不摘除」适合密钥不会失效的上游（如免费额度池）：失败后到期自动回池，
+            避免好密钥被瞬时故障误杀导致可用密钥越来越少。
+          </p>
+
+          <div class="mt-3">
+            <label class="label" for="channel-key-cooldown">冷却时长（秒）</label>
+            <div class="flex flex-wrap items-center gap-2">
+              <input
+                id="channel-key-cooldown"
+                v-model.number="form.keyCooldownSeconds"
+                class="input input-mono w-40 tabular-nums"
+                type="number"
+                min="0"
+                :max="maxCooldownSeconds"
+              />
+              <span class="text-xs text-ink-400">
+                当前：{{ humanizeSeconds(form.keyCooldownSeconds) }}
+              </span>
+            </div>
+            <p class="hint">
+              留 <code>0</code> 使用系统内置的分级退避（限流 / 上游 5xx / 鉴权失败各有一档时长）；
+              填正数则<strong>所有失败统一冷却该时长</strong>——即"进冷却池多久由你决定"。
+              上限 {{ maxCooldownSeconds }} 秒：再长就等价于把密钥摘掉了，与"只冷却"的承诺相矛盾。
+            </p>
+            <p v-if="cooldownSecondsInvalid" class="field-error">
+              冷却时长必须在 0 ~ {{ maxCooldownSeconds }} 秒之间。
+            </p>
+          </div>
+
+          <p class="mt-2 text-xs leading-relaxed text-ink-400">
+            说明：无论选哪种策略，<strong>手动禁用/下架</strong>始终有效，
+            是让密钥退出调度的最终手段；被摘除的密钥也可在「密钥池明细」里手动恢复。
+          </p>
         </div>
 
         <div>

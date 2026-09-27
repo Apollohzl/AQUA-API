@@ -146,6 +146,12 @@ func (s *Server) registerRoutes() {
 	// 因此新增策略不需要改前端代码。
 	admin.GET("/key-strategies", s.handleListKeyStrategies)
 
+	// 密钥失败处置策略目录：渠道表单据此渲染「失败后怎么办」下拉与帮助文案。
+	//
+	// 存在的意义：站长最关心的是"密钥失败了会不会就没了"。把两种策略
+	// （只冷却不摘除 / 失败自动摘除）连说明一起下发，页面无需硬编码文案。
+	admin.GET("/key-failure-policies", s.handleListKeyFailurePolicies)
+
 	// 从上游拉取模型列表。
 	//
 	// 刻意不挂在 /channels/ 之下：gin 的路由树中 `/channels/fetch-models`
