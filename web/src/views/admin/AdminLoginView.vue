@@ -35,6 +35,15 @@ const submitting = ref(false)
 const errorMessage = ref('')
 
 /**
+ * 是否已勾选同意《用户协议》与《隐私政策》。
+ *
+ * 为什么后台入口也要同意：进入后台后可执行渠道管理、额度发放、定价调整等
+ * 运维操作，同样受《用户协议》约束；把同意动作放在入口，避免"未明确同意即使用"的争议。
+ * 仅前端强制（未勾选时按钮置灰），不改动 admin-login 接口契约。
+ */
+const agreedTerms = ref(false)
+
+/**
  * 只接受站内相对路径作为回跳目标，避免开放重定向。
  * 与 /login 的实现保持一致（避免两处规则漂移）。
  */
@@ -49,6 +58,11 @@ async function handleSubmit(): Promise<void> {
   errorMessage.value = ''
   if (!password.value) {
     errorMessage.value = '请输入管理员密码'
+    return
+  }
+  // 协议同意：仅前端强制；后端 admin-login 接口不做此校验（见 agreedTerms 的说明）
+  if (!agreedTerms.value) {
+    errorMessage.value = '请先阅读并同意《用户协议》与《隐私政策》'
     return
   }
 
@@ -122,6 +136,27 @@ async function handleSubmit(): Promise<void> {
               </div>
             </div>
 
+            <!-- 协议同意：后台入口同样要求明示同意《用户协议》与《隐私政策》，
+                 未勾选时按钮置灰；协议入口指向公开文件页，可先阅读再决定。 -->
+            <label class="flex items-start gap-2 text-xs leading-relaxed text-ink-400">
+              <input
+                v-model="agreedTerms"
+                type="checkbox"
+                class="mt-0.5 h-4 w-4 shrink-0 rounded border-ink-600"
+                :disabled="submitting"
+              />
+              <span>
+                我已阅读并同意
+                <RouterLink to="/terms" target="_blank" class="font-medium text-brand-700 hover:underline">
+                  《用户协议》
+                </RouterLink>
+                与
+                <RouterLink to="/privacy" target="_blank" class="font-medium text-brand-700 hover:underline">
+                  《隐私政策》
+                </RouterLink>
+              </span>
+            </label>
+
             <p
               v-if="errorMessage"
               class="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-800"
@@ -130,7 +165,7 @@ async function handleSubmit(): Promise<void> {
               {{ errorMessage }}
             </p>
 
-            <button type="submit" class="btn btn-primary w-full" :disabled="submitting">
+            <button type="submit" class="btn btn-primary w-full" :disabled="submitting || !agreedTerms">
               <span
                 v-if="submitting"
                 class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
