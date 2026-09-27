@@ -366,22 +366,33 @@ const usageMissingNote = "未取得 usage（上游未返回用量，token 记 0�
 //
 // 返回 0 表示无法计算：
 //   - 没有输出 token（例如纯工具调用或失败响应）；
-//   - 或扣除首包后剩余时长不足 1ms（响应在一个分片内返回完，无从测速）。
+//   - 或扣除首包后剩余时长不足 minGenerateMS（响应在一个分片内返回完，无从测速）。
+//
+// minGenerateMS 这个下限不是"美化"，而是防错：只要分母是 1~2 毫秒，
+// 哪怕只有几十个输出 token 也会算出几万 t/s 的荒谬速率（线上实测出现过 9.9 万 t/s）。
+// 这种记录对使用者只有误导，因此按"无法计算"处理。
 func tokensPerSecond(completionTokens, totalMS, firstTokenMS int) float64 {
 	if completionTokens <= 0 || totalMS <= 0 {
 		return 0
 	}
 	generateMS := totalMS
 	// 仅当首包时间合理（>0 且小于总时长）时才扣除：
-	// 非流式请求首包时间为 0，此时总耗时本身就是生成时长。
+	// 非流式请求首包时间为 0（未采集），此时总耗时本身就是生成时长。
 	if firstTokenMS > 0 && totalMS > firstTokenMS {
 		generateMS = totalMS - firstTokenMS
 	}
-	if generateMS <= 0 {
+	if generateMS < minGenerateMS {
 		return 0
 	}
 	return float64(completionTokens) * 1000 / float64(generateMS)
 }
+
+// minGenerateMS 是可测速的最短生成区间（毫秒）。
+//
+// 取 50ms：正常流式回答的生成阶段都在数百毫秒以上，而"看起来像测速、
+// 实际只是测量误差"的区间普遍在几毫秒内。用它做门槛可以在不误伤正常数据的前提下
+// 挡掉由取整误差放大出来的荒谬速率。
+const minGenerateMS = 50
 
 // usageEntry 描述一条待记录的用量。
 type usageEntry struct {

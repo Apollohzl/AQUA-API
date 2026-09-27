@@ -845,13 +845,20 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 	usage, hasUsage := sniffer.Usage()
 	identity := identityFromRequest(req.Context())
 	// 用时与速率指标：在响应已完整回传后计算，不影响客户端可见延迟。
+	isStream := oai.PeekStream(body)
+	// 首 token 延迟（TTFB）【只对流式请求采集】。
 	//
-	// 首 token 延迟（TTFB）取抓取器记录的首个非空分片时刻；
-	// 非流式请求没有 TTFB（响应一次性返回），此时记 0，展示层会显示「—」。
+	// 为什么必须限定流式：非流式响应是一次性返回的，抓取器记录到的"首个分片"
+	// 其实已经是完整响应体——把它当 TTFB 会得出"首包≈总耗时"的假数据，
+	// 更糟的是速率算法里的"总耗时 − 首包"趋近于 0，会算出几十万 t/s 这种
+	// 物理上不可能的数字（已实测出现 9.9 万 t/s）。非流式记 0，
+	// 展示层显示「—」，语义是"未采集"而不是"首包为 0"。
 	totalMS := int(time.Since(start).Milliseconds())
 	firstTokenMS := 0
-	if first := sniffer.FirstByteAt(); !first.IsZero() {
-		firstTokenMS = int(first.Sub(start).Milliseconds())
+	if isStream {
+		if first := sniffer.FirstByteAt(); !first.IsZero() {
+			firstTokenMS = int(first.Sub(start).Milliseconds())
+		}
 	}
 	entry := usageEntry{
 		UserID:    identity.UserID,
@@ -865,7 +872,7 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 		LatencyMS:       totalMS,
 		FirstTokenMS:    firstTokenMS,
 		TokensPerSecond: tokensPerSecond(usage.CompletionTokens, totalMS, firstTokenMS),
-		IsStream:        oai.PeekStream(body),
+		IsStream:        isStream,
 		StatusCode:      resp.StatusCode,
 	}
 	if !hasUsage {
