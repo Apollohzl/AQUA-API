@@ -96,6 +96,13 @@ type siteStatusResponse struct {
 	// 暴露这个布尔值不泄露任何凭据，但能让前端在通道未就绪时提前提示
 	// "请联系管理员"，而不是让用户点半天按钮都收不到邮件。
 	EmailServiceReady bool `json:"email_service_ready"`
+	// QuotaPerYuan 是"1 元可兑换的额度数"（即充值兑换比例）。
+	//
+	// 为什么要把这个数字公开：额度是站内计费单位（默认 1 元 = 100 额度，
+	// 即 1 额度 ≈ 1 分），而用户只认人民币。前端拿它把余额、消费、模型单价
+	// 一律折算成 ¥ 展示，用户才不会看到"充了 1 元、余额显示 100"而困惑。
+	// 这是纯粹的展示换算，与计费口径无关，因此不涉及任何敏感信息。
+	QuotaPerYuan int64 `json:"quota_per_yuan"`
 }
 
 // handleSiteStatus 返回站点信息与可用模型列表。
@@ -125,6 +132,7 @@ func (s *Server) handleSiteStatus(c *gin.Context) {
 		Models:              models,
 		EmailCodeRequired:   settings.RegistrationRequireEmailCode,
 		EmailServiceReady:   s.deps.Mailer != nil && s.deps.Mailer.Configured(),
+		QuotaPerYuan:        settings.Payment.ExchangeRate,
 	})
 }
 
