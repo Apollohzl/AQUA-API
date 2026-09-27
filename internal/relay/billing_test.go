@@ -141,8 +141,57 @@ func TestBilling_Quote_按倍率计价(t *testing.T) {
 	billing := newTestBilling(150, 1_000_000, 2_000_000, 0)
 
 	// 1000 输入 + 500 输出 = 1000 + 1000 = 2000 基础额度；×1.5 = 3000
-	if got := billing.Quote(ctx, "", "test-model", 1000, 500); got != 3000 {
+	if got := billing.Quote(ctx, "", "test-model", 1000, 500, 0); got != 3000 {
 		t.Fatalf("1.5 倍下应扣 3000，实际 %d", got)
+	}
+}
+
+func TestBilling_Quote_缓存命中按缓存价计费(t *testing.T) {
+	ctx := context.Background()
+
+	// 输入价 3_000_000 / 1M，缓存价 300_000 / 1M（即 1 折），输出价 0。
+	prices := &fakePriceRepo{prices: []*model.ModelPrice{{
+		ID: 1, Model: "test-model",
+		PromptPrice: 3_000_000, CachePrice: 300_000, CompletionPrice: 0,
+		Group: "default", Enabled: true,
+	}}}
+	billing := NewBilling(prices, newFakeGroupRepo(100), nil, nil, "default")
+
+	// 1000 输入中 800 命中缓存：200×3 + 800×0.3 = 600 + 240 = 840
+	if got := billing.Quote(ctx, "", "test-model", 1000, 0, 800); got != 840 {
+		t.Fatalf("缓存命中 800 应扣 840，实际 %d", got)
+	}
+
+	// 全部命中：1000×0.3 = 300
+	if got := billing.Quote(ctx, "", "test-model", 1000, 0, 1000); got != 300 {
+		t.Fatalf("全部命中应扣 300，实际 %d", got)
+	}
+
+	// 未命中（cached=0）应与未配置缓存维度时一致：1000×3 = 3000
+	if got := billing.Quote(ctx, "", "test-model", 1000, 0, 0); got != 3000 {
+		t.Fatalf("未命中应扣 3000，实际 %d", got)
+	}
+
+	// 上游上报的缓存数超过输入数：应被夹到 1000，不得出现"输入算两次"
+	if got := billing.Quote(ctx, "", "test-model", 1000, 0, 9999); got != 300 {
+		t.Fatalf("缓存数超上限应被夹住并扣 300，实际 %d", got)
+	}
+}
+
+func TestBilling_Quote_未配置缓存价时回退输入价(t *testing.T) {
+	ctx := context.Background()
+
+	// 老配置：只有输入/输出价，没有缓存价
+	prices := &fakePriceRepo{prices: []*model.ModelPrice{{
+		ID: 1, Model: "test-model",
+		PromptPrice: 1_000_000, CompletionPrice: 2_000_000,
+		Group: "default", Enabled: true,
+	}}}
+	billing := NewBilling(prices, newFakeGroupRepo(150), nil, nil, "default")
+
+	// 与缓存维度引入前完全一致：1000×1 + 500×2 = 2000；×1.5 = 3000
+	if got := billing.Quote(ctx, "", "test-model", 1000, 500, 900); got != 3000 {
+		t.Fatalf("未配置缓存价时应回退输入价，仍扣 3000，实际 %d", got)
 	}
 }
 
@@ -150,7 +199,7 @@ func TestBilling_未定价模型不扣费(t *testing.T) {
 	ctx := context.Background()
 	billing := newTestBilling(150, 1_000_000, 2_000_000, 0)
 
-	if got := billing.Quote(ctx, "", "不存在的模型", 1000, 1000); got != 0 {
+	if got := billing.Quote(ctx, "", "不存在的模型", 1000, 1000, 0); got != 0 {
 		t.Fatalf("未定价模型不应扣费，实际 %d", got)
 	}
 	if got := billing.QuoteOnce(ctx, "", "不存在的模型", 1); got != 0 {
@@ -167,7 +216,7 @@ func TestBilling_分组不存在时按一倍处理(t *testing.T) {
 	// 分组仓储里没有 default（模拟历史数据里未登记的分组）
 	billing := NewBilling(prices, &fakeGroupRepo{groups: map[string]*model.ModelGroup{}}, nil, nil, "default")
 
-	if got := billing.Quote(ctx, "", "test-model", 1000, 0); got != 1000 {
+	if got := billing.Quote(ctx, "", "test-model", 1000, 0, 0); got != 1000 {
 		t.Fatalf("分组不存在时应按 1.0 倍处理（1000），实际 %d", got)
 	}
 }

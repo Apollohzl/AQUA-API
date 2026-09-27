@@ -39,6 +39,7 @@ type modelPriceDTO struct {
 	ID              uint64 `json:"id"`
 	Model           string `json:"model"`
 	PromptPrice     int64  `json:"prompt_price"`
+	CachePrice      int64  `json:"cache_price"`
 	CompletionPrice int64  `json:"completion_price"`
 	Group           string `json:"group"`
 	Enabled         bool   `json:"enabled"`
@@ -56,6 +57,7 @@ func toModelPriceDTO(price *model.ModelPrice) modelPriceDTO {
 		ID:              price.ID,
 		Model:           price.Model,
 		PromptPrice:     price.PromptPrice,
+		CachePrice:      price.CachePrice,
 		CompletionPrice: price.CompletionPrice,
 		Group:           price.Group,
 		Enabled:         price.Enabled,
@@ -93,6 +95,7 @@ func (s *Server) handleListPrices(c *gin.Context) {
 type modelPriceUpsertRequest struct {
 	Model           string `json:"model"`
 	PromptPrice     *int64 `json:"prompt_price"`
+	CachePrice      *int64 `json:"cache_price"`
 	CompletionPrice *int64 `json:"completion_price"`
 	Group           string `json:"group"`
 	Enabled         *bool  `json:"enabled"`
@@ -122,6 +125,9 @@ func (s *Server) handleCreatePrice(c *gin.Context) {
 	}
 	if req.PromptPrice != nil {
 		price.PromptPrice = *req.PromptPrice
+	}
+	if req.CachePrice != nil {
+		price.CachePrice = *req.CachePrice
 	}
 	if req.CompletionPrice != nil {
 		price.CompletionPrice = *req.CompletionPrice
@@ -181,6 +187,9 @@ func (s *Server) handleUpdatePrice(c *gin.Context) {
 	}
 	if req.PromptPrice != nil {
 		price.PromptPrice = *req.PromptPrice
+	}
+	if req.CachePrice != nil {
+		price.CachePrice = *req.CachePrice
 	}
 	if req.CompletionPrice != nil {
 		price.CompletionPrice = *req.CompletionPrice
@@ -245,6 +254,7 @@ func (s *Server) handleDeletePrice(c *gin.Context) {
 // handleQuotePreview 试算某模型的费用，便于管理员核对定价是否合理。
 //
 // 参数：model、prompt_tokens、completion_tokens（可选，默认按 1000/1000 估算）、
+// cached_tokens（可选，默认 0；用于核对缓存命中价的折扣是否按预期生效）、
 // group（可选，缺省用计费组件的默认分组）——价格规则按分组隔离，试算也需能指定分组。
 func (s *Server) handleQuotePreview(c *gin.Context) {
 	if s.deps.Billing == nil {
@@ -261,11 +271,14 @@ func (s *Server) handleQuotePreview(c *gin.Context) {
 	group := strings.TrimSpace(c.Query("group"))
 	promptTokens := parseInt64Query(c, "prompt_tokens", 1000)
 	completionTokens := parseInt64Query(c, "completion_tokens", 1000)
+	cachedTokens := parseInt64Query(c, "cached_tokens", 0)
 
-	quota := s.deps.Billing.Quote(c.Request.Context(), group, modelName, promptTokens, completionTokens)
+	quota := s.deps.Billing.Quote(c.Request.Context(), group, modelName,
+		promptTokens, completionTokens, cachedTokens)
 	c.JSON(http.StatusOK, gin.H{
 		"model":             modelName,
 		"prompt_tokens":     promptTokens,
+		"cached_tokens":     cachedTokens,
 		"completion_tokens": completionTokens,
 		"quota":             quota,
 		"priced":            quota > 0,

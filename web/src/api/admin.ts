@@ -368,11 +368,17 @@ export function deletePrice(id: number): Promise<unknown> {
 }
 
 /** GET /api/admin/prices/quote：费用试算（核对定价是否合理） */
-export function quotePrice(model: string, promptTokens: number, completionTokens: number): Promise<QuotePreview> {
+export function quotePrice(
+  model: string,
+  promptTokens: number,
+  completionTokens: number,
+  cachedTokens = 0,
+): Promise<QuotePreview> {
   return api.get<QuotePreview>('/admin/prices/quote', {
     model,
     prompt_tokens: promptTokens,
     completion_tokens: completionTokens,
+    cached_tokens: cachedTokens,
   })
 }
 

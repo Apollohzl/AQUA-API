@@ -510,7 +510,8 @@ func (r *Relay) settleQuota(ctx context.Context, entry usageEntry) int64 {
 		// 未预留：退化路径。Charge 内部同样只记录错误不返回错误。
 		// 计费分组沿用 entry.Group（与选渠道同一分组），空值由 Billing 回退到默认分组。
 		return r.billing.Charge(ctx, entry.Group, entry.UserID, entry.TokenID, entry.Model,
-			int64(entry.Usage.PromptTokens), int64(entry.Usage.CompletionTokens))
+			int64(entry.Usage.PromptTokens), int64(entry.Usage.CompletionTokens),
+			int64(entry.Usage.CachedTokens))
 	}
 
 	// 请求失败（含上游 4xx/5xx、无可用渠道等）：全额退还预扣额度。
@@ -527,7 +528,8 @@ func (r *Relay) settleQuota(ctx context.Context, entry usageEntry) int64 {
 	actual := int64(model.QuotaUnknown)
 	if hasUsage(entry.Usage) {
 		actual = r.billing.Quote(ctx, entry.Group, entry.Model,
-			int64(entry.Usage.PromptTokens), int64(entry.Usage.CompletionTokens))
+			int64(entry.Usage.PromptTokens), int64(entry.Usage.CompletionTokens),
+			int64(entry.Usage.CachedTokens))
 	}
 
 	reservation, err := r.billing.Settle(ctx, requestID, actual)

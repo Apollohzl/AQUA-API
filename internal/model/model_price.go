@@ -12,10 +12,15 @@
 //
 // 计费口径（唯一真相，改动时必须同步迁移脚本注释与前端说明）：
 //
-//	quota = (promptTokens × promptPrice + completionTokens × completionPrice) / 1_000_000
+//	quota = ((promptTokens − cachedTokens) × promptPrice
+//	         + cachedTokens × cachePrice
+//	         + completionTokens × completionPrice) / 1_000_000
 //
 //	价格字段表示「每 100 万 token 消耗的站点额度单位」，
 //	与上游官方报价口径一致（如 $3 / 1M tokens），避免二次换算。
+//
+//	缓存命中价 cachePrice 缺省（<=0）时回退为 promptPrice，
+//	此时公式退化为上面两项，与引入缓存计价之前的账目完全一致。
 //
 // 金额一律用 int64 整数（不用浮点）：浮点累加会产生"用了一万次之后差 0.3"这类
 // 难以复现的账目问题，而额度扣减是每天发生几十万次的高频操作。
@@ -62,6 +67,7 @@ type ModelPrice struct {
 	ID              uint64    // 主键
 	Model           string    // 模型名或通配模式（"gpt-4*"、"*"）
 	PromptPrice     int64     // 每 1M 输入 token 的额度
+	CachePrice      int64     // 每 1M「命中缓存的输入」token 的额度；0 表示按 PromptPrice 计
 	CompletionPrice int64     // 每 1M 输出 token 的额度
 	PerCallPrice    int64     // 每调用一次的额度（异步任务 / 图像视频类）；0 表示不计费
 	Group           string    // 适用分组
@@ -80,9 +86,9 @@ func (p *ModelPrice) Validate() error {
 		return errors.New("分组不能为空")
 	}
 	// 价格为负会变成"调用反而加额度"，必须拦住
-	if p.PromptPrice < 0 || p.CompletionPrice < 0 || p.PerCallPrice < 0 {
-		return fmt.Errorf("价格不能为负数（输入 %d / 输出 %d / 每次 %d）",
-			p.PromptPrice, p.CompletionPrice, p.PerCallPrice)
+	if p.PromptPrice < 0 || p.CachePrice < 0 || p.CompletionPrice < 0 || p.PerCallPrice < 0 {
+		return fmt.Errorf("价格不能为负数（输入 %d / 缓存 %d / 输出 %d / 每次 %d）",
+			p.PromptPrice, p.CachePrice, p.CompletionPrice, p.PerCallPrice)
 	}
 	return nil
 }
@@ -147,7 +153,7 @@ func (p *ModelPrice) specificity() int {
 	}
 }
 
-// ComputeQuota 按用量计算应扣额度。
+// ComputeQuota 按用量计算应扣额度（不含缓存维度，等价于 cachedTokens=0）。
 //
 // 公式见文件头注释；采用整数运算并向下取整（不足 1 单位不计费），
 // 这样小额调用不会因四舍五入而虚增费用。
@@ -155,6 +161,26 @@ func (p *ModelPrice) specificity() int {
 // 溢出安全：promptTokens 与 price 的乘积上限约 10^15，远小于 int64 上限（9.2×10^18），
 // 因此不需要额外的溢出保护。
 func (p *ModelPrice) ComputeQuota(promptTokens, completionTokens int64) int64 {
+	return p.ComputeQuotaWithCache(promptTokens, completionTokens, 0)
+}
+
+// ComputeQuotaWithCache 按用量计算应扣额度，并对「命中缓存的输入」单独计价。
+//
+// 为什么要单独一个函数而不是给 ComputeQuota 加参数：
+//   - 多数调用点（后台试算、估算预留、无缓存概念的上游）确实只关心两个维度，
+//     强制传 0 会让调用点噪声变大；
+//   - 缓存计价是本文件里唯一"分两段算输入"的地方，单独命名便于检索与测试。
+//
+// 口径：
+//
+//	未命中输入 = promptTokens − cachedTokens（按 promptPrice）
+//	命中输入   = cachedTokens（按 cachePrice，未配置时回退 promptPrice）
+//	输出       = completionTokens（按 completionPrice）
+//
+// cachedTokens 会被夹到 [0, promptTokens]：上游偶发上报超出 prompt 的缓存数
+// （或我们自己把 cache_read 与 cached 两类字段合并时重复计数），
+// 不夹住会出现"输入被算两次"的隐性多扣。
+func (p *ModelPrice) ComputeQuotaWithCache(promptTokens, completionTokens, cachedTokens int64) int64 {
 	if p == nil {
 		return 0
 	}
@@ -164,7 +190,21 @@ func (p *ModelPrice) ComputeQuota(promptTokens, completionTokens int64) int64 {
 	if completionTokens < 0 {
 		completionTokens = 0
 	}
-	return (promptTokens*p.PromptPrice + completionTokens*p.CompletionPrice) / quotaScale
+	if cachedTokens < 0 {
+		cachedTokens = 0
+	}
+	if cachedTokens > promptTokens {
+		cachedTokens = promptTokens
+	}
+
+	cachePrice := p.CachePrice
+	if cachePrice <= 0 {
+		// 未配置缓存价：命中部分仍按输入价，与引入该维度前的账目完全一致。
+		cachePrice = p.PromptPrice
+	}
+
+	uncached := promptTokens - cachedTokens
+	return (uncached*p.PromptPrice + cachedTokens*cachePrice + completionTokens*p.CompletionPrice) / quotaScale
 }
 
 // ComputePerCallQuota 按"次数"计算应扣额度（异步任务 / 图像视频类）。

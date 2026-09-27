@@ -123,8 +123,8 @@ func TestGroupRouting_无令牌分组时沿用默认分组(t *testing.T) {
 
 	// 4) 计费：空分组与显式默认分组的计算结果完全一致
 	billing := newTestBilling(150, 1_000_000, 2_000_000, 0)
-	withEmpty := billing.Quote(context.Background(), "", "test-model", 1000, 500)
-	withDefault := billing.Quote(context.Background(), defaultBillingGroup, "test-model", 1000, 500)
+	withEmpty := billing.Quote(context.Background(), "", "test-model", 1000, 500, 0)
+	withDefault := billing.Quote(context.Background(), defaultBillingGroup, "test-model", 1000, 500, 0)
 	if withEmpty != 3000 || withEmpty != withDefault {
 		t.Fatalf("默认分组计费 = 空分组 %d / 显式默认 %d，期望均为 3000", withEmpty, withDefault)
 	}
@@ -187,11 +187,11 @@ func TestGroupRouting_价格规则按分组隔离(t *testing.T) {
 	billing := NewBilling(prices, newFakeGroupRepo(100), nil, nil, "default")
 
 	// A 分组：命中价格，1000 token → 1000 额度
-	if got := billing.Quote(ctx, "A", "gpt-4o", 1000, 0); got != 1000 {
+	if got := billing.Quote(ctx, "A", "gpt-4o", 1000, 0, 0); got != 1000 {
 		t.Fatalf("A 分组应扣 1000，实际 %d", got)
 	}
 	// B 分组：无价格规则 → 不计费（绝不串用 A 分组的价格）
-	if got := billing.Quote(ctx, "B", "gpt-4o", 1000, 0); got != 0 {
+	if got := billing.Quote(ctx, "B", "gpt-4o", 1000, 0, 0); got != 0 {
 		t.Fatalf("B 分组无价格规则应不计费，实际 %d（价格串组）", got)
 	}
 }

@@ -13,15 +13,17 @@
 //
 // 计费口径（唯一真相在 model.ModelPrice 的文件头）：
 //
-//	quota = (promptTokens × promptPrice + completionTokens × completionPrice) / 1_000_000
+//	quota = ((promptTokens − cachedTokens) × promptPrice
+//	         + cachedTokens × cachePrice
+//	         + completionTokens × completionPrice) / 1_000_000
 //
 // 流转（Flow）：
 //
 //	转发完成 → relay.recordUsage（entry.Group 携带本次请求分组）
-//	  └─ Billing.Charge(ctx, group, userID, tokenID, model, prompt, completion)
+//	  └─ Billing.Charge(ctx, group, userID, tokenID, model, prompt, completion, cached)
 //	       ├─ priceFor(group, model)   按分组带缓存的价格匹配
 //	       ├─ ratioFor(group)          按分组带缓存的倍率
-//	       ├─ ComputeQuota(...)        换算额度
+//	       ├─ ComputeQuotaWithCache    换算额度（缓存命中部分单独计价）
 //	       ├─ tokens.ConsumeQuota      扣令牌额度（原子）
 //	       └─ users.AddUsedQuota       累加用户已用额度（原子）
 //
@@ -265,10 +267,16 @@ func (b *Billing) priceFor(ctx context.Context, group, modelName string) *model.
 
 // Quote 计算该次用量应扣的额度（只算不扣）。
 //
+// cachedTokens 是输入中命中上游缓存的部分（0 表示上游未提供该维度）：
+// 这部分按规则的 CachePrice 计费，未配置时自动回退输入价，因此老配置账目不变。
+//
 // 参数 group 为空表示使用 Billing 的默认分组；扣费请用 Charge。
-func (b *Billing) Quote(ctx context.Context, group, modelName string, promptTokens, completionTokens int64) int64 {
+func (b *Billing) Quote(ctx context.Context, group, modelName string,
+	promptTokens, completionTokens, cachedTokens int64) int64 {
 	price := b.priceFor(ctx, group, modelName)
-	return applyRatio(price.ComputeQuota(promptTokens, completionTokens), b.ratioFor(ctx, group))
+	return applyRatio(
+		price.ComputeQuotaWithCache(promptTokens, completionTokens, cachedTokens),
+		b.ratioFor(ctx, group))
 }
 
 // QuoteOnce 计算"调用一次该模型"应扣的额度（只算不扣）。
@@ -363,7 +371,7 @@ func (b *Billing) applyDelta(ctx context.Context, userID, tokenID uint64, delta 
 //
 // 参数 group 为空表示使用 Billing 的默认分组。
 func (b *Billing) Charge(ctx context.Context, group string, userID, tokenID uint64, modelName string,
-	promptTokens, completionTokens int64) int64 {
+	promptTokens, completionTokens, cachedTokens int64) int64 {
 	if b == nil {
 		return 0
 	}
@@ -375,7 +383,9 @@ func (b *Billing) Charge(ctx context.Context, group string, userID, tokenID uint
 		return 0
 	}
 
-	quota := applyRatio(price.ComputeQuota(promptTokens, completionTokens), b.ratioFor(ctx, group))
+	quota := applyRatio(
+		price.ComputeQuotaWithCache(promptTokens, completionTokens, cachedTokens),
+		b.ratioFor(ctx, group))
 	if quota <= 0 {
 		return 0
 	}

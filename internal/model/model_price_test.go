@@ -132,6 +132,63 @@ func TestModelPrice_ComputeQuota(t *testing.T) {
 	}
 }
 
+func TestModelPrice_ComputeQuotaWithCache(t *testing.T) {
+	// 输入 3_000_000 / 1M、缓存 300_000 / 1M（1 折）、输出 15_000_000 / 1M
+	price := &ModelPrice{
+		PromptPrice: 3_000_000, CachePrice: 300_000, CompletionPrice: 15_000_000,
+		Enabled: true,
+	}
+
+	cases := []struct {
+		name       string
+		prompt     int64
+		completion int64
+		cached     int64
+		want       int64
+	}{
+		// 1M 输入中 0 命中：3_000_000 / 1M × 1M = 3_000_000
+		{"无缓存命中", 1_000_000, 0, 0, 3_000_000},
+		// 1M 输入全命中：300_000 / 1M × 1M = 300_000
+		{"全部命中缓存", 1_000_000, 0, 1_000_000, 300_000},
+		// 一半命中：(500k × 3 + 500k × 0.3) = 1_500_000 + 150_000 = 1_650_000
+		{"一半命中缓存", 1_000_000, 0, 500_000, 1_650_000},
+		// 缓存数超过输入：夹到 prompt，等于全部命中
+		{"缓存数超上限被夹住", 1_000_000, 0, 9_999_999, 300_000},
+		// 负数缓存按 0 处理
+		{"缓存数为负按 0 处理", 1_000_000, 0, -100, 3_000_000},
+		// 输出不受缓存影响
+		{"输出单独按输出价", 0, 1_000_000, 0, 15_000_000},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := price.ComputeQuotaWithCache(tc.prompt, tc.completion, tc.cached)
+			if got != tc.want {
+				t.Fatalf("prompt=%d completion=%d cached=%d 应得 %d，实际 %d",
+					tc.prompt, tc.completion, tc.cached, tc.want, got)
+			}
+		})
+	}
+
+	// 未配置缓存价（0）：回退输入价，与 ComputeQuota 完全一致
+	legacy := &ModelPrice{PromptPrice: 3_000_000, CompletionPrice: 15_000_000, Enabled: true}
+	withCache := legacy.ComputeQuotaWithCache(1_000_000, 1_000_000, 800_000)
+	if want := legacy.ComputeQuota(1_000_000, 1_000_000); withCache != want {
+		t.Fatalf("未配置缓存价时应回退输入价，期望 %d，实际 %d", want, withCache)
+	}
+
+	// ComputeQuota 是 cached=0 的特例
+	if got := legacy.ComputeQuota(1000, 500); got != legacy.ComputeQuotaWithCache(1000, 500, 0) {
+		t.Fatalf("ComputeQuota 应等价于 cached=0 的 ComputeQuotaWithCache")
+	}
+
+	// nil 价格视为未定价
+	var missing *ModelPrice
+	if got := missing.ComputeQuotaWithCache(1000, 1000, 500); got != 0 {
+		t.Fatalf("未定价应返回 0，实际 %d", got)
+	}
+}
+
 func TestModelPrice_ComputeQuota_向下取整不虚增(t *testing.T) {
 	// 单价 1 额度 / 1M token：100 token 应得 0（不足 1 单位不计费）
 	price := &ModelPrice{PromptPrice: 1, CompletionPrice: 1, Enabled: true}
@@ -154,6 +211,7 @@ func TestModelPrice_Validate(t *testing.T) {
 		{Model: "   ", Group: "default"},
 		{Model: "gpt-4o", Group: ""},
 		{Model: "gpt-4o", Group: "default", PromptPrice: -1},
+		{Model: "gpt-4o", Group: "default", CachePrice: -1},
 		{Model: "gpt-4o", Group: "default", CompletionPrice: -1},
 	}
 	for _, price := range invalid {

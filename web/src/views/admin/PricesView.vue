@@ -48,6 +48,7 @@ const form = ref({
   model: '',
   group: 'default',
   promptPrice: '0',
+  cachePrice: '0',
   completionPrice: '0',
   perCallPrice: '0',
   enabled: true,
@@ -55,7 +56,7 @@ const form = ref({
 })
 
 /** 费用试算 */
-const quote = ref({ model: '', promptTokens: '1000', completionTokens: '1000' })
+const quote = ref({ model: '', promptTokens: '1000', cachedTokens: '0', completionTokens: '1000' })
 const quoteResult = ref<{ quota: number; priced: boolean } | null>(null)
 const quoting = ref(false)
 const quoteError = ref('')
@@ -108,6 +109,7 @@ function openCreate(): void {
     model: '',
     group: groups.value[0]?.name || 'default',
     promptPrice: '0',
+    cachePrice: '0',
     completionPrice: '0',
     perCallPrice: '0',
     enabled: true,
@@ -123,6 +125,7 @@ function openEdit(price: ModelPrice): void {
     model: price.model,
     group: price.group,
     promptPrice: String(price.prompt_price),
+    cachePrice: String(price.cache_price),
     completionPrice: String(price.completion_price),
     perCallPrice: String(price.per_call_price),
     enabled: price.enabled,
@@ -149,6 +152,7 @@ async function submit(): Promise<void> {
     model: form.value.model.trim(),
     group: form.value.group.trim() || 'default',
     prompt_price: toNonNegative(form.value.promptPrice),
+    cache_price: toNonNegative(form.value.cachePrice),
     completion_price: toNonNegative(form.value.completionPrice),
     per_call_price: toNonNegative(form.value.perCallPrice),
     enabled: form.value.enabled,
@@ -203,6 +207,7 @@ async function runQuote(): Promise<void> {
       quote.value.model.trim(),
       toNonNegative(quote.value.promptTokens),
       toNonNegative(quote.value.completionTokens),
+      toNonNegative(quote.value.cachedTokens),
     )
     quoteResult.value = { quota: result.quota, priced: result.priced }
   } catch (err) {
@@ -226,6 +231,7 @@ function priceRowClass(price: ModelPrice): string {
         <h2 class="page-title">计价规则</h2>
         <p class="page-desc">
           价格口径：<strong>输入/输出</strong>为「每 100 万 token 的额度」，
+          <strong>缓存</strong>为「每 100 万「命中缓存的输入」token 的额度」（留 0 表示按输入价计，不享折扣），
           <strong>每次</strong>为「每调用一次的额度」（图像/视频等生成类能力）。
           支持通配：<code class="chip">gpt-4*</code> 前缀匹配、<code class="chip">*</code> 全局兜底。
           列表按「精确 → 长前缀 → 全局」排序，靠上的规则优先生效。
@@ -263,6 +269,10 @@ function priceRowClass(price: ModelPrice): string {
           <input id="quote-prompt" v-model="quote.promptTokens" class="input" type="number" min="0" />
         </div>
         <div class="w-32">
+          <label class="label" for="quote-cached">其中缓存命中</label>
+          <input id="quote-cached" v-model="quote.cachedTokens" class="input" type="number" min="0" />
+        </div>
+        <div class="w-32">
           <label class="label" for="quote-completion">输出 token</label>
           <input id="quote-completion" v-model="quote.completionTokens" class="input" type="number" min="0" />
         </div>
@@ -290,6 +300,7 @@ function priceRowClass(price: ModelPrice): string {
             <th>匹配方式</th>
             <th>分组</th>
             <th class="text-right">输入 / 1M</th>
+            <th class="text-right">缓存 / 1M</th>
             <th class="text-right">输出 / 1M</th>
             <th class="text-right">每次</th>
             <th>状态</th>
@@ -302,7 +313,7 @@ function priceRowClass(price: ModelPrice): string {
             :loading="loading"
             :error="error"
             :empty="!loading && !error && prices.length === 0"
-            :colspan="9"
+            :colspan="10"
             loading-text="正在读取计价规则…"
             empty-text="还没有配置任何价格"
             empty-hint="未配置价格的模型仍然可以调用，只是不会扣费。点击「新建规则」开始定价。"
@@ -316,6 +327,10 @@ function priceRowClass(price: ModelPrice): string {
             <td class="cell-muted" data-label="匹配方式">{{ patternHint(price) }}</td>
             <td class="cell-muted" data-label="分组">{{ groupLabels[price.group] || price.group }}</td>
             <td class="cell-num" data-label="输入 / 1M">{{ price.prompt_price > 0 ? formatNumber(price.prompt_price) : '—' }}</td>
+            <td class="cell-num" data-label="缓存 / 1M">
+              <span v-if="price.cache_price > 0">{{ formatNumber(price.cache_price) }}</span>
+              <span v-else class="cell-muted" title="未配置缓存价：命中缓存的输入仍按输入价计费">按输入价</span>
+            </td>
             <td class="cell-num" data-label="输出 / 1M">{{ price.completion_price > 0 ? formatNumber(price.completion_price) : '—' }}</td>
             <td class="cell-num" data-label="每次">{{ price.per_call_price > 0 ? formatNumber(price.per_call_price) : '—' }}</td>
             <td data-label="状态">
@@ -371,10 +386,14 @@ function priceRowClass(price: ModelPrice): string {
           <p class="hint">不同分组可以有不同价格（这就是「分组」的价值）。</p>
         </div>
 
-        <div class="grid gap-3 sm:grid-cols-3">
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <label class="label" for="price-prompt">输入 / 1M token</label>
             <input id="price-prompt" v-model="form.promptPrice" class="input" type="number" min="0" />
+          </div>
+          <div>
+            <label class="label" for="price-cache">缓存命中 / 1M token</label>
+            <input id="price-cache" v-model="form.cachePrice" class="input" type="number" min="0" />
           </div>
           <div>
             <label class="label" for="price-completion">输出 / 1M token</label>
@@ -386,7 +405,8 @@ function priceRowClass(price: ModelPrice): string {
           </div>
         </div>
         <p class="hint -mt-2">
-          值为 0 表示该口径不计费。对话类只看前两项；异步任务（图像/视频）只看「每次调用」。
+          值为 0 表示该口径不计费。对话类只看前三项；异步任务（图像/视频）只看「每次调用」。
+          「缓存命中」留 0 表示命中缓存的输入仍按输入价计费（即不享缓存折扣）。
         </p>
 
         <div>

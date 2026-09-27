@@ -1,0 +1,25 @@
+-- 迁移 0029：为计价规则补上「缓存命中价」（cache_price）
+--
+-- 意图（Why）：
+--   上游（OpenAI / Anthropic / 部分国产模型）会对「命中提示词缓存」的那部分输入
+--   按更低的价计费（常见为输入价的 10%~50%）。我们在迁移 0026 已经采集了
+--   usage_logs.cached_tokens，但计价只有一个输入价 —— 结果是缓存命中的那部分
+--   仍按全价结算，账单必然高于上游实际成本，且越用偏得越多。
+--
+--   加这一列，让站长可以为每个模型单独设置缓存价，把成本如实传导给用户。
+--
+-- 取值语义（重要，改动前必读）：
+--   0（默认值）= 未配置 → 命中缓存的输入仍按该模型的 prompt_price 计费，
+--     即与升级前的口径完全一致（既有部署不会因为这次迁移而改变任何价格）。
+--   > 0 = 命中缓存的输入 token 按此价计费，未命中的部分仍按 prompt_price。
+--
+-- 流转（Flow）：
+--   model_prices.cache_price → model.ModelPrice.CachePrice
+--     → Billing.Quote / Charge(... cachedTokens)
+--     → ComputeQuotaWithCache：未命中部分按 prompt_price、命中部分按 cache_price
+--
+-- 扩展（Extend）：
+--   新增计价维度时：在本目录追加新的 NNNN_*.sql，并同步 model_price.go 与
+--   model_price_repo.go 的列清单 / INSERT / UPDATE / scan 四处，缺一处即静默丢数据。
+
+ALTER TABLE model_prices ADD COLUMN cache_price INTEGER NOT NULL DEFAULT 0;

@@ -880,13 +880,17 @@ export interface LogQuery {
  *
  * 价格口径：字段表示「每 100 万 token 消耗的站点额度」，
  * per_call_price 表示「每调用一次消耗的额度」（异步任务/图像等按次计费的能力）。
- * 三处必须与后端 model.ModelPrice 保持一致：改动时同步本文件与价格页文案。
+ * cache_price 表示「每 100 万命中缓存的输入 token 消耗的额度」，0 = 未配置，
+ * 此时命中缓存的输入仍按 prompt_price 计费。
+ * 四处必须与后端 model.ModelPrice 保持一致：改动时同步本文件、价格页文案与后端。
  */
 export interface ModelPrice {
   id: number
   /** 模型名或通配模式（"gpt-4*" 前缀、"*" 全局） */
   model: string
   prompt_price: number
+  /** 缓存命中价（每 1M 命中缓存的输入 token 额度）；0 = 按 prompt_price 计 */
+  cache_price: number
   completion_price: number
   per_call_price: number
   group: string
@@ -900,6 +904,7 @@ export interface ModelPrice {
 export interface ModelPricePayload {
   model: string
   prompt_price?: number
+  cache_price?: number
   completion_price?: number
   per_call_price?: number
   group?: string
@@ -911,6 +916,8 @@ export interface ModelPricePayload {
 export interface QuotePreview {
   model: string
   prompt_tokens: number
+  /** 其中命中上游缓存的输入 token 数（按 cache_price 计费） */
+  cached_tokens: number
   completion_tokens: number
   quota: number
   priced: boolean
