@@ -30,6 +30,17 @@ export function formatLatency(ms: number | null | undefined): string {
 }
 
 /**
+ * 输出速率（tokens/秒）：保留一位小数。
+ *
+ * 为什么 0 不展示成 "0.0 t/s"：0 是"无法计算"（非流式、上游未回报用量、
+ * 或耗时太短没有有效生成区间），若原样显示会被误读为"模型慢到不产出"。
+ */
+export function formatRate(tps: number | null | undefined): string {
+  if (tps === null || tps === undefined || Number.isNaN(tps) || tps <= 0) return EMPTY
+  return `${tps.toFixed(1)} t/s`
+}
+
+/**
  * 到期时间展示：0 表示永不过期（契约约定）。
  * TODO(i18n): 「永不过期」是展示文案，待页面域（portal/admin）词条就绪后改走 $t —— 本轮仅迁移共用组件。
  */

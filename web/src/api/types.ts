@@ -230,6 +230,19 @@ export interface UsageLog {
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
+  /**
+   * 缓存命中的输入 token（0 = 上游未回报）。
+   *
+   * 为什么单列：缓存命中的提示词通常按更低价计费，是核对账单与评估
+   * "提示词复用率"的直接依据；混在 prompt_tokens 里会看不清钱花在哪。
+   */
+  cached_tokens: number
+  /** 推理 token（0 = 上游未回报）。它计入输出但使用者看不到，是出账争议的主要来源 */
+  reasoning_tokens: number
+  /** 首 token 延迟（毫秒，0 = 非流式或上游未采集） */
+  first_token_ms: number
+  /** 输出速率（tokens/s，0 = 无法计算）；已扣除首包时间，反映真实生成速度 */
+  tokens_per_second: number
   quota: number
   latency_ms: number
   is_stream: boolean
@@ -670,8 +683,32 @@ export interface DashboardStats {
   channels: { total: number; enabled: number; auto_disabled: number }
   users: { total: number; active: number }
   tokens: { total: number; enabled: number }
-  today: { requests: number; tokens: number; quota: number; success_rate: number }
-  recent_days: { date: string; requests: number; tokens: number }[]
+  /**
+   * 今日汇总。
+   *
+   * 除总量外还给出"质量维度"：入/出 token 拆分、缓存命中率、平均延迟与
+   * 平均输出速率。这些是判断"贵不贵、快不快、缓存有没有生效"的依据，
+   * 只有总量时站长无法定位问题（例如总延迟高是慢在首包还是慢在生成）。
+   */
+  today: {
+    requests: number
+    tokens: number
+    quota: number
+    success_rate: number
+    prompt_tokens: number
+    completion_tokens: number
+    cached_tokens: number
+    reasoning_tokens: number
+    /** 缓存命中率（0~1 的比值）；无输入 token 时为 0 */
+    cache_hit_rate: number
+    /** 平均总耗时（毫秒，0 = 无样本） */
+    avg_latency_ms: number
+    /** 平均首 token 延迟（毫秒，0 = 无样本） */
+    avg_first_token_ms: number
+    /** 平均输出速率（tokens/s，0 = 无样本） */
+    avg_tokens_per_second: number
+  }
+  recent_days: { date: string; requests: number; tokens: number; cached_tokens: number }[]
   top_models: { model: string; requests: number }[]
 }
 

@@ -25,7 +25,7 @@ import { ApiError } from '@/api/client'
 import { fetchDashboard } from '@/api/admin'
 import type { DashboardStats } from '@/api/types'
 import { AXIS_LABEL_STYLE, AXIS_LINE_STYLE, CHART_PALETTE, SPLIT_LINE_STYLE, TOOLTIP_STYLE, areaGradient } from '@/utils/chart'
-import { formatCompact, formatNumber, formatPercent } from '@/utils/format'
+import { EMPTY, formatCompact, formatLatency, formatNumber, formatPercent, formatRate } from '@/utils/format'
 
 const data = ref<DashboardStats | null>(null)
 const loading = ref(true)
@@ -67,7 +67,61 @@ const todayRequests = computed(() => formatCompact(data.value?.today.requests ??
 const todayHint = computed(() => {
   const today = data.value?.today
   if (!today) return ''
-  return `Token ${formatCompact(today.tokens)} · 配额 ${formatNumber(today.quota)} · 成功率 ${formatPercent(today.success_rate)}`
+  const parts = [`Token ${formatCompact(today.tokens)}`, `配额 ${formatNumber(today.quota)}`, `成功率 ${formatPercent(today.success_rate)}`]
+  if (today.avg_tokens_per_second > 0) parts.push(`速率 ${formatRate(today.avg_tokens_per_second)}`)
+  return parts.join(' · ')
+})
+
+/**
+ * 今日用量与性能明细（卡片下方的指标格子）。
+ *
+ * 为什么不把这些塞进「今日请求」那张卡的 hint：成本（输入/输出/缓存）、
+ * 质量（成功率）、速度（首包/速率）是三件互不相干的事，挤成一行文案既读不出
+ * 对比也不好定位问题；独立格子还能在无样本时显示「—」而不是刺眼的 0。
+ */
+const todayMetrics = computed(() => {
+  const today = data.value?.today
+  if (!today) return []
+  return [
+    {
+      label: '输入 Token',
+      value: formatNumber(today.prompt_tokens),
+      hint: '发往上游的提示词总量（缓存命中部分也计入其中）',
+    },
+    {
+      label: '输出 Token',
+      value: formatNumber(today.completion_tokens),
+      hint: '模型生成的总量（推理 token 也计入其中）',
+    },
+    {
+      label: '缓存命中',
+      value: today.cached_tokens > 0 ? `${formatNumber(today.cached_tokens)} · ${formatPercent(today.cache_hit_rate, 1)}` : EMPTY,
+      hint:
+        today.cached_tokens > 0
+          ? '命中上游提示词缓存的输入 token；这部分通常按更低价计费，比例越高越省钱'
+          : '今日尚无上游回报的缓存命中（多数上游在未命中时不回报该字段）',
+    },
+    {
+      label: '推理 Token',
+      value: today.reasoning_tokens > 0 ? formatNumber(today.reasoning_tokens) : EMPTY,
+      hint: '计入输出但不出现在回答正文里的思考 token，是「怎么扣了这么多」的主要来源',
+    },
+    {
+      label: '平均耗时',
+      value: today.avg_latency_ms > 0 ? formatLatency(Math.round(today.avg_latency_ms)) : EMPTY,
+      hint: '单次请求的端到端平均耗时（含排队、上游处理与生成）',
+    },
+    {
+      label: '平均首包',
+      value: today.avg_first_token_ms > 0 ? formatLatency(Math.round(today.avg_first_token_ms)) : EMPTY,
+      hint: '流式请求的首 token 平均等待（TTFB）：用户「等多久看到第一个字」；仅统计采集到的流式样本',
+    },
+    {
+      label: '平均速率',
+      value: formatRate(today.avg_tokens_per_second),
+      hint: '输出速率均值（tokens/秒），已扣除首包等待，反映模型真实生成速度',
+    },
+  ]
 })
 
 /* ── 图表 ─────────────────────────────────────────────── */
@@ -225,6 +279,32 @@ const hasTopModels = computed(() => (data.value?.top_models ?? []).length > 0)
 
           <StatCard label="今日请求" :value="todayRequests" :hint="todayHint" icon="bolt" tone="warn" />
         </template>
+      </section>
+
+      <!-- 今日用量与性能：Token 构成 / 缓存命中 / 速度 -->
+      <section class="mt-6 card">
+        <div class="card-head">
+          <div>
+            <h3 class="section-title">今日用量与性能</h3>
+            <p class="mt-1 text-xs text-ink-400">
+              Token 构成、缓存命中与响应速度。显示「—」表示今日尚无对应样本（例如没有流式请求就没有首包数据）。
+            </p>
+          </div>
+        </div>
+        <div class="card-pad">
+          <div v-if="loading" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div v-for="index in 8" :key="index" class="rounded-lg border border-ink-800 bg-ink-950/40 p-3.5">
+              <div class="h-3 w-16 skeleton" />
+              <div class="mt-2 h-5 w-24 skeleton" />
+            </div>
+          </div>
+          <div v-else class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div v-for="item in todayMetrics" :key="item.label" class="rounded-lg border border-ink-800 bg-ink-950/40 p-3.5">
+              <p class="text-xs text-ink-400">{{ item.label }}</p>
+              <p class="mt-1 truncate text-lg font-semibold text-ink-100" :title="item.hint">{{ item.value }}</p>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- 趋势 -->
