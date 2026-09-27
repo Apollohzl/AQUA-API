@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -226,7 +227,13 @@ func (s *Server) Run(ctx context.Context) error {
 		// 收到取消信号：给在途请求 10 秒完成时间
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		return s.httpServer.Shutdown(shutdownCtx)
+		if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
+			// 超时（例如仍有流式响应在传输）不是"启动失败"：进程本来就要退出。
+			// 只记一条告警并返回 nil，让退出码为 0——否则 systemd 会把一次
+			// 正常重启标记为 failed，既污染日志，也会误触重启策略与告警。
+			slog.Warn("优雅关闭未在期限内完成，进程即将退出", "error", err)
+		}
+		return nil
 	}
 }
 
