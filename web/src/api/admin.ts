@@ -19,6 +19,8 @@ import type {
   AdminUser,
   Channel,
   ChannelKey,
+  ChannelModelMapping,
+  ChannelModelMappingItem,
   ChannelPayload,
   ChannelTestResult,
   ChannelTypesResponse,
@@ -187,6 +189,31 @@ export function updateSettings(payload: UpdateSiteSettingsPayload): Promise<unkn
 export async function fetchPaymentChannels(): Promise<PaymentChannel[]> {
   const settings = await fetchSettings()
   return settings.payment_channels ?? []
+}
+
+/* ── 渠道模型 ID 映射 ───────────────────────────────────── */
+
+/**
+ * GET /api/admin/channels/{id}/mappings：读取某渠道的模型 ID 映射。
+ *
+ * 映射语义：public_model（平台模型 ID，用户调用时用）↔ upstream_model（实际发给上游的名字）。
+ * 不配置映射时模型名原样透传。
+ */
+export function listChannelMappings(channelId: number): Promise<{ items: ChannelModelMapping[]; total: number }> {
+  return api.get<{ items: ChannelModelMapping[]; total: number }>(`/admin/channels/${channelId}/mappings`)
+}
+
+/**
+ * PUT /api/admin/channels/{id}/mappings：整组替换该渠道的映射。
+ *
+ * 为什么是整组替换而不是逐条增删：界面是一张表一次性提交，
+ * 整组替换能保证「界面所见 = 落库结果」，不会留下中间态或孤儿行。
+ */
+export function replaceChannelMappings(
+  channelId: number,
+  items: ChannelModelMappingItem[],
+): Promise<{ items: ChannelModelMapping[]; total: number }> {
+  return api.put<{ items: ChannelModelMapping[]; total: number }>(`/admin/channels/${channelId}/mappings`, { items })
 }
 
 /* ── 上游模型列表 ───────────────────────────────────────── */

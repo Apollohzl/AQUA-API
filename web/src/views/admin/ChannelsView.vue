@@ -34,8 +34,10 @@ import {
   fetchKeyStrategies,
   fetchUpstreamModels,
   getChannel,
+  listChannelMappings,
   listChannels,
   listGroups,
+  replaceChannelMappings,
   testChannel,
   updateChannel,
   updateChannelKey,
@@ -88,6 +90,133 @@ const fetchingModels = ref(false)
 const upstreamModels = ref<string[]>([])
 /** 拉取失败原因 */
 const upstreamError = ref('')
+
+/* ── 模型 ID 映射状态 ─────────────────────────────────── */
+/**
+ * 模型 ID 映射的编辑行。
+ *
+ * 这是本页最容易让人困惑的地方，因此把两个名字的职责写死在这里：
+ *   publicModel —— 平台模型 ID（对外）：客户端/SDK 调用时使用的名字，
+ *                  也是模型广场与 /v1/models 里展示的名字；
+ *   upstreamModel —— 上游模型 ID：网关转发时【真正发给上游】的名字。
+ * 例：用户调 AQUA/GLM-5.3-Flash，上游 tierflow 收到 GLM-5.3-Flash。
+ *
+ * 不配置任何映射时，两个名字相同（原样透传），行为与没有本功能时完全一致。
+ */
+interface MappingRow {
+  publicModel: string
+  upstreamModel: string
+  enabled: boolean
+}
+
+const mappingRows = ref<MappingRow[]>([])
+/** 映射读取状态（编辑已有渠道时才会去后端取） */
+const mappingLoading = ref(false)
+const mappingError = ref('')
+/**
+ * 「批量生成映射」用的平台前缀。
+ *
+ * 为什么需要它：上游一次返回几十上百个模型，逐个手填平台名不现实。
+ * 站长只想表达"这批上游模型在我的平台上统一叫 AQUA/xxx"，
+ * 前缀 + 上游名即可一次性生成全部映射行。
+ */
+const mappingPrefix = ref('')
+
+/** 追加一行空白映射 */
+function addMappingRow(): void {
+  mappingRows.value = [...mappingRows.value, { publicModel: '', upstreamModel: '', enabled: true }]
+}
+
+/** 删除一行映射 */
+function removeMappingRow(index: number): void {
+  mappingRows.value = mappingRows.value.filter((_, i) => i !== index)
+}
+
+/**
+ * 用「前缀 + 上游模型名」批量生成映射行。
+ *
+ * 覆盖语义：生成结果会替换掉「上游模型 ID 已存在于上游清单」的旧行，保留手写的其它行，
+ * 这样重复点击不会产生重复行（后端对同一渠道内的上游名有唯一约束，重复会整组保存失败）。
+ */
+function generateMappingsFromUpstream(): void {
+  if (!upstreamModels.value.length) {
+    mappingError.value = '请先点「从上游拉取」获取上游模型清单'
+    return
+  }
+  mappingError.value = ''
+  const prefix = mappingPrefix.value.trim()
+  const generated: MappingRow[] = upstreamModels.value.map((upstream) => ({
+    publicModel: prefix ? `${prefix}${upstream}` : upstream,
+    upstreamModel: upstream,
+    enabled: true,
+  }))
+  // 保序：先保留管理员手写（上游名不在清单里）的行，再追加生成的行
+  const generatedUpstreams = new Set(upstreamModels.value)
+  const manual = mappingRows.value.filter((row) => row.upstreamModel.trim() && !generatedUpstreams.has(row.upstreamModel.trim()))
+  mappingRows.value = [...manual, ...generated]
+}
+
+/**
+ * 把映射里填好的「平台模型 ID」并入"声明支持的模型"清单。
+ *
+ * 为什么必须自动并入：渠道的 models 清单决定了"路由时该渠道能不能接住这个模型"，
+ * 若平台模型 ID 只写在映射里却没进清单，映射永远不会被命中——
+ * 表现就是"配了映射却完全不生效"，且没有任何报错。自动并入消除这类静默失败。
+ */
+function syncMappingPublicModels(): void {
+  const declared = parseModelList(form.value.modelText)
+  const additions = mappingRows.value
+    .map((row) => row.publicModel.trim())
+    .filter((name) => name && !declared.includes(name))
+  if (additions.length) {
+    form.value.modelText = [...declared, ...additions].join(', ')
+  }
+}
+
+/** 读取某渠道已保存的映射，填入编辑行 */
+async function loadChannelMappings(channelId: number): Promise<void> {
+  mappingLoading.value = true
+  mappingError.value = ''
+  try {
+    const result = await listChannelMappings(channelId)
+    mappingRows.value = (result.items ?? []).map((item) => ({
+      publicModel: item.public_model,
+      upstreamModel: item.upstream_model,
+      enabled: item.enabled,
+    }))
+  } catch (err) {
+    mappingRows.value = []
+    mappingError.value = err instanceof ApiError ? err.message : '模型映射加载失败'
+  } finally {
+    mappingLoading.value = false
+  }
+}
+
+/**
+ * 校验映射行，返回错误文案（null 表示通过）。
+ *
+ * 两道检查对应后端的两个硬约束，提前拦住能给出可操作的提示：
+ *   1) 平台模型 ID 与上游模型 ID 都不能为空（半填的行几乎必然是误操作）；
+ *   2) 同一渠道内「上游模型 ID」不能重复（后端唯一索引，重复会让整组保存失败）。
+ */
+function validateMappings(): string | null {
+  const seen = new Set<string>()
+  for (const row of mappingRows.value) {
+    const publicModel = row.publicModel.trim()
+    const upstreamModel = row.upstreamModel.trim()
+    if (!publicModel && !upstreamModel) continue
+    if (!publicModel) return `映射「${upstreamModel}」缺少平台模型 ID（用户调用时用的名字）`
+    if (!upstreamModel) return `映射「${publicModel}」缺少上游模型 ID（实际发给上游的名字）`
+    if (seen.has(upstreamModel)) return `上游模型 ID「${upstreamModel}」在同一渠道内重复，请合并为一条`
+    seen.add(upstreamModel)
+  }
+  return null
+}
+
+/** 把编辑行转成提交载荷（跳过完全空白的行） */
+function mappingPayload(): MappingRow[] {
+  return mappingRows.value.filter((row) => row.publicModel.trim() && row.upstreamModel.trim())
+}
 
 /* ── 密钥池明细状态 ───────────────────────────────────── */
 const keysDrawerOpen = ref(false)
@@ -362,6 +491,10 @@ function openCreate(): void {
   // 清空上一次的上游模型缓存，避免把 A 上游的模型误选到 B 渠道
   upstreamModels.value = []
   upstreamError.value = ''
+  // 映射同样必须清空：否则会把上一个渠道的映射误提交到新渠道
+  mappingRows.value = []
+  mappingError.value = ''
+  mappingPrefix.value = ''
   resetChannelType()
   drawerOpen.value = true
 }
@@ -389,6 +522,10 @@ async function openEdit(channel: Channel): Promise<void> {
     key_strategy: channel.key_strategy || 'least_in_flight',
   }
   formError.value = ''
+  // 先清空映射并置为加载中，避免残留上一个渠道的映射行被误提交
+  mappingRows.value = []
+  mappingError.value = ''
+  mappingLoading.value = true
   drawerOpen.value = true
 
   try {
@@ -411,6 +548,8 @@ async function openEdit(channel: Channel): Promise<void> {
     // 取详情失败不阻断编辑：至少列表数据可用，但提示用户
     toastError(err instanceof ApiError ? err.message : '渠道详情加载失败，已使用列表数据')
   }
+  // 映射是独立资源（渠道详情里不含），单独取一次；失败只影响这一个区块
+  await loadChannelMappings(channel.id)
 }
 
 function validateForm(): string | null {
@@ -654,6 +793,16 @@ async function submitForm(): Promise<void> {
     formError.value = invalid
     return
   }
+  const mappingInvalid = validateMappings()
+  if (mappingInvalid) {
+    formError.value = mappingInvalid
+    return
+  }
+
+  // 先把映射里的平台模型 ID 并入声明清单，再据此提交渠道。
+  // 顺序很重要：渠道的 models 清单决定"路由时该渠道能否接住这个模型"，
+  // 平台名若不在清单里，映射永远不会被命中（静默失效，最难排查）。
+  syncMappingPublicModels()
 
   const payload: ChannelPayload = {
     name: form.value.name.trim(),
@@ -674,13 +823,37 @@ async function submitForm(): Promise<void> {
   saving.value = true
   formError.value = ''
   try {
+    // 新建渠道要先拿到 id 才能写映射（映射挂在渠道下），因此分两步：
+    // 保存渠道 → 拿到 id/或复用已有 id → 整组替换映射。
+    let channelID = editing.value?.id ?? 0
     if (editing.value) {
-      await updateChannel(editing.value.id, payload)
-      toastSuccess('渠道已更新')
+      await updateChannel(channelID, payload)
     } else {
-      await createChannel(payload)
-      toastSuccess('渠道已创建')
+      const created = await createChannel(payload)
+      channelID = created?.id ?? 0
     }
+
+    // 映射单独提交：失败时渠道本身已保存成功，必须明确告知"哪一半失败了"，
+    // 否则管理员会以为整次保存都失败而反复重试。
+    const rows = mappingPayload()
+    try {
+      await replaceChannelMappings(
+        channelID,
+        rows.map((row) => ({
+          public_model: row.publicModel.trim(),
+          upstream_model: row.upstreamModel.trim(),
+          enabled: row.enabled,
+        })),
+      )
+    } catch (err) {
+      const reason = err instanceof ApiError ? err.message : '未知错误'
+      formError.value = `渠道已保存，但模型 ID 映射保存失败：${reason}`
+      toastError('渠道已保存，模型映射未保存')
+      await loadChannels()
+      return
+    }
+
+    toastSuccess(editing.value ? '渠道已更新' : '渠道已创建')
     drawerOpen.value = false
     await loadChannels()
   } catch (err) {
@@ -1174,8 +1347,13 @@ sk-yyyyyyyyyyyy</pre>
           </p>
         </div>
 
-        <div>
-          <label class="label" for="channel-models">声明支持的模型</label>
+        <!-- ── 模型与模型 ID 映射（两块）────────────────────────────
+             把两个名字的职责直接写在界面上，避免"到底哪个名字会发给上游"这类误解：
+               平台模型 ID（对外）= 用户 / SDK 调用时使用的名字，也是模型广场展示的名字；
+               上游模型 ID      = 网关转发时【真正发给上游】的名字。
+        -->
+        <div class="rounded-lg border border-ink-800 bg-ink-950/40 p-3.5">
+          <label class="label" for="channel-models">平台模型 ID（对外）</label>
           <div class="flex gap-2">
             <input
               id="channel-models"
@@ -1195,12 +1373,19 @@ sk-yyyyyyyyyyyy</pre>
             </button>
           </div>
 
+          <p class="hint">
+            这里是<strong>用户 / 客户端调用时使用的名字</strong>，也是模型广场与
+            <code>/v1/models</code> 里展示的名字。留空表示该渠道支持全部模型；多个用英文逗号分隔。
+          </p>
+
           <p v-if="upstreamError" class="field-error">{{ upstreamError }}</p>
 
           <!-- 上游模型勾选清单：把真实模型名一键勾进来，避免手抄出错 -->
           <div v-if="upstreamModels.length" class="mt-2 rounded-lg border border-ink-800 bg-ink-950/60 p-2.5">
             <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <span class="text-xs text-ink-400">上游共 {{ upstreamModels.length }} 个模型，点击即可勾选</span>
+              <span class="text-xs text-ink-400">
+                上游共 {{ upstreamModels.length }} 个模型；点击即按<strong>同名</strong>加入平台模型 ID（不改变发给上游的名字）
+              </span>
               <span class="flex gap-2">
                 <button type="button" class="text-xs text-brand-700 hover:text-brand-800" @click="selectAllModels">
                   全选
@@ -1236,10 +1421,107 @@ sk-yyyyyyyyyyyy</pre>
               {{ model }}
             </button>
           </div>
+        </div>
+
+        <!-- ── 模型 ID 映射 ─────────────────────────────────────── -->
+        <div class="rounded-lg border border-ink-800 bg-ink-950/40 p-3.5">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <label class="label mb-0">模型 ID 映射（可选）</label>
+            <button type="button" class="btn btn-ghost btn-sm" @click="addMappingRow">
+              <AppIcon name="plus" :size="14" />
+              添加一行
+            </button>
+          </div>
 
           <p class="hint">
-            留空表示该渠道支持全部模型；多个模型用英文逗号分隔。
-            点击「从上游拉取」可自动获取该上游支持的全部模型（如 NIM 平台的全部模型）。
+            网关转发时把左边的<strong>平台模型 ID</strong>换成右边的<strong>上游模型 ID</strong>再发给上游；
+            上游回包里的模型名也会改回平台名。例：用户调用 <code>AQUA/GLM-5.3-Flash</code>，
+            上游实际收到 <code>GLM-5.3-Flash</code>。
+            <strong>不配映射时两个名字相同（原样透传）</strong>，与没有本功能时完全一致。
+          </p>
+
+          <!-- 批量生成：上游模型多的时候逐个手填不现实 -->
+          <div class="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-ink-800 bg-ink-950/60 p-2.5">
+            <div>
+              <label class="label" for="mapping-prefix">平台前缀（批量生成用）</label>
+              <input
+                id="mapping-prefix"
+                v-model="mappingPrefix"
+                class="input input-mono w-40"
+                type="text"
+                placeholder="如 AQUA/"
+              />
+            </div>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              :disabled="!upstreamModels.length"
+              @click="generateMappingsFromUpstream"
+            >
+              用上游清单生成映射（{{ upstreamModels.length }}）
+            </button>
+            <span class="pb-2 text-xs text-ink-400">
+              生成规则：<code>前缀 + 上游模型名</code> 作为平台模型 ID。前缀留空则同名映射（等于不映射）。
+            </span>
+          </div>
+
+          <p v-if="mappingError" class="field-error">{{ mappingError }}</p>
+
+          <p v-if="mappingLoading" class="mt-2 text-xs text-ink-400">正在读取已保存的映射…</p>
+
+          <!-- 映射表：左右两列就是"用户用的名字"与"发给上游的名字" -->
+          <div v-else-if="mappingRows.length" class="mt-2 overflow-x-auto">
+            <table class="w-full min-w-[34rem] text-sm">
+              <thead>
+                <tr class="text-left text-xs text-ink-400">
+                  <th class="py-1.5 font-medium">平台模型 ID（用户调用这个）</th>
+                  <th class="w-6 py-1.5" />
+                  <th class="py-1.5 font-medium">上游模型 ID（实际发给上游）</th>
+                  <th class="w-16 py-1.5 font-medium">启用</th>
+                  <th class="w-10 py-1.5" />
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, index) in mappingRows" :key="index">
+                  <td class="py-1 pe-2">
+                    <input v-model="row.publicModel" class="input input-mono" type="text" placeholder="如 AQUA/GLM-5.3-Flash" />
+                  </td>
+                  <td class="py-1 text-center text-ink-500">→</td>
+                  <td class="py-1">
+                    <input
+                      v-model="row.upstreamModel"
+                      class="input input-mono"
+                      type="text"
+                      list="upstream-model-options"
+                      placeholder="如 GLM-5.3-Flash"
+                    />
+                  </td>
+                  <td class="py-1 text-center">
+                    <input v-model="row.enabled" type="checkbox" class="h-4 w-4 align-middle" />
+                  </td>
+                  <td class="py-1 text-right">
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-sm"
+                      :title="`删除该映射`"
+                      @click="removeMappingRow(index)"
+                    >
+                      <AppIcon name="trash" :size="14" />
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <datalist id="upstream-model-options">
+              <option v-for="model in upstreamModels" :key="model" :value="model" />
+            </datalist>
+            <p v-if="form.modelText.trim()" class="mt-1.5 text-xs text-ink-400">
+              保存时会自动把映射中的「平台模型 ID」并入上方声明清单，避免"配了映射却不生效"。
+            </p>
+          </div>
+
+          <p v-else class="mt-2 text-xs text-ink-400">
+            暂无映射。点「添加一行」手工配置，或先「从上游拉取」再用前缀一键生成。
           </p>
         </div>
 

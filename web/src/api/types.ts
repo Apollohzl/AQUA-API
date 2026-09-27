@@ -268,6 +268,39 @@ export interface Channel {
   key_pool?: KeyPoolSummary
 }
 
+/**
+ * 渠道级「模型 ID 映射」（GET/PUT /api/admin/channels/{id}/mappings 的 items 项）。
+ *
+ * 语义（这是本功能唯一需要理解的一句话）：
+ *   平台模型 ID（public_model）——客户端调用时使用的名字，出现在模型广场与 /v1/models；
+ *   上游模型 ID（upstream_model）——网关转发时真正发给上游的名字。
+ * 请求方向用 public 匹配、改写为 upstream；响应方向把上游回包的名字改回 public。
+ * 两侧都支持尾部通配符 *（前缀族），精确匹配优先、最长前缀次之。
+ */
+export interface ChannelModelMapping {
+  id: number
+  channel_id: number
+  /** 实际发给上游的模型 ID */
+  upstream_model: string
+  /** 平台模型 ID（用户调用时使用） */
+  public_model: string
+  /** 优先级，数值越大越优先（同精度竞争时使用） */
+  priority: number
+  enabled: boolean
+  remark: string
+  created_at: number
+  updated_at: number
+}
+
+/** 提交映射时的单条数据（id/时间戳由后端生成，不需要提交） */
+export interface ChannelModelMappingItem {
+  upstream_model: string
+  public_model: string
+  priority?: number
+  enabled?: boolean
+  remark?: string
+}
+
 /** 渠道密钥池概览 */
 export interface KeyPoolSummary {
   total: number
