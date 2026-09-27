@@ -75,7 +75,7 @@
   /* 细窄滚动条：管理后台表格横向滚动频繁，默认滚动条过于笨重 */
   * {
     scrollbar-width: thin;
-    scrollbar-color: #cbd6e4 transparent;
+    scrollbar-color: #cbd8e8 transparent;
   }
 
   *::-webkit-scrollbar {
@@ -88,7 +88,7 @@
   }
 
   *::-webkit-scrollbar-thumb:hover {
-    background-color: #b8c4d4;
+    background-color: #b6c6da;
     background-clip: content-box;
   }
 
@@ -129,8 +129,11 @@
     @apply flex items-center justify-between gap-3 border-b border-ink-800/60 px-5 py-4;
   }
 
+  /* 页面标题用衬线 display 字体：与正文的黑体拉开性格，
+     让"标题是标题"。管理后台的页面标题也统一用它，
+     整站从落地页到后台形成同一种编辑气质。 */
   .page-title {
-    @apply text-lg font-semibold text-ink-50;
+    @apply font-display text-lg font-semibold tracking-tight text-ink-50;
   }
 
   .page-desc {
@@ -318,13 +321,17 @@
   }
 
   /* ── 代码块 ───────────────────────────────────────────── */
-  /* 用页面底色而非纯白：让代码块与卡片形成微弱但可辨的层次 */
+  /* 深色"终端"块：浅色页面里唯一的深色区块，视线会第一时间落在它身上
+     （编辑排版里的"聚光灯"手法）。底色用比页面文字更深一档的深海蓝，
+     与品牌湖蓝同族而非纯黑，避免生硬。
+     内部若需要标题栏/分隔线，请用 border-white/10 与浅色文字
+     （见 LandingView / OneTimeKeyDialog / RedeemCodesView 的用法）。 */
   .code-block {
-    @apply relative overflow-hidden rounded-xl border border-ink-800/70 bg-ink-950;
+    @apply relative overflow-hidden rounded-xl border border-[#1c3050] bg-[#0d1b32];
   }
 
   .code-block pre {
-    @apply overflow-x-auto px-4 py-3.5 font-mono text-[13px] leading-relaxed text-ink-100;
+    @apply overflow-x-auto px-4 py-3.5 font-mono text-[13px] leading-relaxed text-[#d5e2f2];
   }
 
   /* ── 页面级布局 ───────────────────────────────────────── */
@@ -538,8 +545,8 @@
   /* 网格背景：落地页 hero 的几何底纹，纯 CSS 实现，不使用占位图片。
      亮色下的线条要更淡，否则会显得像表格线而不是底纹。 */
   .bg-grid {
-    background-image: linear-gradient(to right, rgba(15, 23, 42, 0.05) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(15, 23, 42, 0.05) 1px, transparent 1px);
+    background-image: linear-gradient(to right, rgba(11, 21, 38, 0.045) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(11, 21, 38, 0.045) 1px, transparent 1px);
     background-size: 44px 44px;
   }
 
@@ -553,17 +560,85 @@
 
   /* 页面氛围光：在极浅底色上叠两团极淡的品牌色光晕。
      为什么需要：整站大面积纯色底会让页面显得"平板、单调"，
-     光晕用纯 CSS 实现（不引入图片），既增加纵深又不干扰阅读。 */
+     光晕用纯 CSS 实现（不引入图片），既增加纵深又不干扰阅读。
+     配色与新版湖蓝品牌色一致：一团偏青（左上），一团偏靛（右上）。 */
   .app-ambient {
     background-image:
-      radial-gradient(58rem 30rem at 10% -10%, rgba(6, 182, 212, 0.13), transparent 62%),
-      radial-gradient(46rem 26rem at 94% 2%, rgba(129, 140, 248, 0.12), transparent 64%);
+      radial-gradient(58rem 30rem at 10% -10%, rgba(46, 127, 224, 0.11), transparent 62%),
+      radial-gradient(46rem 26rem at 94% 2%, rgba(99, 102, 241, 0.09), transparent 64%);
     background-repeat: no-repeat;
   }
 
   /* 标题渐变字：仅用于页面主标题的强调词，不用于正文（正文用渐变会降低可读性） */
   .text-gradient-brand {
     @apply bg-gradient-to-r from-brand-700 via-brand-600 to-indigo-600 bg-clip-text text-transparent;
+  }
+
+  /* ── 落地页 Hero（水感编辑风的核心区块）─────────────────
+     设计取舍：
+       1) 水面质感用「两团缓慢漂移的径向光斑」表达，纯 CSS 动画
+          （transform 合成层，不触发重排/重绘），比视频/图片轻几个数量级；
+       2) 光斑层放在 ::before/::after，不占布局节点，也方便内容层压在上面；
+       3) prefers-reduced-motion 用户直接关掉漂移动画——动效是加分项，
+          不能变成可访问性负担。 */
+  .hero-water {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+  }
+
+  .hero-water::before,
+  .hero-water::after {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    border-radius: 9999px;
+    filter: blur(60px);
+    animation: hero-drift 14s ease-in-out infinite;
+  }
+
+  .hero-water::before {
+    top: -18rem;
+    left: -12rem;
+    width: 44rem;
+    height: 44rem;
+    background: radial-gradient(circle, rgba(46, 127, 224, 0.16), transparent 65%);
+  }
+
+  .hero-water::after {
+    right: -14rem;
+    bottom: -20rem;
+    width: 40rem;
+    height: 40rem;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.13), transparent 65%);
+    animation-delay: -7s; /* 两团光斑相位错开，避免同步起伏的机械感 */
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-water::before,
+    .hero-water::after {
+      animation: none;
+    }
+  }
+
+  /* 落地页大标题：衬线字体 + 收紧字距，是全站最大的文字。
+     用 text-balance 保证两行标题的断行位置自然。 */
+  .hero-title {
+    @apply font-display text-balance text-4xl font-bold leading-[1.15] tracking-tight text-ink-50 sm:text-5xl lg:text-6xl;
+  }
+
+  /* 落地页 kicker（大标题上方的小标签）：全大写 + 宽字距，
+     编辑风排版的经典元素，用来"报幕"而不是承载信息。 */
+  .hero-kicker {
+    @apply inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-brand-700;
+  }
+
+  /* 落地页进场动画：给 hero 内的元素依次错开延迟（配合 style 上的 --d 变量），
+     一次页面加载形成"逐个升上来"的节奏感，比到处都是微交互更有效。 */
+  .hero-reveal {
+    @apply animate-slide-up opacity-0;
+    animation-fill-mode: forwards;
+    animation-delay: var(--d, 0ms);
   }
 
   /* ── 窄屏表格降级（table → 卡片）─────────────────────────

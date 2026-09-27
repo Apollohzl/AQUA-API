@@ -125,7 +125,7 @@ function reloadSite(): void {
 
         <div class="card card-pad shadow-pop">
           <div>
-            <h1 class="text-xl font-semibold tracking-tight text-ink-50">登录 {{ site.siteName }}</h1>
+            <h1 class="font-display text-xl font-semibold tracking-tight text-ink-50">登录 {{ site.siteName }}</h1>
             <p class="mt-1.5 text-sm text-ink-400">使用账号密码登录，管理你的访问令牌与调用记录。</p>
           </div>
 

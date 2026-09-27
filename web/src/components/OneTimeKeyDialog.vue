@@ -65,8 +65,8 @@ const baseUrl = computed(() => `${window.location.origin}/v1`)
           {{ t('components.oneTimeKey.tokenName') }}<span class="text-ink-200">{{ tokenName }}</span>
         </p>
         <div class="code-block">
-          <div class="flex items-center justify-between gap-3 border-b border-ink-800 px-4 py-2">
-            <span class="font-mono text-xs text-ink-300">{{ t('components.oneTimeKey.accessToken') }}</span>
+          <div class="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2">
+            <span class="font-mono text-xs text-[#8ba6c9]">{{ t('components.oneTimeKey.accessToken') }}</span>
             <CopyButton
               :value="apiKey"
               :label="t('components.oneTimeKey.copyKey')"

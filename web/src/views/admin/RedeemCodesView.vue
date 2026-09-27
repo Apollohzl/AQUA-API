@@ -550,8 +550,8 @@ const emptyHint = computed(() =>
     >
       <div class="space-y-3">
         <div class="code-block">
-          <div class="flex items-center justify-between gap-3 border-b border-ink-800 px-4 py-2">
-            <span class="font-mono text-xs text-ink-300">批次号 {{ createdBatchNo }}</span>
+          <div class="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2">
+            <span class="font-mono text-xs text-[#8ba6c9]">批次号 {{ createdBatchNo }}</span>
             <CopyButton :value="createdText" label="复制全部" small success-text="本批兑换码已全部复制" />
           </div>
           <pre class="max-h-72 whitespace-pre-wrap break-all">{{ createdText }}</pre>

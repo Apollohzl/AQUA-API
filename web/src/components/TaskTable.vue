@@ -289,11 +289,11 @@ function openDetail(task: Task): void {
         <div class="grid gap-4 md:grid-cols-2">
           <div>
             <p class="label">{{ $t('components.taskTable.params') }}</p>
-            <pre class="code-block max-h-56 overflow-auto p-3 font-mono text-[12px] leading-relaxed text-ink-200" dir="ltr">{{ detailParamsText || $t('components.taskTable.emptyValue') }}</pre>
+            <pre class="code-block max-h-56 overflow-auto p-3 font-mono text-[12px] leading-relaxed text-[#d5e2f2]" dir="ltr">{{ detailParamsText || $t('components.taskTable.emptyValue') }}</pre>
           </div>
           <div>
             <p class="label">{{ $t('components.taskTable.upstream') }}</p>
-            <pre class="code-block max-h-56 overflow-auto p-3 font-mono text-[12px] leading-relaxed text-ink-200" dir="ltr">{{ detailResultText || $t('components.taskTable.emptyValue') }}</pre>
+            <pre class="code-block max-h-56 overflow-auto p-3 font-mono text-[12px] leading-relaxed text-[#d5e2f2]" dir="ltr">{{ detailResultText || $t('components.taskTable.emptyValue') }}</pre>
           </div>
         </div>
 

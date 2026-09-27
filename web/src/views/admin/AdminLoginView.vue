@@ -106,7 +106,7 @@ async function handleSubmit(): Promise<void> {
               <AppIcon name="shield" :size="18" />
             </span>
             <div>
-              <h1 class="text-lg font-semibold tracking-tight text-ink-50">管理后台</h1>
+              <h1 class="font-display text-lg font-semibold tracking-tight text-ink-50">管理后台</h1>
               <p class="text-xs text-ink-400">请输入管理员密码</p>
             </div>
           </div>

@@ -176,42 +176,38 @@ const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
     </header>
 
     <main>
-      <!-- ── Hero ─────────────────────────────────────────── -->
-      <section class="relative overflow-hidden border-b border-ink-800/70">
-        <!-- 背景：网格 + 两处低饱和光斑（纯 CSS，无图片资源） -->
-        <div class="pointer-events-none absolute inset-0 bg-grid opacity-60" aria-hidden="true" />
-        <div
-          class="pointer-events-none absolute -left-24 -top-24 h-72 w-72 rounded-full bg-brand-500/20 blur-[90px]"
-          aria-hidden="true"
-        />
-        <div
-          class="pointer-events-none absolute -right-16 top-16 h-80 w-80 rounded-full bg-indigo-500/10 blur-[110px]"
-          aria-hidden="true"
-        />
+      <!-- ── Hero（水感编辑风）────────────────────────────────
+           设计说明：
+           · hero-water 提供两团缓慢漂移的湖蓝光斑（纯 CSS，见 style.css），
+             是"AQUA=水"的视觉锚点；
+           · 大标题用衬线 display 字体，kicker 全大写宽字距——编辑排版的报幕感；
+           · hero 内元素用 hero-reveal + --d 依次错开进场，一次加载形成节奏。 -->
+      <section class="hero-water relative overflow-hidden border-b border-ink-800/70">
+        <!-- 背景：网格压在最底层，光斑由 hero-water 的伪元素提供 -->
+        <div class="pointer-events-none absolute inset-0 bg-grid opacity-50" aria-hidden="true" />
         <div class="pointer-events-none absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-ink-950 to-transparent" aria-hidden="true" />
 
         <div class="relative mx-auto grid max-w-6xl gap-12 px-5 py-16 lg:grid-cols-[1.05fr_1fr] lg:px-8 lg:py-24">
           <div>
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="badge badge-info">
-                <span class="dot" />
-                自托管网关
+            <div class="hero-reveal flex flex-wrap items-center gap-3" style="--d: 0ms">
+              <span class="hero-kicker">
+                <span class="dot" aria-hidden="true" />
+                Self-hosted LLM Gateway
               </span>
               <span v-if="site.version" class="chip">v{{ site.version }}</span>
               <span v-if="site.models.length" class="chip">{{ site.models.length }} 个模型在线</span>
             </div>
 
-            <h1 class="mt-6 text-balance text-4xl font-semibold leading-tight tracking-tight text-ink-50 lg:text-5xl">
+            <h1 class="hero-title mt-6" style="--d: 60ms">
               一个入口，接管你所有的
-              <!-- 渐变文字：亮色主题下必须用较深的品牌色，否则在浅底上几乎不可见 -->
-              <span class="bg-gradient-to-r from-brand-600 to-brand-800 bg-clip-text text-transparent">大模型调用</span>
+              <span class="text-gradient-brand">大模型调用</span>
             </h1>
 
-            <p class="mt-5 max-w-xl text-base leading-relaxed text-ink-300">
+            <p class="hero-reveal mt-5 max-w-xl text-base leading-relaxed text-ink-300" style="--d: 120ms">
               {{ site.siteDescription || 'AQUA-API 是自托管的 LLM API 网关：统一接入渠道与对外协议，负责路由、计费与运营。' }}
             </p>
 
-            <ul class="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-ink-300">
+            <ul class="hero-reveal mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-ink-300" style="--d: 180ms">
               <li class="flex items-center gap-1.5">
                 <AppIcon name="check" :size="15" class="text-brand-600" />
                 兼容 OpenAI 接口
@@ -226,7 +222,7 @@ const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
               </li>
             </ul>
 
-            <div class="mt-8 flex flex-wrap items-center gap-3">
+            <div class="hero-reveal mt-8 flex flex-wrap items-center gap-3" style="--d: 240ms">
               <template v-if="auth.isLoggedIn">
                 <RouterLink :to="consoleTarget" class="btn btn-primary">
                   <AppIcon :name="auth.isAdmin ? 'shield' : 'home'" :size="16" />
@@ -255,17 +251,19 @@ const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
             </div>
           </div>
 
-          <!-- 请求示例卡片：让访客立刻看到「怎么用」 -->
-          <div class="lg:pt-4">
+          <!-- 请求示例卡片：让访客立刻看到「怎么用」。
+               深色代码块在浅色页面里是天然的"舞台聚光灯"——
+               编辑风版面里唯一的深色块，视线会第一时间落在它身上。 -->
+          <div class="hero-reveal lg:pt-4" style="--d: 200ms">
             <div class="code-block shadow-panel">
-              <div class="flex items-center justify-between gap-3 border-b border-ink-800 px-4 py-2.5">
+              <div class="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2.5">
                 <div class="flex items-center gap-2">
                   <span class="flex gap-1.5" aria-hidden="true">
-                    <span class="h-2.5 w-2.5 rounded-full bg-ink-700" />
-                    <span class="h-2.5 w-2.5 rounded-full bg-ink-700" />
-                    <span class="h-2.5 w-2.5 rounded-full bg-ink-700" />
+                    <span class="h-2.5 w-2.5 rounded-full bg-white/25" />
+                    <span class="h-2.5 w-2.5 rounded-full bg-white/25" />
+                    <span class="h-2.5 w-2.5 rounded-full bg-white/25" />
                   </span>
-                  <span class="font-mono text-xs text-ink-400">POST /v1/chat/completions</span>
+                  <span class="font-mono text-xs text-[#8ba6c9]">POST /v1/chat/completions</span>
                 </div>
                 <CopyButton :value="codeSamples[0].code" label="复制" small success-text="cURL 示例已复制" />
               </div>
@@ -297,8 +295,8 @@ const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
       <!-- ── 核心特性 ─────────────────────────────────────── -->
       <section id="features" class="mx-auto max-w-6xl scroll-mt-20 px-5 py-16 lg:px-8 lg:py-20">
         <div class="max-w-2xl">
-          <p class="text-xs font-medium uppercase tracking-widest text-brand-600">核心特性</p>
-          <h2 class="mt-3 text-2xl font-semibold tracking-tight text-ink-50 lg:text-3xl">
+          <p class="hero-kicker">核心特性</p>
+          <h2 class="mt-3 font-display text-2xl font-semibold tracking-tight text-ink-50 lg:text-3xl">
             该管的都管住，该接的照旧接
           </h2>
           <p class="mt-3 text-sm leading-relaxed text-ink-300">
@@ -327,8 +325,8 @@ const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
         <div class="mx-auto max-w-6xl px-5 py-16 lg:px-8 lg:py-20">
           <div class="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <p class="text-xs font-medium uppercase tracking-widest text-brand-600">可用模型</p>
-              <h2 class="mt-3 text-2xl font-semibold tracking-tight text-ink-50">当前对外提供的模型</h2>
+              <p class="hero-kicker">可用模型</p>
+              <h2 class="mt-3 font-display text-2xl font-semibold tracking-tight text-ink-50">当前对外提供的模型</h2>
               <p class="mt-2 text-sm text-ink-400">
                 来自所有已启用渠道声明模型的并集，随渠道配置变化实时更新。
               </p>
@@ -385,8 +383,8 @@ const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
       <section id="quickstart" class="mx-auto max-w-6xl scroll-mt-20 px-5 py-16 lg:px-8 lg:py-20">
         <div class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr]">
           <div>
-            <p class="text-xs font-medium uppercase tracking-widest text-brand-600">快速接入</p>
-            <h2 class="mt-3 text-2xl font-semibold tracking-tight text-ink-50 lg:text-3xl">三步开始调用</h2>
+            <p class="hero-kicker">快速接入</p>
+            <h2 class="mt-3 font-display text-2xl font-semibold tracking-tight text-ink-50 lg:text-3xl">三步开始调用</h2>
 
             <ol class="mt-8 space-y-6">
               <li class="flex gap-4">
@@ -441,7 +439,7 @@ const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
 
           <div>
             <div class="code-block shadow-panel">
-              <div class="flex flex-wrap items-center gap-2 border-b border-ink-800 px-3 py-2.5">
+              <div class="flex flex-wrap items-center gap-2 border-b border-white/10 px-3 py-2.5">
                 <button
                   v-for="sample in codeSamples"
                   :key="sample.key"
@@ -449,8 +447,8 @@ const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
                   class="rounded-md px-2.5 py-1 text-xs font-medium transition-colors"
                   :class="
                     activeSample === sample.key
-                      ? 'bg-brand-500/15 text-brand-700'
-                      : 'text-ink-400 hover:bg-ink-850 hover:text-ink-200'
+                      ? 'bg-brand-500/25 text-brand-200'
+                      : 'text-[#8ba6c9] hover:bg-white/10 hover:text-white'
                   "
                   @click="activeSample = sample.key"
                 >
