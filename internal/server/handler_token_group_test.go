@@ -45,6 +45,7 @@ type tokenGroupFixture struct {
 	adminTok string
 	userTok  string
 	userID   uint64
+	adminID  uint64
 }
 
 // newTokenGroupFixture 构造含分组/令牌仓储、带管理员与普通用户会话的最小服务。
@@ -97,6 +98,7 @@ func newTokenGroupFixture(t *testing.T) *tokenGroupFixture {
 		orders:   store.NewPaymentOrderRepository(st.DB()),
 		channels: store.NewChannelRepository(st.DB(), cipher),
 		userID:   owner.ID,
+		adminID:  admin.ID,
 		adminTok: createTokenGroupSession(t, sessions, admin.ID),
 		userTok:  createTokenGroupSession(t, sessions, owner.ID),
 	}
@@ -427,6 +429,25 @@ func TestTokenGroup_更新令牌同样受门槛约束(t *testing.T) {
 	}
 	if stored.GroupName != "" {
 		t.Fatalf("被拒后分组不应被写入，实际 %q", stored.GroupName)
+	}
+}
+
+// TestTokenGroup_管理员本人不受门槛限制 覆盖"站长要能自测大客户档位"。
+//
+// 门槛防的是客户自选低价分组；管理员本就能改门槛与倍率，拦他只会让站长
+// 无法自测大客户价格。注意这条只适用于"管理员自己的令牌"，
+// 后台代客户建令牌仍按客户的资格判定（见上一条用例）。
+func TestTokenGroup_管理员本人不受门槛限制(t *testing.T) {
+	fx := newTokenGroupFixture(t)
+	fx.withGatedGroup(t, "billing_vip", 50, 10000)
+
+	rec, created := doBearerJSON(t, fx.srv, http.MethodPost, "/api/user/tokens", fx.adminTok,
+		`{"name":"站长自测令牌","unlimited_quota":true,"group_name":"billing_vip"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("管理员自建令牌应放行，实际 %d %s", rec.Code, rec.Body.String())
+	}
+	if got, _ := created["group_name"].(string); got != "billing_vip" {
+		t.Fatalf("分组应为 billing_vip，实际 %q", got)
 	}
 }
 

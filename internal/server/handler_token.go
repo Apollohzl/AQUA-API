@@ -350,6 +350,18 @@ func (s *Server) checkGroupUnlock(c *gin.Context, group *model.ModelGroup, owner
 	if ownerID == 0 {
 		return true
 	}
+	// 管理员本人不受门槛限制。
+	// 门槛防的是"客户自选低价分组吃掉毛利"；管理员本就能改门槛、改倍率、
+	// 给自己发额度，拦他既不增加安全性，又会让站长无法自测大客户档位。
+	// 注意：后台"代用户建令牌"传的是【目标用户】的 id，因此对客户依然生效。
+	if s.deps.Users != nil {
+		if owner, err := s.deps.Users.GetByID(c.Request.Context(), ownerID); err == nil && owner.IsAdmin() {
+			return true
+		}
+		// 查询失败时【不返回错误也不放行】，继续走下面的门槛判定（fail-closed）：
+		// 查不出身份时按普通用户处理，代价是管理员可能被临时拦一下，
+		// 而放行的代价是任何人都可能借故障时机绕开定价门槛。
+	}
 	if s.deps.Orders == nil {
 		oai.WriteError(c.Writer, http.StatusServiceUnavailable, "充值模块未启用", oai.TypeServer, oai.CodeInternal)
 		return false
