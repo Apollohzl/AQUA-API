@@ -47,6 +47,7 @@ import (
 	"time"
 
 	aqua "gitee.com/xiaosu4610/aqua-api"
+	"gitee.com/xiaosu4610/aqua-api/internal/broadcast"
 	"gitee.com/xiaosu4610/aqua-api/internal/config"
 	"gitee.com/xiaosu4610/aqua-api/internal/crypto"
 	"gitee.com/xiaosu4610/aqua-api/internal/mailer"
@@ -189,6 +190,8 @@ func run() error {
 	usageLogs := store.NewUsageLogRepository(st.DB(), st.Dialect())
 	settings := store.NewSettingRepository(st.DB(), st.Dialect())
 	emailCodes := store.NewEmailCodeRepository(st.DB())
+	// 邮件群发：批次 + 逐人收件明细（断点续发与"绝不重复发"的依据）。
+	emailBroadcasts := store.NewEmailBroadcastRepository(st.DB())
 	modelPrices := store.NewModelPriceRepository(st.DB())
 	oauthProviders := store.NewOAuthProviderRepository(st.DB(), cipher)
 	tasks := store.NewTaskRepository(st.DB())
@@ -322,6 +325,14 @@ func run() error {
 			"AQUA_SMTP_USERNAME / AQUA_SMTP_FROM / AQUA_SMTP_PASSWORD")
 	}
 
+	// 邮件群发执行器：名单入队、节流逐封发送、停止与重启续发。
+	//
+	// 与 mailerSender 分开的原因：mailer 刻意保持"一次尝试、快速失败"，
+	// 而群发要的节流、去重、断点续发都属于批量语义，混进 mailer 会让它
+	// 从"发一封"变成难以推理的长调用（见 internal/mailer 文件头说明）。
+	// Options{} 表示用默认节奏（2 秒/封、每 50 封停 30 秒），见 broadcast 包的常量说明。
+	broadcastSender := broadcast.New(emailBroadcasts, users, mailerSender, broadcast.Options{})
+
 	// 子命令：创建访问令牌（M2 遗留入口，保留以兼容既有脚本）
 	if *createToken != "" {
 		return createAndPrintToken(ctx, tokens, *createToken, cfg.Server.Listen)
@@ -427,6 +438,9 @@ func run() error {
 		// 注册邮箱验证码：仓储 + 发信通道
 		EmailCodes: emailCodes,
 		Mailer:     mailerSender,
+		// 邮件群发：批次仓储 + 执行器（后台触发"通知全站用户"时使用）
+		Broadcasts: emailBroadcasts,
+		Broadcast:  broadcastSender,
 		// 邮件通道（SMTP）：后台可视化配置；SMTPBase 是环境变量/默认值兜底项
 		SMTP:     smtpSettings,
 		SMTPBase: smtpBase,
@@ -435,6 +449,10 @@ func run() error {
 	})
 
 	logger.Info("HTTP 服务已就绪，等待请求", "addr", cfg.Server.Listen)
+
+	// 续发上次进程退出时未完成的邮件群发（串行，不并发开多条 SMTP 连接）。
+	// 已发过的收件人在明细表里是 sent，不会被再取到——重启导致的重复投递由数据保证不会发生。
+	broadcastSender.ResumeAll(ctx)
 
 	// ── 启动并阻塞 ──────────────────────────────────────────────
 	// Run 在收到退出信号后会优雅关闭并返回 nil；

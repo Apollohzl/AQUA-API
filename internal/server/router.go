@@ -200,6 +200,18 @@ func (s *Server) registerRoutes() {
 	admin.PUT("/announcements/:id", s.handleAdminUpdateAnnouncement)
 	admin.DELETE("/announcements/:id", s.handleAdminDeleteAnnouncement)
 
+	// 全站通知邮件（群发）：预览 → 确认发送 → 看进度 / 看失败明细 → 可停止。
+	//
+	// 模板目录刻意放在顶层 /broadcast-templates 而不是 /broadcasts/templates：
+	// 后者会与 /broadcasts/:id 在同一层级形成静态段/参数段冲突
+	// （与 /fetch-models 同样的处理，见上方注释）。
+	admin.GET("/broadcast-templates", s.handleListBroadcastTemplates)
+	admin.POST("/broadcasts/preview", s.handlePreviewBroadcast)
+	admin.GET("/broadcasts", s.handleListBroadcasts)
+	admin.POST("/broadcasts", s.handleCreateBroadcast)
+	admin.GET("/broadcasts/:id/recipients", s.handleListBroadcastRecipients)
+	admin.POST("/broadcasts/:id/cancel", s.handleCancelBroadcast)
+
 	// 模型计价规则（用量 → 费用的换算依据）
 	admin.GET("/prices", s.handleListPrices)
 	admin.POST("/prices", s.handleCreatePrice)

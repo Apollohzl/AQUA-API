@@ -33,6 +33,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"gitee.com/xiaosu4610/aqua-api/internal/broadcast"
 	"gitee.com/xiaosu4610/aqua-api/internal/config"
 	"gitee.com/xiaosu4610/aqua-api/internal/mailer"
 	"gitee.com/xiaosu4610/aqua-api/internal/model"
@@ -124,6 +125,14 @@ type Deps struct {
 	//  2) 后台保存后要重新合成"最终生效配置"，需要它作为回退项。
 	// 注意它【不含】任何硬编码的账号或口令：默认值只有服务商地址与端口（见 config.DefaultSMTPHost）。
 	SMTPBase config.SMTPConfig
+
+	// Broadcasts 是邮件群发仓储（批次与逐人收件明细，是断点续发的依据）。
+	Broadcasts model.EmailBroadcastRepository
+	// Broadcast 是邮件群发执行器（名单入队、节流发送、重启续发、停止）。
+	//
+	// 与 Mailer 分开的原因：Mailer 只负责"发一封"，节流、去重、断点续发
+	// 属于批量语义，混进 Mailer 会让它从"一次尝试快速失败"变成难以推理的长调用。
+	Broadcast *broadcast.Sender
 
 	// WebFS 是前端构建产物的嵌入文件系统；为 nil 时不托管前端页面（接口仍可用）。
 	//
