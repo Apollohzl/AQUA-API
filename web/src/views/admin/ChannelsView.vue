@@ -60,6 +60,7 @@ import {
   type Channel,
   type ChannelKeyUsage,
   type ChannelModelCostPayload,
+  type ChannelModelRetryRule,
   type ChannelPayload,
   type ChannelTestResult,
   type ChannelType,
@@ -123,6 +124,7 @@ const mappingRows = ref<MappingRow[]>([])
 /** 映射读取状态（编辑已有渠道时才会去后端取） */
 const mappingLoading = ref(false)
 const mappingError = ref('')
+
 /**
  * 「批量生成映射」用的平台前缀。
  *
@@ -226,6 +228,103 @@ function validateMappings(): string | null {
 /** 把编辑行转成提交载荷（跳过完全空白的行） */
 function mappingPayload(): MappingRow[] {
   return mappingRows.value.filter((row) => row.publicModel.trim() && row.upstreamModel.trim())
+}
+
+/* ── 上游错误重试（渠道级 + 模型级覆盖）──────────────────── */
+
+/** 重试次数上限，与后端 model.MaxRetryMaxAttempts 保持一致（超出会被 400 拒绝） */
+const MAX_RETRY_ATTEMPTS = 10
+
+/**
+ * 模型级重试规则编辑行。
+ *
+ * 字段与提交载荷同形（model / enabled / maxAttempts）：这一层是"渠道配置的一部分"，
+ * 不需要像映射那样做命名转换，少一层映射就少一处出错的地方。
+ */
+interface RetryRuleRow {
+  model: string
+  enabled: boolean
+  maxAttempts: number
+}
+
+const retryRuleRows = ref<RetryRuleRow[]>([])
+
+/**
+ * 把接口返回的模型级规则转成编辑行。
+ *
+ * 做一次深拷贝而不是直接引用响应对象：编辑行会被就地修改，
+ * 直接引用会让"取消编辑"变得无法回滚（原对象已被改）。
+ */
+function toRetryRuleRows(rules: ChannelModelRetryRule[] | undefined): RetryRuleRow[] {
+  return (rules ?? []).map((rule) => ({
+    model: rule.model,
+    enabled: rule.enabled,
+    maxAttempts: rule.max_attempts ?? 0,
+  }))
+}
+
+/** 新增一行空规则，由管理员填写模型名 */
+function addRetryRule(): void {
+  retryRuleRows.value = [...retryRuleRows.value, { model: '', enabled: true, maxAttempts: 0 }]
+}
+
+/** 删除一行规则 */
+function removeRetryRule(index: number): void {
+  retryRuleRows.value = retryRuleRows.value.filter((_, i) => i !== index)
+}
+
+/**
+ * 用"已勾选的模型"批量生成规则行。
+ *
+ * 为什么需要：一个渠道常有几十个模型，逐个手打模型名既慢又容易打错，
+ * 而打错的模型名永远不会命中——表现为"规则配了却完全没生效"。
+ */
+function fillRetryRulesFromModels(): void {
+  const models = parseModelList(form.value.modelText)
+  if (!models.length) {
+    formError.value = '请先在上方勾选该渠道支持的模型'
+    return
+  }
+  const existing = new Set(retryRuleRows.value.map((row) => row.model.trim()))
+  const additions = models.filter((name) => !existing.has(name))
+  if (!additions.length) {
+    formError.value = '已勾选的模型都在规则列表里了'
+    return
+  }
+  formError.value = ''
+  // 新行默认"开启重试 + 次数留空（用默认值）"：最常见的诉求单独给某几个模型
+  // 调次数或单独关掉，先用默认值占位，管理员再按需改。
+  retryRuleRows.value = [
+    ...retryRuleRows.value,
+    ...additions.map((name) => ({ model: name, enabled: true, maxAttempts: 0 })),
+  ]
+}
+
+/** 校验模型级重试规则，返回错误文案（null 表示通过） */
+function validateRetryRules(): string | null {
+  const seen = new Set<string>()
+  for (const row of retryRuleRows.value) {
+    const model = row.model.trim()
+    if (!model) return '模型级重试规则里的模型名不能为空'
+    if (/\s/.test(model)) return `模型名「${model}」不能包含空白字符（否则永远匹配不上）`
+    if (seen.has(model)) return `模型名「${model}」重复，请合并为一条`
+    seen.add(model)
+
+    const attempts = Number(row.maxAttempts)
+    if (!Number.isInteger(attempts) || attempts < 0 || attempts > MAX_RETRY_ATTEMPTS) {
+      return `模型「${model}」的重试次数必须在 0 ~ ${MAX_RETRY_ATTEMPTS} 之间（0 表示用默认次数）`
+    }
+  }
+  return null
+}
+
+/** 把编辑行转成提交载荷（模型名去空白） */
+function retryRulesPayload(): ChannelModelRetryRule[] {
+  return retryRuleRows.value.map((row) => ({
+    model: row.model.trim(),
+    enabled: row.enabled,
+    max_attempts: Number(row.maxAttempts) || 0,
+  }))
 }
 
 /* ── 密钥池明细状态 ───────────────────────────────────── */
@@ -568,6 +667,15 @@ interface ChannelForm {
   key_failure_policy: string
   /** 密钥失败后的统一冷却时长（秒）；0 表示用系统内置的分级退避 */
   keyCooldownSeconds: number
+  /**
+   * 上游错误重试总开关。
+   *
+   * 关闭 = 对上游只尝试一次（不换密钥、不换渠道），适合怕重复扣费的上游；
+   * 开启则按下面的次数在站内重试，把可恢复的失败消化掉。
+   */
+  retryEnabled: boolean
+  /** 渠道级重试次数上限（含首次尝试） */
+  retryMaxAttempts: number
 }
 
 /** 表单默认值：优先级 10、权重 1、启用、最少在途调度，符合常见「默认可用」预期 */
@@ -590,6 +698,10 @@ function emptyChannelForm(): ChannelForm {
     key_failure_policy: 'cooldown_only',
     // 0 = 使用系统内置的分级退避（限流/5xx/鉴权失败各有一档时长）
     keyCooldownSeconds: 0,
+    // 与后端默认一致：开启重试、次数用内置默认（3 次）。
+    // 站长不改这两项时，行为与升级前完全一致。
+    retryEnabled: true,
+    retryMaxAttempts: 3,
   }
 }
 
@@ -610,6 +722,14 @@ const drawerTitle = computed(() => (editing.value ? `编辑渠道 · ${editing.v
  */
 const selectedModelSet = computed(() => new Set(parseModelList(form.value.modelText)))
 
+/**
+ * 已选模型清单（数组形式）。
+ *
+ * 供重试规则的模型名下拉复用：与上面的 Set 同源，因此模板里不必再解析一次
+ * 上百个模型名（那会让每次输入都触发一轮解析）。
+ */
+const selectedModels = computed(() => Array.from(selectedModelSet.value))
+
 /** 打开新建抽屉 */
 function openCreate(): void {
   editing.value = null
@@ -622,6 +742,8 @@ function openCreate(): void {
   mappingRows.value = []
   mappingError.value = ''
   mappingPrefix.value = ''
+  // 模型级重试规则同理：残留行会被误当成新渠道的配置提交
+  retryRuleRows.value = []
   resetChannelType()
   drawerOpen.value = true
 }
@@ -650,12 +772,16 @@ async function openEdit(channel: Channel): Promise<void> {
     key_strategy: channel.key_strategy || 'least_in_flight',
     key_failure_policy: channel.key_failure_policy || 'cooldown_only',
     keyCooldownSeconds: channel.key_cooldown_seconds ?? 0,
+    retryEnabled: channel.retry_enabled ?? true,
+    retryMaxAttempts: channel.retry_max_attempts ?? 3,
   }
   formError.value = ''
   // 先清空映射并置为加载中，避免残留上一个渠道的映射行被误提交
   mappingRows.value = []
   mappingError.value = ''
   mappingLoading.value = true
+  // 重试规则随渠道详情下发，先用列表数据填一次，取到详情后再覆盖
+  retryRuleRows.value = toRetryRuleRows(channel.model_retry_rules)
   drawerOpen.value = true
 
   try {
@@ -667,7 +793,7 @@ async function openEdit(channel: Channel): Promise<void> {
       base_url: detail.base_url,
       api_key: '',
       keysText: '',
-    oauthTokensText: '',
+      oauthTokensText: '',
       modelText: joinModelList(detail.models),
       groups: detail.groups?.length ? [...detail.groups] : [detail.group || 'default'],
       priority: detail.priority,
@@ -676,7 +802,10 @@ async function openEdit(channel: Channel): Promise<void> {
       key_strategy: detail.key_strategy || 'least_in_flight',
       key_failure_policy: detail.key_failure_policy || 'cooldown_only',
       keyCooldownSeconds: detail.key_cooldown_seconds ?? 0,
+      retryEnabled: detail.retry_enabled ?? true,
+      retryMaxAttempts: detail.retry_max_attempts ?? 3,
     }
+    retryRuleRows.value = toRetryRuleRows(detail.model_retry_rules)
   } catch (err) {
     // 取详情失败不阻断编辑：至少列表数据可用，但提示用户
     toastError(err instanceof ApiError ? err.message : '渠道详情加载失败，已使用列表数据')
@@ -709,6 +838,13 @@ function validateForm(): string | null {
   if (cooldownSecondsInvalid.value) {
     return `密钥冷却时长必须在 0 ~ ${maxCooldownSeconds.value} 秒之间（当前 ${form.value.keyCooldownSeconds}）`
   }
+  // 重试次数与模型级规则：越界值后端会 400，提前拦住能给出更具体的提示
+  const attempts = Number(form.value.retryMaxAttempts)
+  if (!Number.isInteger(attempts) || attempts < 1 || attempts > MAX_RETRY_ATTEMPTS) {
+    return `重试次数必须在 1 ~ ${MAX_RETRY_ATTEMPTS} 之间（当前 ${form.value.retryMaxAttempts}）`
+  }
+  const retryInvalid = validateRetryRules()
+  if (retryInvalid) return retryInvalid
   return null
 }
 
@@ -1269,6 +1405,13 @@ async function submitForm(): Promise<void> {
     // 始终提交冷却时长：后端用"字段缺失 = 不修改"的语义，
     // 若因为值为 0 就省略，站长将永远改不回"使用系统默认退避"。
     key_cooldown_seconds: Number(form.value.keyCooldownSeconds) || 0,
+    // 重试策略：始终提交，让"界面上看到的"就是"实际生效的"。
+    // 次数显式提交（后端把 0 解释为"用内置默认"，且用指针区分"未提交"）。
+    retry_enabled: form.value.retryEnabled,
+    retry_max_attempts: Number(form.value.retryMaxAttempts) || 0,
+    // 模型级规则同样始终整组提交：显式提交 [] 表示"清空"，
+    // 否则删掉最后一行规则后旧规则会一直留在库里（静默失效的反面）。
+    model_retry_rules: retryRulesPayload(),
   }
   // 编辑时密钥留空表示「不修改」，因此不发送该字段（避免把密钥覆盖为空）
   if (form.value.api_key.trim()) payload.api_key = form.value.api_key.trim()
@@ -2173,6 +2316,115 @@ sk-yyyyyyyyyyyy</pre>
             说明：无论选哪种策略，<strong>手动禁用/下架</strong>始终有效，
             是让密钥退出调度的最终手段；被摘除的密钥也可在「密钥池明细」里手动恢复。
           </p>
+        </div>
+
+        <!-- 上游错误重试：决定"上游报错后要不要在站内再试一次" -->
+        <div class="rounded-lg border border-ink-800 bg-ink-950/40 p-3.5">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-[15rem] flex-1">
+              <label class="label" for="channel-retry-enabled">上游错误重试</label>
+              <p class="hint">
+                开启后：上游报错时先在站内<strong>换密钥 / 换渠道</strong>重试，
+                可恢复的失败不会直接丢给下游（这是降低下游错误率的主要手段）。
+                关闭后：对上游<strong>只请求一次</strong>，失败即按本站定制错误码回给下游——
+                适合"重复请求会重复扣费"的上游。
+              </p>
+            </div>
+            <label class="flex cursor-pointer items-center gap-2 pt-6 text-sm text-ink-200">
+              <input id="channel-retry-enabled" v-model="form.retryEnabled" class="checkbox" type="checkbox" />
+              {{ form.retryEnabled ? '已开启' : '已关闭' }}
+            </label>
+          </div>
+
+          <div class="mt-3">
+            <label class="label" for="channel-retry-attempts">重试次数（含首次尝试）</label>
+            <input
+              id="channel-retry-attempts"
+              v-model.number="form.retryMaxAttempts"
+              class="input input-mono w-40 tabular-nums"
+              type="number"
+              min="1"
+              :max="MAX_RETRY_ATTEMPTS"
+              :disabled="!form.retryEnabled"
+            />
+            <p class="hint">
+              填 <code>3</code> 表示"本次请求最多尝试 3 个渠道"（首次 + 2 次重试）。
+              同一渠道内<strong>换密钥</strong>重试的预算另计（上限 8 次）——
+              它毫秒级返回、代价低，正是密钥池的价值所在。关闭上面的开关时此项不生效。
+            </p>
+          </div>
+
+          <!-- 模型级覆盖：只给个别模型改次数，或单独关掉 -->
+          <div class="mt-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="text-xs font-medium text-ink-300">
+                模型级覆盖（不填则全部沿用上面的渠道配置）
+              </span>
+              <div class="flex gap-2">
+                <button type="button" class="btn btn-ghost btn-sm" @click="fillRetryRulesFromModels">
+                  <AppIcon name="plus" :size="14" />
+                  用已选模型批量添加
+                </button>
+                <button type="button" class="btn btn-ghost btn-sm" @click="addRetryRule">
+                  <AppIcon name="plus" :size="14" />
+                  添加一行
+                </button>
+              </div>
+            </div>
+
+            <table v-if="retryRuleRows.length" class="mt-2 w-full text-xs">
+              <thead>
+                <tr class="text-left text-ink-500">
+                  <th class="py-1.5 font-medium">平台模型 ID（支持尾部 * 通配）</th>
+                  <th class="w-20 py-1.5 font-medium">重试</th>
+                  <th class="w-28 py-1.5 font-medium">次数</th>
+                  <th class="w-10 py-1.5" />
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, index) in retryRuleRows" :key="index">
+                  <td class="py-1 pe-2">
+                    <input
+                      v-model="row.model"
+                      class="input input-mono"
+                      type="text"
+                      list="retry-rule-model-options"
+                      placeholder="如 gpt-4o 或 gpt-4*"
+                    />
+                  </td>
+                  <td class="py-1 text-center">
+                    <input v-model="row.enabled" type="checkbox" class="h-4 w-4 align-middle" />
+                  </td>
+                  <td class="py-1">
+                    <input
+                      v-model.number="row.maxAttempts"
+                      class="input input-mono tabular-nums"
+                      type="number"
+                      min="0"
+                      :max="MAX_RETRY_ATTEMPTS"
+                    />
+                  </td>
+                  <td class="py-1 text-right">
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-sm"
+                      title="删除该规则"
+                      @click="removeRetryRule(index)"
+                    >
+                      <AppIcon name="trash" :size="14" />
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <datalist id="retry-rule-model-options">
+              <option v-for="model in selectedModels" :key="model" :value="model" />
+            </datalist>
+            <p class="hint">
+              命中规则的模型不再沿用渠道级配置；次数填 <code>0</code> 表示用默认次数。
+              匹配顺序为「精确匹配 → 最长前缀」，例如 <code>gpt-4*</code> 覆盖同族模型。
+            </p>
+          </div>
         </div>
 
         <div>

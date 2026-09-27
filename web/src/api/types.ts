@@ -327,6 +327,24 @@ export interface SMTPSettingsPayload {
 
 /* ────────────────────────── 渠道 ────────────────────────── */
 
+/**
+ * 渠道级「模型重试覆盖规则」。
+ *
+ * 语义：站长的配置视角是"我对外卖的这个模型"，因此这里写的是平台模型名
+ * （public_model），与映射后的上游模型名无关；支持尾部通配符 *（如 "gpt-4*"）。
+ *
+ * 解析次序为「精确匹配 → 最长前缀 → 渠道级配置」，
+ * 与计价规则的匹配约定保持一致（同一份模型名在价格与重试上不会出现两套解释）。
+ */
+export interface ChannelModelRetryRule {
+  /** 平台模型名，支持尾部通配符 * */
+  model: string
+  /** 该模型是否允许站内重试 */
+  enabled: boolean
+  /** 该模型的渠道级重试次数；0 表示用默认值 */
+  max_attempts: number
+}
+
 /** 渠道对象（响应中只有 masked_key，绝不出现明文） */
 export interface Channel {
   id: number
@@ -362,6 +380,18 @@ export interface Channel {
   key_failure_policy: string
   /** 密钥失败后的统一冷却时长（秒）；0 表示使用系统内置的分级退避 */
   key_cooldown_seconds: number
+  /**
+   * 上游错误重试总开关。
+   *
+   * true（默认）= 上游报错时在站内换密钥/换渠道再试，降低下游看到的错误率；
+   * false = 只尝试一次，上游一报错就按本站定制错误码回给下游
+   * （适合"重复请求会重复扣费"的上游）。
+   */
+  retry_enabled: boolean
+  /** 渠道级重试次数上限（含首次尝试）；后端保证已归一为 1~10 */
+  retry_max_attempts: number
+  /** 模型级重试覆盖规则；空数组表示全部沿用渠道级配置 */
+  model_retry_rules: ChannelModelRetryRule[]
   status: number
   status_text?: string
   last_test_at?: number
@@ -609,6 +639,26 @@ export interface ChannelPayload {
    * 因此前端必须始终提交该字段（不要因为值为 0 就省略）。
    */
   key_cooldown_seconds?: number
+  /**
+   * 上游错误重试总开关。
+   *
+   * 省略（字段缺失）表示「不修改」；显式提交 false 表示关闭重试。
+   * 关闭是一个明确诉求（按次计费的上游怕重复扣费），因此不能用"缺省"表达。
+   */
+  retry_enabled?: boolean
+  /**
+   * 渠道级重试次数上限（含首次尝试）。
+   *
+   * 显式提交 0 表示「恢复内置默认次数」（3 次）；省略表示「不修改」。
+   */
+  retry_max_attempts?: number
+  /**
+   * 模型级重试覆盖规则。
+   *
+   * 省略表示「不修改」；显式提交 [] 表示「清空所有模型级规则」。
+   * 命中规则的模型不再沿用渠道级配置（数组里没有该模型即等于继承）。
+   */
+  model_retry_rules?: ChannelModelRetryRule[]
   /**
    * 批量密钥文本：每行一把，行内可用空格或逗号附加备注。
    *
