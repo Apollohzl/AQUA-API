@@ -292,7 +292,14 @@ func Types() []Type {
 			Key: "custom_openai", Label: "自定义 OpenAI 兼容", Category: CategoryText,
 			// 地址必须由使用者填写：这类上游可能是任意第三方或内网服务。
 			Protocol: ProtocolOpenAI, AuthMode: AuthBearer,
-			BaseURLEditable:   true,
+			BaseURLEditable: true,
+			ExtraFields: []ExtraField{
+				{Key: "inject_stream_usage", Label: "流式注入用量统计", Placeholder: "true",
+					Help: "填 true 时，网关会给流式请求补上 stream_options.include_usage，" +
+						"让上游在最后一个事件里返回 usage —— 按量真实计费的上游建议开启，" +
+						"否则流式调用只能按预留量估算、账对不上。" +
+						"部分严格校验请求体的上游会因该字段返回 400，因此默认关闭。"},
+			},
 			Caps:              CapChat | CapStream | CapTools | CapVision | CapReasoning,
 			SupportsModelList: true, Available: true,
 			Notes: "任何遵循 OpenAI 协议的第三方或内网服务：必须自行填写上游地址。",

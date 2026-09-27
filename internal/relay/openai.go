@@ -202,10 +202,10 @@ type forwardTarget struct {
 // 但"选渠道 / 密钥池 / 重试 / 计费 / 日志"这一整套逻辑完全相同，
 // 不该为了多一个端点而复制一遍转发实现。
 func (r *Relay) forwardWithFallback(w http.ResponseWriter, req *http.Request, modelName string, body []byte, adapter Adapter, upstreamPath string) {
-	// 按开关决定是否给流式请求注入 stream_options.include_usage（默认关闭，
-	// 取舍见 usage.go 的 injectStreamUsageOption）。只在这里改写一次，
-	// 保证同一次请求的各次重试使用完全相同的请求体。
-	body = withStreamUsageOption(body, injectStreamUsageOption)
+	// 注意：这里【不】改写请求体。是否注入 stream_options.include_usage 取决于
+	// 本次选中的渠道（见 injectStreamUsageFor：渠道扩展参数 > 全局常量），
+	// 而渠道是在下面的重试循环里逐轮选出来的，因此改写发生在循环内、
+	// 每次都从原始 body 派生，保证"同一次请求的各次尝试行为一致"。
 
 	// 解析本次请求分组：【只解析一次】，之后整条链路复用同一个值。
 	//
@@ -298,7 +298,10 @@ retryLoop:
 		// 占用在途计数（供 least_in_flight 使用）：与下方的 releaseKey 成对，
 		// 覆盖本轮从"选定凭据"到"响应结束"的整个区间。
 		r.acquireKey(keyCtx, target.keyID)
-		outcome := r.forwardChat(w, req, target, group, modelName, body, adapter, upstreamPath, &lastFailure)
+		// 按本轮的渠道决定是否注入 include_usage（见 injectStreamUsageFor）。
+		// 每次都从原始 body 派生，因此同一请求的各次尝试只在渠道不同时才不同。
+		attemptBody := withStreamUsageOption(body, injectStreamUsageFor(ch))
+		outcome := r.forwardChat(w, req, target, group, modelName, attemptBody, adapter, upstreamPath, &lastFailure)
 		// 归还本轮的在途占用：无论成功、换密钥还是换渠道，都必须释放，
 		// 否则 in_flight 只增不减，least_in_flight 会逐步失去参考价值。
 		r.releaseKey(target.keyID)

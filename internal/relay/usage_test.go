@@ -24,6 +24,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"gitee.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // mustWrite 向嗅探器写入内容，写入失败即终止测试。
@@ -279,5 +281,43 @@ func TestWithStreamUsageOption_InjectionRules(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestInjectStreamUsageFor_渠道级开关优先 验证"渠道扩展参数覆盖全局默认"。
+//
+// 为什么这条不能少：include_usage 是"计费精度"与"上游兼容性"的折中开关——
+// 按量真实计费的上游必须开启（否则流式账对不上），而不认识该字段的上游必须关闭
+// （否则直接 400）。若优先级写反（渠道配置被全局常量盖住），
+// 结果就是"站长明明配了开启，流式却依然拿不到用量"这类极难排查的计费缺口。
+func TestInjectStreamUsageFor_渠道级开关优先(t *testing.T) {
+	cases := []struct {
+		name      string
+		extra     map[string]string
+		wantValue bool // 期望的最终结果（基于全局常量为 false 的现状）
+	}{
+		{name: "未配置时回退全局默认", extra: nil, wantValue: injectStreamUsageOption},
+		{name: "空串回退全局默认", extra: map[string]string{"inject_stream_usage": "  "}, wantValue: injectStreamUsageOption},
+		{name: "true 开启", extra: map[string]string{"inject_stream_usage": "true"}, wantValue: true},
+		{name: "大小写与空白不影响识别", extra: map[string]string{"inject_stream_usage": " TRUE "}, wantValue: true},
+		{name: "1 开启", extra: map[string]string{"inject_stream_usage": "1"}, wantValue: true},
+		{name: "yes 开启", extra: map[string]string{"inject_stream_usage": "yes"}, wantValue: true},
+		{name: "false 强制关闭（可覆盖全局开启）", extra: map[string]string{"inject_stream_usage": "false"}, wantValue: false},
+		{name: "0 强制关闭", extra: map[string]string{"inject_stream_usage": "0"}, wantValue: false},
+		{name: "无关键时不误判", extra: map[string]string{"deployment": "true"}, wantValue: injectStreamUsageOption},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ch := &model.Channel{ExtraConfig: tc.extra}
+			if got := injectStreamUsageFor(ch); got != tc.wantValue {
+				t.Errorf("injectStreamUsageFor = %v，期望 %v（extra=%v）", got, tc.wantValue, tc.extra)
+			}
+		})
+	}
+
+	// 渠道为空时不得 panic（转发链路早期可能拿不到渠道对象）
+	if got := injectStreamUsageFor(nil); got != injectStreamUsageOption {
+		t.Errorf("渠道为 nil 时应回退全局默认，实际 %v", got)
 	}
 }

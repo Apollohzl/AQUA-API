@@ -37,6 +37,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"gitee.com/xiaosu4610/aqua-api/internal/model"
@@ -309,7 +310,42 @@ func extractUsage(raw []byte) (openAIUsage, bool) {
 // 若要启用：把常量改成 true 即可。withStreamUsageOption 已限定
 //
 //	"仅流式 + 客户端未显式指定 stream_options"时才注入，并会尊重客户端已有设置。
+//
+// 更细的控制见 injectStreamUsageFor：**渠道级扩展参数可以覆盖本常量**
+// （填 true 开启、填 false 强制关闭），这样"按量真实计费"的上游可以单独开启，
+// 而不必让全部渠道一起承担兼容性风险。
 const injectStreamUsageOption = false
+
+// channelInjectStreamUsageKey 是渠道扩展参数里"是否注入 include_usage"的键名。
+//
+// 该键声明在 channeltype 的「自定义 OpenAI 兼容」类型上（后台可见可填）。
+const channelInjectStreamUsageKey = "inject_stream_usage"
+
+// injectStreamUsageFor 判断本次转发（针对某个渠道）是否注入 stream_options.include_usage。
+//
+// 优先级：**渠道级扩展参数 > 全局默认常量**。
+//
+// 为什么需要渠道级：这是"计费精度"与"兼容性"之间唯一的折中点——
+//   - 开启：上游会在最后一个事件里带回 usage，流式调用的计费才精准；
+//     但严格校验请求体的上游会因未知字段直接返回 400；
+//   - 关闭：兼容性最好，但上游若默认不回 usage，流式调用只能按预留量估算，
+//     对"按量真实计费"的上游就等于账对不上。
+//
+// 取值识别：true/1/yes/on 视为开启，false/0/no/off 视为强制关闭；
+// 其它值（含空串、未配置）回退到全局常量。
+func injectStreamUsageFor(ch *model.Channel) bool {
+	if ch == nil {
+		return injectStreamUsageOption
+	}
+	switch strings.ToLower(strings.TrimSpace(ch.ExtraConfig[channelInjectStreamUsageKey])) {
+	case "true", "1", "yes", "on":
+		return true
+	case "false", "0", "no", "off":
+		return false
+	default:
+		return injectStreamUsageOption
+	}
+}
 
 // withStreamUsageOption 在 enabled 且请求体确实是"未指定 stream_options 的流式请求"时，
 // 注入 include_usage，让上游在最后一个事件里带上 usage。
