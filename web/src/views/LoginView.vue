@@ -4,7 +4,7 @@
  *
  * 意图（Why）：
  *   登录是进入门户/后台的唯一入口，页面必须「干净聚焦」：
- *   只有必要信息（品牌、站点名、两个输入框、一个按钮），不放置营销内容分散注意力。
+ *   只有必要信息（品牌、站点名、两个输入框、一个协议勾选、一个按钮），不放置营销内容分散注意力。
  *
  * 流转（Flow）：
  *   表单提交 → stores/auth.signIn() → POST /api/auth/login → 保存会话令牌
@@ -34,6 +34,17 @@ const showPassword = ref(false)
 const submitting = ref(false)
 const errorMessage = ref('')
 
+/**
+ * 是否已勾选同意《用户协议》与《隐私政策》。
+ *
+ * 为什么登录也要同意：登录后进入控制台，其提交的调用内容仍受《用户协议》约束，
+ * 把同意动作放在入口处，可避免"未明确同意即使用服务"的争议。
+ *
+ * 这里只做前端强制（未勾选时按钮置灰），不改动登录接口契约——
+ * 登录接口被 CLI/脚本等 API 客户端复用，新增必传字段会直接打断既有集成。
+ */
+const agreedTerms = ref(false)
+
 /** 站点信息仍在加载时，注册入口显示为禁用态，避免误判「注册未开放」 */
 const registrationReady = computed(() => !site.loading)
 
@@ -52,6 +63,11 @@ async function handleSubmit(): Promise<void> {
   errorMessage.value = ''
   if (!username.value.trim() || !password.value) {
     errorMessage.value = '请输入用户名与密码'
+    return
+  }
+  // 协议同意：仅前端强制；后端登录接口不做此校验（见 agreedTerms 的说明）
+  if (!agreedTerms.value) {
+    errorMessage.value = '请先阅读并同意《用户协议》与《隐私政策》'
     return
   }
 
@@ -150,6 +166,27 @@ function reloadSite(): void {
               </div>
             </div>
 
+            <!-- 协议同意：登录入口同样要求明示同意《用户协议》与《隐私政策》，
+                 未勾选时登录按钮置灰；协议入口指向公开文件页，可先阅读再决定。 -->
+            <label class="flex items-start gap-2 text-xs leading-relaxed text-ink-400">
+              <input
+                v-model="agreedTerms"
+                type="checkbox"
+                class="mt-0.5 h-4 w-4 shrink-0 rounded border-ink-600"
+                :disabled="submitting"
+              />
+              <span>
+                我已阅读并同意
+                <RouterLink to="/terms" target="_blank" class="font-medium text-brand-700 hover:underline">
+                  《用户协议》
+                </RouterLink>
+                与
+                <RouterLink to="/privacy" target="_blank" class="font-medium text-brand-700 hover:underline">
+                  《隐私政策》
+                </RouterLink>
+              </span>
+            </label>
+
             <!-- 错误态：贴在按钮上方，视线自然落点 -->
             <p
               v-if="errorMessage"
@@ -159,7 +196,7 @@ function reloadSite(): void {
               {{ errorMessage }}
             </p>
 
-            <button type="submit" class="btn btn-primary w-full" :disabled="submitting">
+            <button type="submit" class="btn btn-primary w-full" :disabled="submitting || !agreedTerms">
               <span
                 v-if="submitting"
                 class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
