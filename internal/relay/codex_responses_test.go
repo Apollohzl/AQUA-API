@@ -21,6 +21,8 @@ package relay
 import (
 	"encoding/base64"
 	"encoding/json"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -561,5 +563,103 @@ func TestApplyCredentialHeaders_缺少账号标识时报错(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "chatgpt_account_id") {
 		t.Errorf("错误信息应指明缺少的是账号标识，实际 %v", err)
+	}
+}
+
+// TestEncodeCodexRequest_Responses形态直通 覆盖 /v1/responses 入口。
+//
+// 客户端说的就是上游的语言，因此只做合规性归一、不做翻译：
+// input / tools 必须原样保留，只有被上游拒绝的字段才被剥掉。
+func TestEncodeCodexRequest_Responses形态直通(t *testing.T) {
+	out := decodeCodexRequest(t, `{
+		"model": "gpt-5.4",
+		"instructions": "你是严谨的助手",
+		"input": [{"role":"user","content":[{"type":"input_text","text":"你好"}]}],
+		"tools": [{"type":"function","name":"ping","parameters":{"type":"object"}}],
+		"store": true,
+		"stream": false,
+		"max_output_tokens": 512,
+		"metadata": {"trace":"x"}
+	}`)
+
+	if out["store"] != false || out["stream"] != true {
+		t.Errorf("store/stream 未被强制：%v / %v", out["store"], out["stream"])
+	}
+	if out["instructions"] != "你是严谨的助手" {
+		t.Errorf("客户端自己的 instructions 必须保留，实际 %v", out["instructions"])
+	}
+	for _, field := range []string{"max_output_tokens", "metadata"} {
+		if _, exists := out[field]; exists {
+			t.Errorf("字段 %q 应被剥离（上游不接受）", field)
+		}
+	}
+	input, _ := out["input"].([]any)
+	if len(input) != 1 {
+		t.Errorf("input 必须原样保留，实际 %#v", out["input"])
+	}
+	tools, _ := out["tools"].([]any)
+	if len(tools) != 1 {
+		t.Errorf("tools 必须原样保留，实际 %#v", out["tools"])
+	}
+}
+
+// TestEncodeCodexRequest_Responses形态缺instructions 覆盖"字段不能缺"这条硬约束。
+func TestEncodeCodexRequest_Responses形态缺instructions(t *testing.T) {
+	out := decodeCodexRequest(t, `{"model":"gpt-5.4","input":"你好"}`)
+
+	instructions, _ := out["instructions"].(string)
+	if strings.TrimSpace(instructions) == "" {
+		t.Fatal("instructions 缺失时必须注入默认值，否则上游直接拒绝")
+	}
+}
+
+// TestIsResponsesShape_判据 钉住"哪种请求体算 Responses"。
+func TestIsResponsesShape_判据(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"带 input", `{"model":"m","input":"hi"}`, true},
+		{"带 instructions", `{"model":"m","instructions":"sys","input":[]}`, true},
+		{"chat 形态（含 messages）", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, false},
+		{"两者都有（以 chat 优先，避免误判）", `{"messages":[],"input":"hi"}`, false},
+		{"空对象", `{}`, false},
+		{"非 JSON", `not json`, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isResponsesShape([]byte(tc.body)); got != tc.want {
+				t.Errorf("isResponsesShape = %v，期望 %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAdjustCodexUpstreamResponse_下游同为Responses时直通 是最关键的一条防回归。
+//
+// 若这里把上游事件流改写成 chat.completions 分片，Responses 客户端
+// （Codex CLI 等）会完全无法解析——而这类问题在 chat 入口测不出来。
+func TestAdjustCodexUpstreamResponse_下游同为Responses时直通(t *testing.T) {
+	body := io.NopCloser(strings.NewReader(codexTestStream))
+	resp := &http.Response{
+		StatusCode:    http.StatusOK,
+		Body:          body,
+		Header:        http.Header{"Content-Type": []string{"text/event-stream"}},
+		ContentLength: int64(len(codexTestStream)),
+	}
+
+	if err := adjustCodexUpstreamResponse(resp, true, true); err != nil {
+		t.Fatalf("直通路径不应报错: %v", err)
+	}
+	if resp.Body != body {
+		t.Error("下游同为 Responses 时不应包装响应体（改写会让客户端无法解析）")
+	}
+	if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
+		t.Errorf("Content-Type 不应被改写，实际 %q", got)
+	}
+	if resp.ContentLength != int64(len(codexTestStream)) {
+		t.Error("ContentLength 不应被改写")
 	}
 }

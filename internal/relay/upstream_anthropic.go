@@ -769,6 +769,16 @@ func marshalOpenAIPayload(payload map[string]any) []byte {
 // 其余类型直接返回，不做任何改动——这样既有 OpenAI 渠道的响应回写路径
 // （含响应头、流式行为）与改动前完全一致。
 func normalizeUpstreamResponse(spec channeltype.Type, resp *http.Response, wantStream bool) error {
+	return normalizeUpstreamResponseFor(spec, resp, wantStream, false)
+}
+
+// normalizeUpstreamResponseFor 与 normalizeUpstreamResponse 相同，
+// 额外接受"下游是否本身就使用 Responses 协议"。
+//
+// 为什么需要这个维度：订阅账号的上游与下游可能同为 Responses 协议
+// （客户端走 /v1/responses），此时必须原样透传而不是改写——
+// 客户端看不懂 chat.completions 的分片。其余协议不受影响，仍走各自的改写逻辑。
+func normalizeUpstreamResponseFor(spec channeltype.Type, resp *http.Response, wantStream, downstreamResponses bool) error {
 	switch spec.Protocol {
 	case channeltype.ProtocolAnthropic:
 		return adjustAnthropicUpstreamResponse(resp, wantStream)
@@ -779,8 +789,8 @@ func normalizeUpstreamResponse(spec channeltype.Type, resp *http.Response, wantS
 		return adjustGeminiUpstreamResponse(resp, wantStream)
 	case channeltype.ProtocolCodex:
 		// 订阅账号：把 Responses 事件流改写成 chat.completions
-		// （非流式时聚合成一个完整响应）。
-		return adjustCodexUpstreamResponse(resp, wantStream)
+		// （非流式时聚合成一个完整响应）；下游同为 Responses 时直通。
+		return adjustCodexUpstreamResponse(resp, wantStream, downstreamResponses)
 	default:
 		return nil
 	}

@@ -121,6 +121,45 @@ func (r *Relay) ServeEmbeddings(w http.ResponseWriter, req *http.Request) {
 	r.forwardWithFallback(w, req, modelName, body, nil, oai.EmbeddingsPath)
 }
 
+// ServeResponses 处理 POST /v1/responses（Responses 协议直连）。
+//
+// 与 ServeChatCompletions 的关系：两者走完全相同的转发链路（路由、密钥池、
+// 重试、计费），差别只在"双方说的是哪种协议"——
+//   - chat.completions：客户端说 chat，上游若是订阅账号则需转成 Responses；
+//   - responses：客户端本来就说 Responses，若上游也是 Responses 则原样透传。
+//
+// 请求体不做"猜测式改写"：只有订阅账号（Codex）才需要归一
+// （store=false / stream=true / instructions 非空），其余上游按原文转发——
+// 因为我们无从判断第三方上游接受哪些字段，擅自改写反而会引入新的失败点。
+func (r *Relay) ServeResponses(w http.ResponseWriter, req *http.Request) {
+	body, err := oai.ReadBody(req)
+	if err != nil {
+		if errors.Is(err, oai.ErrRequestTooLarge) {
+			oai.WriteError(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("请求体超过上限（%d 字节）", oai.MaxRequestBodyBytes),
+				oai.TypeInvalidRequest, oai.CodeRequestTooLarge)
+			return
+		}
+		oai.WriteError(w, http.StatusBadRequest, "读取请求体失败",
+			oai.TypeInvalidRequest, oai.CodeInvalidJSON)
+		return
+	}
+
+	modelName, err := oai.PeekModel(body)
+	if err != nil {
+		if errors.Is(err, oai.ErrMissingModel) {
+			oai.WriteError(w, http.StatusBadRequest, "缺少 model 字段",
+				oai.TypeInvalidRequest, oai.CodeMissingModel)
+			return
+		}
+		oai.WriteError(w, http.StatusBadRequest, "请求体不是合法的 JSON",
+			oai.TypeInvalidRequest, oai.CodeInvalidJSON)
+		return
+	}
+
+	r.forwardWithFallback(w, req, modelName, body, nil, oai.ResponsesPath)
+}
+
 // forwardTarget 描述「一次转发尝试」的完整目标：哪个渠道 + 用哪把密钥。
 //
 // 为什么要额外携带密钥信息：一个渠道可能挂着几百把密钥（密钥池），
@@ -831,10 +870,15 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 		}
 	}
 
-	// 上游协议入站转换：Anthropic / Gemini 渠道的响应需改写回内部 OpenAI 协议
+	// 上游协议入站转换：Anthropic / Gemini / Codex 渠道的响应需改写回内部 OpenAI 协议
 	// （非流式整体改写、流式逐事件转换、错误体改写为 OpenAI 错误体）。
 	// 其余上游此调用为空操作，既有回写路径完全不受影响。
-	if err := normalizeUpstreamResponse(spec, resp, wantStream); err != nil {
+	//
+	// "下游是否本身就用 Responses"由入口路径判定：只有 /v1/responses 那条入口
+	// 会传入 ResponsesPath。这样判断的依据是"客户端说了什么语言"，
+	// 而不是"上游是谁"——后者无法区分同一渠道上的两种客户端。
+	downstreamResponses := upstreamPath == oai.ResponsesPath
+	if err := normalizeUpstreamResponseFor(spec, resp, wantStream, downstreamResponses); err != nil {
 		// 读取/改写上游响应失败：此时响应头尚未发出，可换渠道重试
 		drainAndClose(resp)
 		return forwardRetryChannel

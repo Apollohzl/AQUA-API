@@ -48,6 +48,15 @@ const (
 	// 对 /v1/chat/completions 一律返回 404。若不支持这个端点，
 	// 这些模型在网关里就等于"上架了但调不通"，只能从清单里剔掉。
 	EmbeddingsPath = "/v1/embeddings"
+	// ResponsesPath 是 OpenAI 新一代 Responses 端点。
+	//
+	// 为什么网关要转发它：Codex 系列订阅账号的上游只认 Responses 协议，
+	// 而 Codex CLI / 官方 SDK 也以它为主入口；不提供这个端点，
+	// 站长就没法把现成的 Codex 客户端直接指向本站。
+	//
+	// 它同时是"下游语言"的标记：转发链路据此判断"客户端要的就是 Responses"，
+	// 从而跳过 Responses→chat.completions 的转写（客户端本来就看不懂那个格式）。
+	ResponsesPath = "/v1/responses"
 )
 
 // MaxRequestBodyBytes 是允许的请求体上限。

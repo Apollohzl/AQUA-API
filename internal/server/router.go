@@ -272,6 +272,12 @@ func (s *Server) registerRoutes() {
 	// 缺了会显示"未获取到模型列表"，使用者容易误判为网关故障。
 	v1.GET("/models", s.handleListModels)
 	v1.POST("/chat/completions", gin.WrapF(s.deps.Relay.ServeChatCompletions))
+	// Responses 端点：Codex 系订阅账号的上游只认这个协议，官方 Codex CLI
+	// 与新版 SDK 也以它为主入口。没有它，站长就没法把现成客户端直接指向本站。
+	//
+	// 与 chat/completions 的差别只在协议语言：客户端说 Responses 时，
+	// 若上游也是 Responses（订阅账号）则原样直通，不做任何转写。
+	v1.POST("/responses", gin.WrapF(s.deps.Relay.ServeResponses))
 	// 向量嵌入：不少免费上游（如 NVIDIA 的 embedding / rerank / clip 模型）
 	// 只提供这个端点，对 /v1/chat/completions 一律 404。支持它才能把这些
 	// 模型真正用起来，否则它们在清单里等于"上架了但调不通"。

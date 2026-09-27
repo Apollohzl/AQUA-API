@@ -116,6 +116,13 @@ type codexChatTool struct {
 //
 // 返回值保证满足三条硬约束：store=false、stream=true、instructions 为非空字符串。
 func encodeCodexRequest(body []byte) ([]byte, error) {
+	// 客户端本来就说 Responses（Codex CLI 等 /v1/responses 客户端）：
+	// 此时不需要翻译，只需做合规性归一。判据是"有 input/instructions、没有 messages"，
+	// 它比"看请求来自哪个路由"更可靠——同一份代码因此对两条入口都成立。
+	if isResponsesShape(body) {
+		return normalizeCodexResponsesBody(body)
+	}
+
 	var in codexChatRequest
 	if err := json.Unmarshal(body, &in); err != nil {
 		return nil, fmt.Errorf("relay: 解析待转换的 OpenAI 请求失败: %w", err)
@@ -172,6 +179,91 @@ func encodeCodexRequest(body []byte) ([]byte, error) {
 		return nil, fmt.Errorf("relay: 序列化 Codex 请求失败: %w", err)
 	}
 	return encoded, nil
+}
+
+// isResponsesShape 判断请求体是否已经是 Responses 协议形态。
+//
+// 判据取"有 input 或 instructions、且没有 messages"：
+//   - input / instructions 是 Responses 的专有顶层字段；
+//   - messages 是 chat.completions 的专有字段，两者不会同时出现。
+//
+// 用字段特征而不是"请求来自哪个路由"来判定，有两个好处：
+// 路由变更不会影响转换选择；同一份代码对两条入口都成立，不必分叉。
+func isResponsesShape(body []byte) bool {
+	var probe struct {
+		Messages     json.RawMessage `json:"messages"`
+		Input        json.RawMessage `json:"input"`
+		Instructions json.RawMessage `json:"instructions"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return false
+	}
+	if len(probe.Messages) > 0 {
+		return false
+	}
+	return len(probe.Input) > 0 || len(probe.Instructions) > 0
+}
+
+// codexUnsupportedResponsesFields 是 ChatGPT 内部端点不接受、但 Responses 客户端
+// 可能会带的字段。
+//
+// 与 chat 方向的白名单重建不同，这里必须"点名删除"：客户端给的 input/tools 等
+// 内容是权威的，重建会丢信息；而这些字段是上游明确拒绝的，留着就必然 400。
+// 因此这个清单只包含"确定不被接受"的字段。
+var codexUnsupportedResponsesFields = []string{
+	"max_output_tokens", "max_completion_tokens", "temperature", "top_p",
+	"frequency_penalty", "presence_penalty", "logit_bias", "n", "seed",
+	"user", "metadata", "safety_identifier", "prompt_cache_retention",
+	"stream_options", "truncation", "stop_sequences", "chat_template_kwargs",
+	// previous_response_id 依赖上游侧的服务端会话存储，而我们强制 store=false，
+	// 该字段必然无效，留着只会让请求被拒。
+	"previous_response_id",
+}
+
+// normalizeCodexResponsesBody 对"已经是 Responses 形态"的请求体做合规性归一。
+//
+// 三件事（与 chat 方向完全一致的三条硬约束）：
+//  1. store 强制 false、stream 强制 true；
+//  2. instructions 必须是非空字符串（缺失时注入默认，非字符串时纠正为空串再注入）；
+//  3. 删除上游不接受的字段。
+//
+// 其余内容（input / tools / reasoning / text 等）原样保留——
+// 客户端说的就是上游的语言，我们只做合规校验，不做翻译。
+func normalizeCodexResponsesBody(body []byte) ([]byte, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("relay: 解析 Responses 请求失败: %w", err)
+	}
+	if payload == nil {
+		return nil, fmt.Errorf("relay: Responses 请求体必须是 JSON 对象")
+	}
+
+	for _, field := range codexUnsupportedResponsesFields {
+		delete(payload, field)
+	}
+	payload["store"] = false
+	payload["stream"] = true
+
+	callerInstructions, _ := payload["instructions"].(string)
+	payload["instructions"] = strings.TrimSpace(callerInstructions)
+	if strings.TrimSpace(callerInstructions) == "" {
+		model, _ := payload["model"].(string)
+		payload["instructions"] = codexDefaultInstructionsFor(model)
+	}
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("relay: 序列化 Responses 请求失败: %w", err)
+	}
+	return encoded, nil
+}
+
+// codexDefaultInstructionsFor 返回按模型选择的默认指令。
+//
+// 目前所有模型共用一段自述用途的短指令：上游只要求该字段非空，
+// 内容不影响能力；真正的行为约束来自客户端自己的 instructions。
+func codexDefaultInstructionsFor(string) string {
+	return codexDefaultInstructions
 }
 
 // splitCodexModelEffort 从模型名尾部拆出推理强度后缀。
@@ -512,9 +604,13 @@ func codexTextFormatFromRequest(raw json.RawMessage) (any, bool) {
 //
 // 三条分支与 Anthropic/Gemini 的同类函数保持一致：
 //   - 错误（>=400）：改写为 OpenAI 错误体，便于下游按熟悉的错误结构解析；
-//   - 流式成功：把 Responses SSE 逐事件转成 chat.completions 分片；
-//   - 非流式成功：读完（上游总是流式的）SSE 后聚合成一个完整响应。
-func adjustCodexUpstreamResponse(resp *http.Response, wantStream bool) error {
+//   - 流式成功（下游要 chat）：把 Responses SSE 逐事件转成 chat.completions 分片；
+//   - 非流式成功（下游要 chat）：读完（上游总是流式的）SSE 后聚合成一个完整响应。
+//
+// 参数 downstreamResponses 表示"下游客户端本身就说 Responses"（走 /v1/responses）。
+// 此时上游与下游同协议，绝不能改写——客户端看不懂 chat.completions 的分片，
+// 改写等于把一条本来直通的链路弄坏。只需保证错误体结构一致即可。
+func adjustCodexUpstreamResponse(resp *http.Response, wantStream, downstreamResponses bool) error {
 	if resp == nil || resp.Body == nil {
 		return nil
 	}
@@ -527,6 +623,11 @@ func adjustCodexUpstreamResponse(resp *http.Response, wantStream bool) error {
 		}
 		replaceResponseBody(resp, codexErrorBody(raw, resp.StatusCode))
 		resp.Header.Set("Content-Type", "application/json")
+		return nil
+	}
+
+	if downstreamResponses {
+		// 同协议直通：不改 body、不改 Content-Type（上游已是 text/event-stream）。
 		return nil
 	}
 
