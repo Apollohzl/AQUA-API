@@ -144,9 +144,12 @@ export default {
     copyName: '复制模型名',
     noGroup: '暂无分组',
     perCall: '/ 次',
+    /** 显式免费（站长明确设置为不收费，区别于"未配置价格"） */
+    free: '免费',
     perMillionTitle: '每 100 万 token 的额度',
     billingPerCall: '按次计费',
     billingPerMillion: '输入 / 输出（每 100 万 token）',
+    billingFree: '该模型免费开放，调用不计费',
     noPrice: '未配置价格（调用不计费）',
     unpriced: '未定价',
     viewDetail: '查看详情',

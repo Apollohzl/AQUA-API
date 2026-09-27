@@ -62,6 +62,20 @@ function isPerCall(price: PlazaPrice): boolean {
   return price.per_call_price > 0
 }
 
+/**
+ * 价格口径说明文案。
+ *
+ * 优先判断"全部免费"：免费是用户最关心的一条信息，若被"输入/输出（每 100 万 token）"
+ * 之类的口径说明盖住，用户还得自己去算 0 是不是免费。
+ */
+function billingCaption(prices: PlazaPrice[]): string {
+  if (prices.length > 0 && prices.every((price) => price.is_free)) {
+    return t('components.modelCard.billingFree')
+  }
+  if (prices.some(isPerCall)) return t('components.modelCard.billingPerCall')
+  return t('components.modelCard.billingPerMillion')
+}
+
 /** 格式化成 "每 1M" 的读数：价格为 0 表示未定价 */
 function tokenPriceText(value: number): string {
   return value > 0 ? formatNumber(value) : t('components.modelCard.unpriced')
@@ -145,8 +159,12 @@ function onCopy(): void {
             <span v-if="price.ratio !== 100" class="badge badge-warn">{{ ratioText(price.ratio) }}</span>
           </span>
 
+          <!-- 免费优先展示：用户最关心的就是"要不要花钱" -->
+          <span v-if="price.is_free" class="whitespace-nowrap font-mono text-emerald-400">
+            {{ t('components.modelCard.free') }}
+          </span>
           <!-- 按次计费与按 token 计费是两种口径，展示上必须区分 -->
-          <span v-if="isPerCall(price)" class="whitespace-nowrap font-mono text-ink-200">
+          <span v-else-if="isPerCall(price)" class="whitespace-nowrap font-mono text-ink-200">
             {{ formatNumber(price.per_call_price) }} <span class="text-ink-500">{{ t('components.modelCard.perCall') }}</span>
           </span>
           <span v-else class="whitespace-nowrap font-mono text-ink-200" :title="t('components.modelCard.perMillionTitle')">
@@ -154,7 +172,7 @@ function onCopy(): void {
           </span>
         </div>
         <p class="pt-0.5 text-[11px] text-ink-500">
-          {{ model.prices.some(isPerCall) ? t('components.modelCard.billingPerCall') : t('components.modelCard.billingPerMillion') }}
+          {{ billingCaption(model.prices) }}
         </p>
       </template>
       <p v-else class="text-xs text-ink-500">{{ t('components.modelCard.noPrice') }}</p>

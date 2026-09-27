@@ -50,6 +50,7 @@ import {
   updateChannelKeyBalance,
   type ChannelKeyWithBalance,
 } from '@/api/channel'
+import { fetchChannelKeyUsage, listChannelCosts, saveChannelCosts } from '@/api/cost'
 import {
   KEY_STATUS_AUTO_REMOVED,
   KEY_STATUS_DISABLED,
@@ -57,6 +58,8 @@ import {
   STATUS_DISABLED,
   STATUS_ENABLED,
   type Channel,
+  type ChannelKeyUsage,
+  type ChannelModelCostPayload,
   type ChannelPayload,
   type ChannelTestResult,
   type ChannelType,
@@ -70,7 +73,7 @@ import { confirmDialog } from '@/composables/useConfirm'
 import { toastError, toastSuccess } from '@/composables/useToast'
 import { useSiteStore } from '@/stores/site'
 import { channelStatusBadgeClass, channelStatusLabel, channelTypeLabel } from '@/utils/display'
-import { formatDateTime, joinModelList, parseModelList } from '@/utils/format'
+import { formatDateTime, formatNumber, joinModelList, parseModelList } from '@/utils/format'
 
 const site = useSiteStore()
 const route = useRoute()
@@ -229,6 +232,13 @@ function mappingPayload(): MappingRow[] {
 const keysDrawerOpen = ref(false)
 /** 当前查看密钥池的渠道 */
 const keysOfChannel = ref<Channel | null>(null)
+/**
+ * 按密钥 ID 索引的用量核算结果（已消耗 / 估算剩余）。
+ *
+ * 加载失败时保持为空：核算只是增强信息，不能因为它取不到就把密钥列表也废掉。
+ * 后端只返回"仍在池内"的密钥，因此这里的键一定能和 channelKeys 对上。
+ */
+const keyUsage = ref<Record<number, ChannelKeyUsage>>({})
 const channelKeys = ref<ChannelKeyWithBalance[]>([])
 const keysLoading = ref(false)
 const keysError = ref('')
@@ -769,6 +779,160 @@ function clearModels(): void {
   form.value.modelText = ''
 }
 
+/* ── 上游计费（渠道 × 模型进价）──────────────────────────── */
+
+/**
+ * 抽屉里的一行进价草稿。
+ *
+ * 价格用字符串保存：输入过程中会出现空串与半成品（如 "1."），
+ * 用 number 会因为 v-model.number 把空串变成 NaN，界面显示成 "NaN"。
+ */
+interface CostRowDraft {
+  model: string
+  promptPrice: string
+  cachePrice: string
+  completionPrice: string
+  perCallPrice: string
+  remark: string
+}
+
+const costDrawerOpen = ref(false)
+const costOfChannel = ref<Channel | null>(null)
+const costRows = ref<CostRowDraft[]>([])
+/** 该渠道声明的模型清单，用于「补入渠道模型」一键预填（避免手敲模型名敲错） */
+const declaredModels = ref<string[]>([])
+const costLoading = ref(false)
+const costSaving = ref(false)
+const costError = ref('')
+
+/** 打开某渠道的上游计费抽屉 */
+async function openCosts(channel: Channel): Promise<void> {
+  costOfChannel.value = channel
+  costDrawerOpen.value = true
+  await loadCosts(channel.id)
+}
+
+/** 读取该渠道的上游进价 */
+async function loadCosts(channelId: number): Promise<void> {
+  costLoading.value = true
+  costError.value = ''
+  try {
+    const result = await listChannelCosts(channelId)
+    costRows.value = (result.items ?? []).map((item) => ({
+      model: item.model,
+      promptPrice: String(item.prompt_price),
+      cachePrice: String(item.cache_price),
+      completionPrice: String(item.completion_price),
+      perCallPrice: String(item.per_call_price),
+      remark: item.remark,
+    }))
+    declaredModels.value = result.declared_models ?? []
+  } catch (err) {
+    costRows.value = []
+    declaredModels.value = []
+    costError.value = err instanceof ApiError ? err.message : '上游成本加载失败'
+  } finally {
+    costLoading.value = false
+  }
+}
+
+/** 把价格输入转成非负整数（空串与非法值一律当 0） */
+function toCostNumber(value: string): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) return 0
+  return Math.round(parsed)
+}
+
+/** 新增一行空白草稿（模型名留空，保存时会被忽略） */
+function addCostRow(): void {
+  costRows.value.push({
+    model: '',
+    promptPrice: '0',
+    cachePrice: '0',
+    completionPrice: '0',
+    perCallPrice: '0',
+    remark: '',
+  })
+}
+
+/** 删除一行 */
+function removeCostRow(index: number): void {
+  costRows.value.splice(index, 1)
+}
+
+/**
+ * 补入该渠道声明的模型（已存在的跳过）。
+ *
+ * 存在的意义：手敲模型名敲错一个字符，成本规则会静默不生效——
+ * 核算时表现为"这个模型未录进价"，而站长会以为"已经配过了"。
+ */
+function fillDeclaredModels(): void {
+  const existing = new Set(costRows.value.map((row) => row.model.trim()))
+  let added = 0
+  for (const name of declaredModels.value) {
+    if (!name || existing.has(name)) continue
+    costRows.value.push({
+      model: name,
+      promptPrice: '0',
+      cachePrice: '0',
+      completionPrice: '0',
+      perCallPrice: '0',
+      remark: '',
+    })
+    added += 1
+  }
+  if (added === 0) {
+    toastSuccess('渠道声明的模型已全部在列表中')
+  } else {
+    toastSuccess(`已补入 ${added} 个渠道声明的模型`)
+  }
+}
+
+/** 保存整批进价（整体替换语义：表里没有的行会被删除） */
+async function submitCosts(): Promise<void> {
+  const channel = costOfChannel.value
+  if (!channel) return
+
+  const items: ChannelModelCostPayload[] = []
+  for (const row of costRows.value) {
+    const modelName = row.model.trim()
+    // 空行直接忽略：界面上的"新增一行"会先给空行，若因此整批拒绝，
+    // 站长每次保存前都要先删空行。
+    if (!modelName) continue
+    items.push({
+      model: modelName,
+      prompt_price: toCostNumber(row.promptPrice),
+      cache_price: toCostNumber(row.cachePrice),
+      completion_price: toCostNumber(row.completionPrice),
+      per_call_price: toCostNumber(row.perCallPrice),
+      remark: row.remark.trim(),
+    })
+  }
+
+  // 清空是合法但危险的动作用：确认一次，避免点错按钮把整张成本表清掉
+  if (items.length === 0) {
+    const ok = await confirmDialog({
+      title: '清空上游进价',
+      message: '当前没有任何有效行，保存后将清空该渠道的全部进价配置（密钥余额核算会因此失去依据）。',
+      confirmText: '确认清空',
+      danger: true,
+    })
+    if (!ok) return
+  }
+
+  costSaving.value = true
+  costError.value = ''
+  try {
+    const result = await saveChannelCosts(channel.id, items)
+    toastSuccess(`上游进价已保存：新增 ${result.created} 条，更新 ${result.updated} 条`)
+    await loadCosts(channel.id)
+  } catch (err) {
+    costError.value = err instanceof ApiError ? err.message : '保存失败'
+  } finally {
+    costSaving.value = false
+  }
+}
+
 /* ── 密钥池明细 ───────────────────────────────────────── */
 
 /** 打开某渠道的密钥池抽屉 */
@@ -805,15 +969,60 @@ async function loadChannelKeys(channelId: number): Promise<void> {
   keysLoading.value = true
   keysError.value = ''
   try {
-    const result = await listChannelKeysWithBalance(channelId, keysReveal.value)
+    // 用量核算与密钥列表并行取：核算失败只让"已用/剩余"缺省，不影响密钥池本身。
+    const [result, usageResult] = await Promise.all([
+      listChannelKeysWithBalance(channelId, keysReveal.value),
+      fetchChannelKeyUsage(channelId).catch(() => null),
+    ])
     channelKeys.value = result.items ?? []
     syncKeyDrafts(channelKeys.value)
+
+    const usageMap: Record<number, ChannelKeyUsage> = {}
+    for (const item of usageResult?.items ?? []) {
+      usageMap[item.channel_key_id] = item
+    }
+    keyUsage.value = usageMap
   } catch (err) {
     channelKeys.value = []
     keyDrafts.value = {}
+    keyUsage.value = {}
     keysError.value = err instanceof ApiError ? err.message : '密钥列表加载失败'
   } finally {
     keysLoading.value = false
+  }
+}
+
+/** 密钥用量摘要的视图模型（永不返回 null，模板中可直接取字段） */
+interface KeyUsageView {
+  /** 是否取到了核算数据（取不到时不显示"已用/剩余"） */
+  known: boolean
+  /** 已消耗（按上游进价估算），已是展示用字符串 */
+  used: string
+  /** 估算剩余；未录入余额时为空串（不显示） */
+  remaining: string
+  /** 剩余是否已归零或为负（超支） */
+  overdue: boolean
+  /** 未录进价的模型数量（>0 时提示站长去补录） */
+  unpricedCount: number
+}
+
+/**
+ * 取某把密钥的用量摘要。
+ *
+ * 返回视图模型而不是原始对象：模板里无法安全访问可能为 undefined 的字段
+ *（Vue 模板不支持非空断言），返回一个字段齐全的对象最省心。
+ */
+function usageView(keyId: number): KeyUsageView {
+  const usage = keyUsage.value[keyId]
+  if (!usage) {
+    return { known: false, used: '', remaining: '', overdue: false, unpricedCount: 0 }
+  }
+  return {
+    known: true,
+    used: formatNumber(usage.estimated_cost),
+    remaining: usage.balance_known ? formatNumber(usage.remaining) : '',
+    overdue: usage.balance_known && usage.remaining <= 0,
+    unpricedCount: usage.unpriced_models.length,
   }
 }
 
@@ -1345,6 +1554,16 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
 
                   <button type="button" class="btn btn-row" title="编辑" @click="openEdit(channel)">
                     <AppIcon name="edit" :size="14" />
+                  </button>
+
+                  <!-- 上游计费：录入「上游每个模型怎么收我的钱」，是成本核算与密钥余额的依据 -->
+                  <button
+                    type="button"
+                    class="btn btn-row"
+                    title="上游计费（每个模型的上游进价）"
+                    @click="openCosts(channel)"
+                  >
+                    <AppIcon name="quota" :size="14" />
                   </button>
 
                   <button
@@ -2099,6 +2318,31 @@ sk-yyyyyyyyyyyy</pre>
                     <span class="text-xs text-ink-300">
                       {{ key.balance_updated_at ? '更新于 ' + formatDateTime(key.balance_updated_at) : '未录入' }}
                     </span>
+
+                    <!-- 用量核算：把"余额"这个静态快照变成"还剩多少"。
+                         口径：已用 = 按「上游计费」里录的进价估算的累计消耗；
+                         剩余 = 余额 − 已用（可为负，代表按进价估算已用超）。 -->
+                    <template v-if="usageView(key.id).known">
+                      <span class="text-xs text-ink-300">
+                        已用 <span class="font-mono">{{ usageView(key.id).used }}</span>
+                        <template v-if="usageView(key.id).remaining !== ''">
+                          · 剩余
+                          <span
+                            class="font-mono"
+                            :class="usageView(key.id).overdue ? 'text-red-600' : 'text-ink-200'"
+                          >
+                            {{ usageView(key.id).remaining }}
+                          </span>
+                        </template>
+                      </span>
+                      <span
+                        v-if="usageView(key.id).unpricedCount > 0"
+                        class="text-xs text-amber-700"
+                        title="这些模型没有录入上游进价，其消耗无法估算，因此未计入「已用」"
+                      >
+                        有 {{ usageView(key.id).unpricedCount }} 个模型未录上游进价，未计入消耗
+                      </span>
+                    </template>
                   </div>
                 </td>
 
@@ -2215,6 +2459,161 @@ sk-yyyyyyyyyyyy</pre>
           </table>
         </div>
       </div>
+    </Drawer>
+
+    <!-- 上游计费抽屉：录入「上游每个模型怎么收我的钱」 -->
+    <Drawer
+      :open="costDrawerOpen"
+      :title="`上游计费 · ${costOfChannel?.name ?? ''}`"
+      subtitle="口径与售价一致（每 100 万 token 的额度），所以毛利 = 售价 − 进价；密钥池的「已用 / 剩余」也按这里的进价估算。"
+      @close="costDrawerOpen = false"
+    >
+      <div class="space-y-4">
+        <p class="text-xs leading-relaxed text-ink-400">
+          按<strong>上游模型名</strong>录入（不是对外模型名：钱是上游按上游名收的），支持前缀通配如
+          <code class="chip">qwen-*</code>。
+          <strong>四个价格都填 0 表示「上游免费」</strong>——这是一个明确结论；
+          若某个模型在这里没有规则，它与"免费"不同：消耗无法估算，密钥池会提示你补录。
+        </p>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            :disabled="costLoading || !costOfChannel"
+            @click="costOfChannel && loadCosts(costOfChannel.id)"
+          >
+            <AppIcon name="refresh" :size="14" />
+            刷新
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            :disabled="declaredModels.length === 0"
+            :title="declaredModels.length ? '按渠道声明的模型补入空行，避免手敲模型名出错' : '该渠道未声明模型'"
+            @click="fillDeclaredModels"
+          >
+            <AppIcon name="layers" :size="14" />
+            补入渠道模型（{{ declaredModels.length }}）
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" @click="addCostRow">
+            <AppIcon name="plus" :size="14" />
+            添加一行
+          </button>
+        </div>
+
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>上游模型名</th>
+                <th class="text-right">输入 / 1M</th>
+                <th class="text-right">缓存 / 1M</th>
+                <th class="text-right">输出 / 1M</th>
+                <th class="text-right">每次</th>
+                <th>备注</th>
+                <th class="cell-actions">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <DataState
+                :loading="costLoading"
+                :error="costError"
+                :empty="!costLoading && !costError && costRows.length === 0"
+                :colspan="7"
+                loading-text="正在读取上游进价…"
+                empty-text="还没有录入任何上游进价"
+                empty-hint="可以点「补入渠道模型」按渠道声明的模型批量生成空行，再逐个填价格。"
+                @retry="costOfChannel && loadCosts(costOfChannel.id)"
+              />
+
+              <tr v-for="(row, index) in costRows" :key="index">
+                <td data-label="上游模型名">
+                  <input
+                    v-model="row.model"
+                    class="input input-mono w-full min-w-[10rem]"
+                    type="text"
+                    placeholder="如 qwen-long 或 qwen-*"
+                  />
+                </td>
+                <td data-label="输入 / 1M">
+                  <input
+                    v-model="row.promptPrice"
+                    class="input w-24 text-right tabular-nums"
+                    type="number"
+                    min="0"
+                  />
+                </td>
+                <td data-label="缓存 / 1M">
+                  <input
+                    v-model="row.cachePrice"
+                    class="input w-24 text-right tabular-nums"
+                    type="number"
+                    min="0"
+                    title="命中缓存的输入单价；0 表示按输入价计"
+                  />
+                </td>
+                <td data-label="输出 / 1M">
+                  <input
+                    v-model="row.completionPrice"
+                    class="input w-24 text-right tabular-nums"
+                    type="number"
+                    min="0"
+                  />
+                </td>
+                <td data-label="每次">
+                  <input
+                    v-model="row.perCallPrice"
+                    class="input w-24 text-right tabular-nums"
+                    type="number"
+                    min="0"
+                    title="按次计费的上游（图像/视频）用这一列"
+                  />
+                </td>
+                <td data-label="备注">
+                  <input
+                    v-model="row.remark"
+                    class="input w-full min-w-[8rem]"
+                    type="text"
+                    placeholder="定价依据（可选）"
+                  />
+                </td>
+                <td class="cell-actions" data-label="操作">
+                  <button type="button" class="btn btn-row" title="删除该行" @click="removeCostRow(index)">
+                    <AppIcon name="trash" :size="14" />
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="hint">
+          保存采用<strong>整体替换</strong>：表里没有的模型会被删除（保存空表 = 清空该渠道全部进价）。
+          进价只用于核算与展示，<strong>不会自动改动密钥余额</strong>——网关无法得知上游真实扣费，
+          自动写回只会产生对不上账的数字。
+        </p>
+      </div>
+
+      <template #footer>
+        <button type="button" class="btn btn-secondary" :disabled="costSaving" @click="costDrawerOpen = false">
+          关闭
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          :disabled="costSaving || costLoading"
+          @click="submitCosts"
+        >
+          <span
+            v-if="costSaving"
+            class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+            aria-hidden="true"
+          />
+          <AppIcon v-else name="check" :size="16" />
+          {{ costSaving ? '保存中…' : '保存进价' }}
+        </button>
+      </template>
     </Drawer>
   </div>
 </template>

@@ -76,6 +76,16 @@ function isPerCall(price: PlazaPrice): boolean {
   return price.per_call_price > 0
 }
 
+/**
+ * 是否应展示 token 单价。
+ *
+ * 按次计费与免费都不看 token 价，此时显示「—」而不是 0——
+ * 显示 0 会让人误以为"这个模型的输入不要钱"，而真相是"这个口径不适用"。
+ */
+function showTokenPrice(price: PlazaPrice): boolean {
+  return !isPerCall(price) && !price.is_free
+}
+
 function priceText(value: number): string {
   return value > 0 ? formatNumber(value) : t('components.modelDetail.unpriced')
 }
@@ -143,14 +153,20 @@ function groupLabel(name: string): string {
           </thead>
           <tbody>
             <tr v-for="price in model.prices" :key="price.group">
-              <td class="font-medium text-ink-100">{{ groupLabel(price.group) }}</td>
+              <td class="font-medium text-ink-100">
+                {{ groupLabel(price.group) }}
+                <!-- 免费是明确结论（不是"价格为 0"的含糊表达），单独标出来 -->
+                <span v-if="price.is_free" class="badge badge-ok ml-1">
+                  {{ t('components.modelCard.free') }}
+                </span>
+              </td>
               <td>
                 <span class="badge" :class="price.ratio === 100 ? 'badge-off' : 'badge-warn'">
                   {{ ratioText(price.ratio) }}
                 </span>
               </td>
-              <td class="cell-num">{{ isPerCall(price) ? '—' : priceText(price.prompt_price) }}</td>
-              <td class="cell-num">{{ isPerCall(price) ? '—' : priceText(price.completion_price) }}</td>
+              <td class="cell-num">{{ showTokenPrice(price) ? priceText(price.prompt_price) : '—' }}</td>
+              <td class="cell-num">{{ showTokenPrice(price) ? priceText(price.completion_price) : '—' }}</td>
               <td class="cell-num">{{ isPerCall(price) ? formatNumber(price.per_call_price) : '—' }}</td>
             </tr>
             <tr v-if="!model.prices.length">

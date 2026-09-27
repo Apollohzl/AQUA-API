@@ -26,7 +26,7 @@ import DataState from '@/components/DataState.vue'
 import Modal from '@/components/Modal.vue'
 import { ApiError } from '@/api/client'
 import { createPrice, deletePrice, listGroups, listPrices, quotePrice, updatePrice } from '@/api/admin'
-import type { ModelGroup, ModelPrice } from '@/api/types'
+import type { BillingMode, ModelGroup, ModelPrice } from '@/api/types'
 import { confirmDialog } from '@/composables/useConfirm'
 import { toastError, toastSuccess } from '@/composables/useToast'
 import { formatNumber } from '@/utils/format'
@@ -47,6 +47,7 @@ const formError = ref('')
 const form = ref({
   model: '',
   group: 'default',
+  billingMode: '' as '' | BillingMode,
   promptPrice: '0',
   cachePrice: '0',
   completionPrice: '0',
@@ -57,7 +58,7 @@ const form = ref({
 
 /** 费用试算 */
 const quote = ref({ model: '', promptTokens: '1000', cachedTokens: '0', completionTokens: '1000' })
-const quoteResult = ref<{ quota: number; priced: boolean } | null>(null)
+const quoteResult = ref<{ quota: number; priced: boolean; billingMode: string; isFree: boolean } | null>(null)
 const quoting = ref(false)
 const quoteError = ref('')
 
@@ -73,6 +74,30 @@ function patternHint(price: ModelPrice): string {
   if (price.model.endsWith('*')) return '前缀通配'
   return '精确匹配'
 }
+
+/** 计费方式的中文短名（列表与表单共用，避免两处文案漂移） */
+function billingModeLabel(mode: string): string {
+  switch (mode) {
+    case 'free':
+      return '免费'
+    case 'per_call':
+      return '按次'
+    default:
+      return '按量'
+  }
+}
+
+/** 列表里的计费方式文案：显式选择直接显示，自动判定则标明"自动 → X" */
+function billingModeText(price: ModelPrice): string {
+  if (!price.billing_mode) return `自动 → ${billingModeLabel(price.effective_billing_mode)}`
+  return billingModeLabel(price.billing_mode)
+}
+
+/** 表单选了"免费"时价格输入不生效，界面上要禁用以避免误填 */
+const formFree = computed(() => form.value.billingMode === 'free')
+
+/** 表单选了"按次"时 token 三个价不生效 */
+const formPerCall = computed(() => form.value.billingMode === 'per_call')
 
 async function load(): Promise<void> {
   loading.value = true
@@ -108,6 +133,7 @@ function openCreate(): void {
   form.value = {
     model: '',
     group: groups.value[0]?.name || 'default',
+    billingMode: '',
     promptPrice: '0',
     cachePrice: '0',
     completionPrice: '0',
@@ -124,6 +150,7 @@ function openEdit(price: ModelPrice): void {
   form.value = {
     model: price.model,
     group: price.group,
+    billingMode: price.billing_mode,
     promptPrice: String(price.prompt_price),
     cachePrice: String(price.cache_price),
     completionPrice: String(price.completion_price),
@@ -151,6 +178,7 @@ async function submit(): Promise<void> {
   const payload = {
     model: form.value.model.trim(),
     group: form.value.group.trim() || 'default',
+    billing_mode: form.value.billingMode,
     prompt_price: toNonNegative(form.value.promptPrice),
     cache_price: toNonNegative(form.value.cachePrice),
     completion_price: toNonNegative(form.value.completionPrice),
@@ -209,7 +237,12 @@ async function runQuote(): Promise<void> {
       toNonNegative(quote.value.completionTokens),
       toNonNegative(quote.value.cachedTokens),
     )
-    quoteResult.value = { quota: result.quota, priced: result.priced }
+    quoteResult.value = {
+      quota: result.quota,
+      priced: result.priced,
+      billingMode: result.billing_mode,
+      isFree: result.is_free,
+    }
   } catch (err) {
     quoteError.value = err instanceof ApiError ? err.message : '试算失败'
   } finally {
@@ -286,8 +319,14 @@ function priceRowClass(price: ModelPrice): string {
       <p v-else-if="quoteResult" class="mt-3 text-sm text-ink-200">
         应扣额度：
         <strong class="font-mono text-ink-50">{{ formatNumber(quoteResult.quota) }}</strong>
-        <span v-if="!quoteResult.priced" class="ml-2 text-xs text-amber-700">
-          该模型未定价（或价格为 0），调用不会扣费
+        <span v-if="quoteResult.priced" class="ml-2 text-xs text-ink-400">
+          （计费方式：{{ billingModeLabel(quoteResult.billingMode) }}）
+        </span>
+        <span v-if="quoteResult.isFree" class="ml-2 text-xs text-emerald-400">
+          该模型已被设为「免费」，调用不扣费
+        </span>
+        <span v-else-if="!quoteResult.priced" class="ml-2 text-xs text-amber-700">
+          该模型未定价（没有适用的规则），调用不会扣费
         </span>
       </p>
     </section>
@@ -298,6 +337,7 @@ function priceRowClass(price: ModelPrice): string {
           <tr>
             <th>模型 / 模式</th>
             <th>匹配方式</th>
+            <th>计费方式</th>
             <th>分组</th>
             <th class="text-right">输入 / 1M</th>
             <th class="text-right">缓存 / 1M</th>
@@ -313,7 +353,7 @@ function priceRowClass(price: ModelPrice): string {
             :loading="loading"
             :error="error"
             :empty="!loading && !error && prices.length === 0"
-            :colspan="10"
+            :colspan="11"
             loading-text="正在读取计价规则…"
             empty-text="还没有配置任何价格"
             empty-hint="未配置价格的模型仍然可以调用，只是不会扣费。点击「新建规则」开始定价。"
@@ -325,6 +365,15 @@ function priceRowClass(price: ModelPrice): string {
               <code class="font-mono text-[13px] text-ink-100" :class="priceRowClass(price)">{{ price.model }}</code>
             </td>
             <td class="cell-muted" data-label="匹配方式">{{ patternHint(price) }}</td>
+            <td data-label="计费方式">
+              <span
+                class="badge"
+                :class="price.is_free ? 'badge-ok' : 'badge-off'"
+                :title="price.billing_mode ? '' : '未显式选择：按价格字段自动判定'"
+              >
+                {{ billingModeText(price) }}
+              </span>
+            </td>
             <td class="cell-muted" data-label="分组">{{ groupLabels[price.group] || price.group }}</td>
             <td class="cell-num" data-label="输入 / 1M">{{ price.prompt_price > 0 ? formatNumber(price.prompt_price) : '—' }}</td>
             <td class="cell-num" data-label="缓存 / 1M">
@@ -378,6 +427,20 @@ function priceRowClass(price: ModelPrice): string {
         </div>
 
         <div>
+          <label class="label" for="price-billing-mode">计费方式</label>
+          <select id="price-billing-mode" v-model="form.billingMode" class="input">
+            <option value="">自动判定（按下面填写的价格）</option>
+            <option value="token">按量（按 token 计价）</option>
+            <option value="per_call">按次（按调用次数计价）</option>
+            <option value="free">免费（不扣费）</option>
+          </select>
+          <p class="hint">
+            「免费」是一个明确决定：即使下面填了价格也不会生效，模型广场会标出「免费」。
+            与「没有这条规则」不同——后者是「未定价」，属于漏配。
+          </p>
+        </div>
+
+        <div>
           <label class="label" for="price-group">适用分组</label>
           <select id="price-group" v-model="form.group" class="input">
             <option v-for="group in groups" :key="group.name" :value="group.name">{{ group.label }}</option>
@@ -389,24 +452,54 @@ function priceRowClass(price: ModelPrice): string {
         <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <label class="label" for="price-prompt">输入 / 1M token</label>
-            <input id="price-prompt" v-model="form.promptPrice" class="input" type="number" min="0" />
+            <input
+              id="price-prompt"
+              v-model="form.promptPrice"
+              class="input"
+              type="number"
+              min="0"
+              :disabled="formFree || formPerCall"
+            />
           </div>
           <div>
             <label class="label" for="price-cache">缓存命中 / 1M token</label>
-            <input id="price-cache" v-model="form.cachePrice" class="input" type="number" min="0" />
+            <input
+              id="price-cache"
+              v-model="form.cachePrice"
+              class="input"
+              type="number"
+              min="0"
+              :disabled="formFree || formPerCall"
+            />
           </div>
           <div>
             <label class="label" for="price-completion">输出 / 1M token</label>
-            <input id="price-completion" v-model="form.completionPrice" class="input" type="number" min="0" />
+            <input
+              id="price-completion"
+              v-model="form.completionPrice"
+              class="input"
+              type="number"
+              min="0"
+              :disabled="formFree || formPerCall"
+            />
           </div>
           <div>
             <label class="label" for="price-percall">每次调用</label>
-            <input id="price-percall" v-model="form.perCallPrice" class="input" type="number" min="0" />
+            <input
+              id="price-percall"
+              v-model="form.perCallPrice"
+              class="input"
+              type="number"
+              min="0"
+              :disabled="formFree"
+            />
           </div>
         </div>
         <p class="hint -mt-2">
-          值为 0 表示该口径不计费。对话类只看前三项；异步任务（图像/视频）只看「每次调用」。
+          值为 0 表示该口径不计费。对话类看前三个价；异步任务（图像/视频）看「每次调用」。
           「缓存命中」留 0 表示命中缓存的输入仍按输入价计费（即不享缓存折扣）。
+          <span v-if="formFree" class="text-amber-700">当前为「免费」，以上价格均不生效。</span>
+          <span v-else-if="formPerCall" class="text-amber-700">当前为「按次」，输入/缓存/输出价格不生效。</span>
         </p>
 
         <div>

@@ -873,6 +873,92 @@ export type UpdateSiteSettingsPayload = Partial<{
   safeguard: Partial<SafeguardSettings>
 }>
 
+/* ────────────────────────── 上游进价与密钥余额核算 ────────────────────────── */
+
+/**
+ * 上游进价规则（渠道 × 模型）。
+ *
+ * 口径与模型售价完全一致（每 1M token 的额度单位），因此毛利就是一次减法。
+ * 四个价格全为 0 表示「上游免费」这一明确结论；未录入则是根本没有这条规则。
+ */
+export interface ChannelModelCost {
+  id: number
+  model: string
+  prompt_price: number
+  cache_price: number
+  completion_price: number
+  per_call_price: number
+  remark: string
+  /** 是否表示上游免费（四个价格全为 0） */
+  is_free: boolean
+  updated_at: number
+}
+
+/** 单条进价的可写入参（保存时整批提交） */
+export interface ChannelModelCostPayload {
+  model: string
+  prompt_price: number
+  cache_price: number
+  completion_price: number
+  per_call_price: number
+  remark: string
+}
+
+/** GET /api/admin/channels/{id}/costs 响应 */
+export interface ChannelCostListResult {
+  items: ChannelModelCost[]
+  total: number
+  /** 该渠道声明的模型清单，供「按渠道模型预填」使用 */
+  declared_models: string[]
+}
+
+/** 密钥在某个模型上的用量与成本 */
+export interface ChannelKeyModelUsage {
+  model: string
+  requests: number
+  prompt_tokens: number
+  completion_tokens: number
+  cached_tokens: number
+  /** 按上游进价估算的成本（额度单位） */
+  cost: number
+  /** 是否匹配到了进价规则；false 表示「未录进价」（不是零成本） */
+  priced: boolean
+}
+
+/** 一把密钥的用量、估算消耗与剩余余额 */
+export interface ChannelKeyUsage {
+  channel_key_id: number
+  label: string
+  status: number
+  account_hint: string
+  balance: number
+  balance_unknown: boolean
+  balance_exhausted: boolean
+  balance_updated_at: number
+  requests: number
+  prompt_tokens: number
+  completion_tokens: number
+  cached_tokens: number
+  /** 按上游进价估算的累计消耗（只统计有进价的模型） */
+  estimated_cost: number
+  /** 能/不能估算成本的请求数 */
+  priced_requests: number
+  unpriced_requests: number
+  /** 估算剩余 = 录入余额 − 估算消耗；仅在 balance_known 为 true 时有意义，可为负 */
+  remaining: number
+  /** 站长是否录入过余额 */
+  balance_known: boolean
+  models: ChannelKeyModelUsage[]
+  /** 没有进价规则的模型清单（提示站长去「上游计费」补录） */
+  unpriced_models: string[]
+}
+
+/** GET /api/admin/channels/{id}/key-usage 响应 */
+export interface ChannelKeyUsageResult {
+  items: ChannelKeyUsage[]
+  total: number
+}
+
 /* ────────────────────────── 敏感词（内容合规） ────────────────────────── */
 
 /**
@@ -954,12 +1040,25 @@ export interface ModelPrice {
   cache_price: number
   completion_price: number
   per_call_price: number
+  /**
+   * 站长显式选择的计费方式；空串表示「自动判定」（历史数据）。
+   *
+   * 'free' 免费 / 'token' 按量 / 'per_call' 按次。
+   */
+  billing_mode: BillingMode | ''
+  /** 实际生效的计费方式（把「自动」解释成具体口径），只读 */
+  effective_billing_mode: 'free' | 'token' | 'per_call'
+  /** 是否显式免费（只读派生值；与「未定价」是两回事） */
+  is_free: boolean
   group: string
   enabled: boolean
   remark: string
   created_at: number
   updated_at: number
 }
+
+/** 计费方式 */
+export type BillingMode = 'free' | 'token' | 'per_call'
 
 /** 新增/更新计价规则请求体 */
 export interface ModelPricePayload {
@@ -968,6 +1067,7 @@ export interface ModelPricePayload {
   cache_price?: number
   completion_price?: number
   per_call_price?: number
+  billing_mode?: BillingMode | ''
   group?: string
   enabled?: boolean
   remark?: string
@@ -981,7 +1081,16 @@ export interface QuotePreview {
   cached_tokens: number
   completion_tokens: number
   quota: number
+  /**
+   * 是否命中了计价规则。
+   *
+   * 注意语义是「有规则」而不是「金额大于 0」：显式免费的规则金额也是 0，
+   * 若按金额判定，界面会把「免费」误显示成「未定价」。
+   */
   priced: boolean
+  /** 生效的计费方式；空串表示未定价 */
+  billing_mode: '' | 'free' | 'token' | 'per_call'
+  is_free: boolean
 }
 
 /* ────────────────────────── 模型分组 ────────────────────────── */
@@ -1022,8 +1131,13 @@ export interface ModelGroupPayload {
 export interface PlazaPrice {
   group: string
   prompt_price: number
+  cache_price: number
   completion_price: number
   per_call_price: number
+  /** 生效的计费方式 */
+  billing_mode: 'free' | 'token' | 'per_call'
+  /** 是否显式免费（广场据此显示「免费」标识） */
+  is_free: boolean
   /** 该分组的计费倍率（百分比） */
   ratio: number
 }

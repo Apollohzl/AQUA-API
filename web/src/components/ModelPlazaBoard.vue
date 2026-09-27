@@ -216,9 +216,10 @@ function clearFilters(): void {
 
 /* ── 行内展示辅助 ─────────────────────────────────────── */
 
-/** 列表视图的价格摘要：按次计费优先展示，否则取第一个分组的价格 */
+/** 列表视图的价格摘要：免费 > 按次 > 按量（免费排最前，用户最关心这条） */
 function priceSummary(model: PlazaModel): string {
   if (!model.prices.length) return t('components.plaza.unpriced')
+  if (model.prices.every((price) => price.is_free)) return t('components.modelCard.free')
   const perCall = model.prices.find((price) => price.per_call_price > 0)
   if (perCall) return `${formatNumber(perCall.per_call_price)} ${t('components.modelCard.perCall')}`
   const first = model.prices[0]
