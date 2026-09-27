@@ -106,7 +106,11 @@ func (s *Server) handleReferralInfo(c *gin.Context) {
 		"invited_count":        invited,
 		"register_bonus_quota": settings.Referral.RegisterBonus,
 		"total_reward_quota":   rewarded,
-		"checkin":              checkin,
+		// recharge_ratio 是"被邀请人充值时邀请人可得百分之几"。
+		// 下发它的原因：返利比例是邀请人最关心的数字（决定值不值得推广），
+		// 页面写死或干脆不写都会让用户以为没有返利；由后端下发则改配置立即生效。
+		"recharge_ratio": settings.Referral.RechargeRatio,
+		"checkin":        checkin,
 	})
 }
 

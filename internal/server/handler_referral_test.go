@@ -131,6 +131,31 @@ func registerUser(t *testing.T, srv *Server, username, inviteCode string) (strin
 	return token, user
 }
 
+// TestReferralInfo_下发返利比例 校验邀请页展示的返利比例来自后端设置。
+//
+// 这条不变量防的是"页面承诺的返利与后台配置不一致"：
+// 邀请人是否愿意推广取决于比例，前端写死或漏下发都会让用户误判。
+func TestReferralInfo_下发返利比例(t *testing.T) {
+	srv, st := newReferralTestServer(t)
+	applySettings(t, st, map[string]string{
+		model.SettingKeyRegistrationRequireEmailCode: "false",
+		model.SettingKeyReferralEnabled:              "true",
+		model.SettingKeyReferralRechargeRatio:        "3",
+	})
+	token, _ := registerUser(t, srv, "ratio-user", "")
+
+	rec, body := callJSON(t, srv, http.MethodGet, "/api/user/referral", nil, token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("邀请信息应返回 200，实际 %d，响应 %v", rec.Code, body)
+	}
+	if body["recharge_ratio"] != float64(3) {
+		t.Errorf("返利比例应为 3，实际 %v", body["recharge_ratio"])
+	}
+	if _, ok := body["invite_code"].(string); !ok {
+		t.Errorf("应下发邀请码，实际 %v", body["invite_code"])
+	}
+}
+
 func TestHandlerRegister_带邀请码建立关系并发注册奖(t *testing.T) {
 	srv, st := newReferralTestServer(t)
 	applySettings(t, st, map[string]string{
