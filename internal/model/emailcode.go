@@ -121,8 +121,16 @@ type EmailCodeRepository interface {
 	// 不存在时返回 ErrEmailCodeNotFound。
 	LatestActive(ctx context.Context, email, purpose string) (*EmailCode, error)
 
-	// IncreaseAttempts 累加失败次数，用于达到上限后作废该验证码。
-	IncreaseAttempts(ctx context.Context, id uint64) error
+	// IncreaseAttemptsWithin 在"失败次数未达上限"的前提下原子累加一次尝试计数。
+	//
+	// 返回 true 表示本次尝试已被计数（调用方可以继续比对验证码）；
+	// 返回 false 表示该验证码的尝试次数已经用尽，调用方必须直接拒绝。
+	//
+	// 为什么不是"先读 attempts 判断、再累加"：那两步之间存在窗口，
+	// 并发提交 N 个猜测时全部会读到同一个旧值并通过阈值检查，
+	// 使"单码最多 5 次"在并发下被放大成"5 + 并发数"次。
+	// 把阈值写进 UPDATE 的 WHERE 里，条件自增本身就是唯一的闸门。
+	IncreaseAttemptsWithin(ctx context.Context, id uint64, max int) (bool, error)
 
 	// Consume 标记验证码已使用（一次性）。
 	Consume(ctx context.Context, id uint64, at time.Time) error

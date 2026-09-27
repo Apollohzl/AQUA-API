@@ -96,16 +96,29 @@ func (r *emailCodeRepository) LatestActive(ctx context.Context, email, purpose s
 	return code, nil
 }
 
-// IncreaseAttempts 累加失败次数。
+// IncreaseAttemptsWithin 在未达上限时原子累加一次尝试计数，返回是否计数成功。
 //
-// 用 SQL 原子自增而非"读出-加一-写回"：并发提交错误验证码时，
-// 后者会互相覆盖，导致次数统计偏小、攻击者实际尝试次数远超上限。
-func (r *emailCodeRepository) IncreaseAttempts(ctx context.Context, id uint64) error {
-	if _, err := r.db.ExecContext(ctx,
-		"UPDATE email_codes SET attempts = attempts + 1 WHERE id = ?", id); err != nil {
-		return fmt.Errorf("store: 累加验证码失败次数失败: %w", err)
+// 用带条件的 SQL 原子自增，而不是"读到 attempts → 判断 → 加一写回"：
+// 后者的读与写之间存在窗口，并发提交错误验证码时多个请求会读到同一个旧值、
+// 全部通过阈值检查，导致实际可尝试次数远超上限。
+//
+// 条件里的 consumed_at = 0 表示已消费的验证码不再计数（其 attempts 已无意义）。
+func (r *emailCodeRepository) IncreaseAttemptsWithin(ctx context.Context, id uint64, max int) (bool, error) {
+	if max <= 0 {
+		return false, nil
 	}
-	return nil
+	res, err := r.db.ExecContext(ctx,
+		"UPDATE email_codes SET attempts = attempts + 1 WHERE id = ? AND consumed_at = 0 AND attempts < ?",
+		id, max)
+	if err != nil {
+		return false, fmt.Errorf("store: 累加验证码尝试次数失败: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: 读取影响行数失败: %w", err)
+	}
+	return affected > 0, nil
 }
 
 // Consume 标记验证码已使用。

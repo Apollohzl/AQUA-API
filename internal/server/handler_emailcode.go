@@ -222,16 +222,24 @@ func (s *Server) verifyAndConsumeRegisterEmailCode(c *gin.Context, email, code s
 		return false
 	}
 
-	// 失败次数上限：6 位数字共 100 万种组合，限次后在线穷举不可行
-	if record.Attempts >= model.EmailCodeMaxAttempts {
+	// 尝试次数上限：6 位数字共 100 万种组合，限次后在线穷举不可行。
+	//
+	// 这里的自增刻意【先于】验证码比对：把"用掉一次机会"变成一次原子的条件自增，
+	// 读阈值与自增之间就不再存在窗口——并发提交同一验证码时，条件自增本身就是闸门，
+	// 多出来的请求会拿到 false 被直接拒绝，而不是"各自读到旧值后都放行"。
+	// 比对成功时代码随即被 Consume 消费，所以多算的那一次尝试没有副作用。
+	counted, err := s.deps.EmailCodes.IncreaseAttemptsWithin(ctx, record.ID, model.EmailCodeMaxAttempts)
+	if err != nil {
+		s.respondInternalError(c, "累加验证码尝试次数失败")
+		return false
+	}
+	if !counted {
 		writeUserError(c, http.StatusTooManyRequests,
 			"email.code_attempts_exceeded", oai.TypeRateLimit, "email_code_attempts_exceeded")
 		return false
 	}
 
 	if !model.VerifyEmailCode(record, code) {
-		// 累加失败次数；累加失败不阻断本次错误提示（用户看到的仍是"验证码错误"）
-		_ = s.deps.EmailCodes.IncreaseAttempts(ctx, record.ID)
 		remaining := model.EmailCodeMaxAttempts - record.Attempts - 1
 		if remaining < 0 {
 			remaining = 0
