@@ -23,8 +23,8 @@ func testSender() *Sender {
 	return New(config.SMTPConfig{
 		Host:     "smtpdm.aliyun.com",
 		Port:     465,
-		Username: "aqua@ltzy.top",
-		From:     "aqua@ltzy.top",
+		Username: "user@example.com",
+		From:     "user@example.com",
 		FromName: "AQUA 网关",
 		Password: "not-a-real-password",
 	})
@@ -51,10 +51,9 @@ func TestConfigured_缺口令_应判为未配置(t *testing.T) {
 }
 
 func TestBuildMessage_中文主题与HTML正文_应可正确解码(t *testing.T) {
-	sender := testSender()
 	subject, body := RegisterCodeEmail("AQUA 网关", "482913", 5*time.Minute)
 
-	raw := sender.buildMessage("user@example.com", subject, body)
+	raw := buildMessage(testSender().snapshot(), "user@example.com", subject, body)
 
 	// 1) 头部与正文之间必须以 CRLF+CRLF 分隔
 	sep := bytes.Index(raw, []byte("\r\n\r\n"))
@@ -110,10 +109,10 @@ func TestBuildMessage_中文主题与HTML正文_应可正确解码(t *testing.T)
 }
 
 func TestBuildMessage_未配置发件人显示名_不应出现尖括号包裹(t *testing.T) {
-	sender := New(config.SMTPConfig{From: "aqua@ltzy.top"})
-	raw := string(sender.buildMessage("u@e.com", "主题", "<p>hi</p>"))
+	sender := New(config.SMTPConfig{From: "user@example.com"})
+	raw := string(buildMessage(sender.snapshot(), "u@e.com", "主题", "<p>hi</p>"))
 
-	if !strings.Contains(raw, "From: aqua@ltzy.top\r\n") {
+	if !strings.Contains(raw, "From: user@example.com\r\n") {
 		t.Errorf("无显示名时应直接使用地址，实际头部为: %s", firstLines(raw, 3))
 	}
 }

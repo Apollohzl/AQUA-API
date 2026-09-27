@@ -49,6 +49,8 @@ import type {
   RedeemCode,
   RedeemCodeQuery,
   SiteSettings,
+  SMTPSettings,
+  SMTPSettingsPayload,
   Task,
   TaskProvider,
   TaskQuery,
@@ -190,6 +192,37 @@ export function updateSettings(payload: UpdateSiteSettingsPayload): Promise<unkn
 export async function fetchPaymentChannels(): Promise<PaymentChannel[]> {
   const settings = await fetchSettings()
   return settings.payment_channels ?? []
+}
+
+/* ── 邮件通道（SMTP）─────────────────────────────────────── */
+
+/**
+ * GET /api/admin/smtp：读取邮件通道配置状态。
+ *
+ * 响应不含口令（后端永不回传），只给 password_set 表示"是否已配置"。
+ */
+export function fetchSMTP(): Promise<SMTPSettings> {
+  return api.get<SMTPSettings>('/admin/smtp')
+}
+
+/**
+ * PUT /api/admin/smtp：保存邮件通道配置。
+ *
+ * 保存成功后后端会立即热加载发送器（无需重启进程）；
+ * password 留空表示沿用已保存的口令（避免"改端口却清空口令"）。
+ */
+export function updateSMTP(payload: SMTPSettingsPayload): Promise<SMTPSettings> {
+  return api.put<SMTPSettings>('/admin/smtp', payload)
+}
+
+/**
+ * POST /api/admin/smtp/test：发送测试邮件。
+ *
+ * 失败时后端返回 502 与具体原因（认证失败/端口被拒等），前端应原样展示，
+ * 这正是站长排查发信问题最需要的信息。to 留空则发给发件地址。
+ */
+export function testSMTP(to = ''): Promise<{ ok: boolean; to: string }> {
+  return api.post<{ ok: boolean; to: string }>('/admin/smtp/test', { to })
 }
 
 /* ── 渠道模型 ID 映射 ───────────────────────────────────── */

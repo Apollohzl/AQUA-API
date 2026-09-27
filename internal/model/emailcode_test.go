@@ -47,8 +47,8 @@ func TestGenerateEmailCode_多次生成_不应完全相同(t *testing.T) {
 }
 
 func TestNormalizeEmail_存在空白与大小写_应统一为标准形式(t *testing.T) {
-	got := NormalizeEmail("  Aqua.Admin@LTZY.Top  ")
-	want := "aqua.admin@ltzy.top"
+	got := NormalizeEmail("  admin@example.com  ")
+	want := "admin@example.com"
 	if got != want {
 		t.Fatalf("规范化结果应为 %q，实际 %q", want, got)
 	}
@@ -57,7 +57,7 @@ func TestNormalizeEmail_存在空白与大小写_应统一为标准形式(t *tes
 func TestValidateEmailFormat_用例表(t *testing.T) {
 	valid := []string{
 		"a@b.cn",
-		"aqua@ltzy.top",
+		"user@example.com",
 		"first.last@sub.example.com",
 		"user+tag@example.co.uk",
 	}
@@ -89,24 +89,24 @@ func TestValidateEmailFormat_用例表(t *testing.T) {
 }
 
 func TestHashEmailCode_相同输入_结果稳定(t *testing.T) {
-	a := HashEmailCode("aqua@ltzy.top", EmailCodePurposeRegister, "123456")
-	b := HashEmailCode("aqua@ltzy.top", EmailCodePurposeRegister, "123456")
+	a := HashEmailCode("user@example.com", EmailCodePurposeRegister, "123456")
+	b := HashEmailCode("user@example.com", EmailCodePurposeRegister, "123456")
 	if a != b {
 		t.Fatalf("相同输入应得到相同摘要，实际 %q 与 %q", a, b)
 	}
 }
 
 func TestHashEmailCode_不同邮箱同验证码_摘要必须不同(t *testing.T) {
-	a := HashEmailCode("user1@ltzy.top", EmailCodePurposeRegister, "123456")
-	b := HashEmailCode("user2@ltzy.top", EmailCodePurposeRegister, "123456")
+	a := HashEmailCode("user1@example.com", EmailCodePurposeRegister, "123456")
+	b := HashEmailCode("user2@example.com", EmailCodePurposeRegister, "123456")
 	if a == b {
 		t.Fatal("不同邮箱的同一验证码不应产生相同摘要（盐未生效，可被预计算表反查）")
 	}
 }
 
 func TestHashEmailCode_大小写不同的邮箱_应视为同一邮箱(t *testing.T) {
-	a := HashEmailCode("Aqua@LTZY.Top", EmailCodePurposeRegister, "123456")
-	b := HashEmailCode("aqua@ltzy.top", EmailCodePurposeRegister, "123456")
+	a := HashEmailCode("user@example.com", EmailCodePurposeRegister, "123456")
+	b := HashEmailCode("user@example.com", EmailCodePurposeRegister, "123456")
 	if a != b {
 		t.Fatal("邮箱未规范化，大小写变体会被当成不同邮箱而绕过限流")
 	}
@@ -114,9 +114,9 @@ func TestHashEmailCode_大小写不同的邮箱_应视为同一邮箱(t *testing
 
 func TestVerifyEmailCode_正确与错误验证码(t *testing.T) {
 	record := &EmailCode{
-		Email:    "aqua@ltzy.top",
+		Email:    "user@example.com",
 		Purpose:  EmailCodePurposeRegister,
-		CodeHash: HashEmailCode("aqua@ltzy.top", EmailCodePurposeRegister, "654321"),
+		CodeHash: HashEmailCode("user@example.com", EmailCodePurposeRegister, "654321"),
 	}
 
 	if !VerifyEmailCode(record, "654321") {

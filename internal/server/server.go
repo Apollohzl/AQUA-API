@@ -103,6 +103,15 @@ type Deps struct {
 	// Mailer 是出站邮件发送器；未配置时验证码接口会返回明确的"邮件服务未配置"提示，
 	// 而不是让用户误以为"验证码已发出但没收到"。
 	Mailer *mailer.Sender
+	// SMTP 是 SMTP 配置仓储（后台可视化配置邮件通道；落库口令为密文）。
+	SMTP model.SMTPRepository
+	// SMTPBase 是"环境变量 / 内置默认值"提供的兜底 SMTP 参数。
+	//
+	// 用途有两个：
+	//  1) 后台未启用配置时，它是实际生效的参数（首次部署即可用环境变量跑起来）；
+	//  2) 后台保存后要重新合成"最终生效配置"，需要它作为回退项。
+	// 注意它【不含】任何硬编码的账号或口令：默认值只有服务商地址与端口（见 config.DefaultSMTPHost）。
+	SMTPBase config.SMTPConfig
 
 	// WebFS 是前端构建产物的嵌入文件系统；为 nil 时不托管前端页面（接口仍可用）。
 	//

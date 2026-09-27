@@ -28,12 +28,13 @@ import { computed, onMounted, ref } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import CopyButton from '@/components/CopyButton.vue'
 import DataState from '@/components/DataState.vue'
-import { fetchSettings, updateSettings } from '@/api/admin'
+import { fetchSMTP, fetchSettings, testSMTP, updateSMTP, updateSettings } from '@/api/admin'
 import { ApiError } from '@/api/client'
 import type {
   PaymentChannel,
   SeoSettings,
   SiteSettings,
+  SMTPSettings,
   UpdateSeoSettingsPayload,
   UpdateSiteSettingsPayload,
 } from '@/api/types'
@@ -150,7 +151,7 @@ const seoErrorText = computed(() => {
 const seoSitemapURL = computed(() => seo.value?.sitemap_url || '')
 const seoRobotsURL = computed(() => seo.value?.robots_url || '')
 
-/** 邮件通道是否就绪（只读，由服务端环境变量决定） */
+/** 邮件通道是否就绪（只读，由服务端计算：后台配置或环境变量任一可用即为就绪） */
 const emailReady = computed(() => settings.value?.email_service_ready === true)
 const emailFrom = computed(() => settings.value?.email_from || '')
 
@@ -246,6 +247,127 @@ const paymentInvalid = computed(
  * 此时任何保存动作都应被阻止，否则会立刻造成"全站无法注册"。
  */
 const emailCodeUnavailable = computed(() => requireEmailCode.value && !emailReady.value)
+
+/* ── 邮件通道（SMTP）配置 ──────────────────────────────────
+ *
+ * 为什么单独维护一套表单状态而不塞进 settings：
+ *   SMTP 的读写规则与普通设置项完全不同——口令【只进不出】（后端永不回传），
+ *   因此编辑时输入框必须是空的，靠"留空即沿用已保存的口令"来避免误清空。
+ *   把它和通用设置混在一起，容易被"整体覆盖保存"的语义坑到。
+ */
+const smtp = ref<SMTPSettings | null>(null)
+const smtpLoading = ref(false)
+const smtpSaving = ref(false)
+const smtpError = ref('')
+const smtpHost = ref('')
+const smtpPort = ref(465)
+const smtpUsername = ref('')
+const smtpFrom = ref('')
+const smtpFromName = ref('')
+const smtpEnabled = ref(false)
+/** 口令输入框：始终以空开始，留空提交表示"沿用已保存的口令" */
+const smtpPassword = ref('')
+const smtpTestTo = ref('')
+const smtpTesting = ref(false)
+
+/** 后台配置是否已被保存过（用于提示"留空即沿用"） */
+const smtpPasswordSet = computed(() => smtp.value?.password_set === true)
+/** 后台配置是否正在生效（source=database）；否则实际用的是环境变量/默认值 */
+const smtpUsingDatabase = computed(() => smtp.value?.source === 'database')
+
+/** 生效来源的中文说明：让站长一眼知道"现在到底用的是哪一套参数" */
+const smtpSourceText = computed(() => {
+  switch (smtp.value?.source) {
+    case 'database':
+      return '当前生效：后台配置'
+    case 'env':
+      return '当前生效：环境变量 / 默认值'
+    default:
+      return '当前生效：未配置（无法发信）'
+  }
+})
+
+async function loadSMTP(): Promise<void> {
+  smtpLoading.value = true
+  smtpError.value = ''
+  try {
+    const data = await fetchSMTP()
+    smtp.value = data
+    smtpHost.value = data.host || ''
+    smtpPort.value = data.port || 465
+    smtpUsername.value = data.username || ''
+    smtpFrom.value = data.from || ''
+    smtpFromName.value = data.from_name || ''
+    smtpEnabled.value = data.enabled === true
+    // 口令刻意留空：后端不回传口令，界面只能"重填"
+    smtpPassword.value = ''
+    smtpTestTo.value = data.from || ''
+  } catch (err) {
+    smtpError.value = err instanceof ApiError ? err.message : '邮件通道配置加载失败'
+  } finally {
+    smtpLoading.value = false
+  }
+}
+
+/** 前端先拦一道明显错误，避免白跑一次请求（后端仍会做最终校验） */
+function smtpFormError(): string {
+  if (!smtpEnabled.value) return ''
+  if (!smtpHost.value.trim()) return '请填写 SMTP 服务器地址'
+  if (!Number.isInteger(Number(smtpPort.value)) || Number(smtpPort.value) < 1 || Number(smtpPort.value) > 65535) {
+    return 'SMTP 端口必须在 1 ~ 65535 之间'
+  }
+  if (!smtpUsername.value.trim()) return '请填写 SMTP 登录账号'
+  if (!smtpFrom.value.trim() || !smtpFrom.value.includes('@')) return '请填写正确的发件地址（需含 @）'
+  if (!smtpPassword.value.trim() && !smtpPasswordSet.value) return '首次配置必须填写 SMTP 登录口令（授权码）'
+  return ''
+}
+
+async function handleSaveSMTP(): Promise<void> {
+  const invalid = smtpFormError()
+  if (invalid) {
+    toastError(invalid)
+    return
+  }
+  smtpSaving.value = true
+  smtpError.value = ''
+  try {
+    const data = await updateSMTP({
+      host: smtpHost.value.trim(),
+      port: Number(smtpPort.value) || 465,
+      username: smtpUsername.value.trim(),
+      from: smtpFrom.value.trim(),
+      from_name: smtpFromName.value.trim(),
+      enabled: smtpEnabled.value,
+      // 留空 = 沿用已保存的口令（后端按此语义处理）
+      password: smtpPassword.value.trim(),
+    })
+    smtp.value = data
+    smtpPassword.value = ''
+    toastSuccess(data.ready ? '邮件通道已保存并生效' : '邮件通道配置已保存')
+    // 邮件通道可能从"未就绪"变成"就绪"，刷新总设置让上方状态徽标同步
+    await load()
+  } catch (err) {
+    const message = err instanceof ApiError ? err.message : '保存失败，请稍后重试'
+    smtpError.value = message
+    toastError(message)
+  } finally {
+    smtpSaving.value = false
+  }
+}
+
+async function handleTestSMTP(): Promise<void> {
+  smtpTesting.value = true
+  try {
+    const to = smtpTestTo.value.trim()
+    await testSMTP(to)
+    toastSuccess(`测试邮件已发出，请检查 ${to || '发件地址'} 的收件箱`)
+  } catch (err) {
+    // 发信失败原因（认证失败/端口被拒…）正是站长最需要看到的信息，原样展示
+    toastError(err instanceof ApiError ? err.message : '发送测试邮件失败')
+  } finally {
+    smtpTesting.value = false
+  }
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -419,7 +541,11 @@ async function handleSave(): Promise<void> {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  // 邮件通道是独立资源（口令只进不出），因此单独拉取、单独保存
+  void loadSMTP()
+})
 </script>
 
 <template>
@@ -521,8 +647,137 @@ onMounted(load)
             </p>
             <p v-if="emailReady" class="mt-1">发件地址：{{ emailFrom }}</p>
             <p v-else class="mt-1">
-              需在服务端配置 SMTP 环境变量后才能开启邮箱验证码校验。
+              可在下方「邮件通道」里填写自己的 SMTP 参数（保存即生效），
+              或用环境变量 AQUA_SMTP_USERNAME / AQUA_SMTP_FROM / AQUA_SMTP_PASSWORD 注入。
             </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 邮件通道（SMTP）─────────────────────────────────────
+           为什么单独一张卡片：SMTP 是"每个站长都不一样"的参数（服务商、域名、授权码），
+           必须能在后台改；口令只进不出，界面只能重填，因此不能和通用设置混在一起保存。 -->
+      <section class="card lg:col-span-3">
+        <div class="card-head">
+          <div>
+            <h2 class="section-title flex items-center gap-2">
+              <AppIcon name="mail" :size="16" class="text-brand-700" />
+              邮件通道
+            </h2>
+            <p class="mt-0.5 text-xs text-ink-400">
+              用于发送注册验证码等通知邮件。请填写你自己的发信账号，本站不提供公共发信通道。
+            </p>
+          </div>
+          <span
+            class="badge"
+            :class="smtp?.ready ? 'badge-ok' : 'badge-warn'"
+          >
+            {{ smtp?.ready ? '可用' : '未就绪' }}
+          </span>
+        </div>
+
+        <div class="card-pad grid gap-4">
+          <p class="text-xs text-ink-300">{{ smtpSourceText }}</p>
+
+          <p v-if="smtpError" class="field-error">{{ smtpError }}</p>
+
+          <label class="flex cursor-pointer items-start gap-3">
+            <input v-model="smtpEnabled" class="checkbox mt-0.5" type="checkbox" />
+            <span>
+              <span class="block text-sm text-ink-100">启用这条后台配置</span>
+              <span class="mt-0.5 block text-xs leading-relaxed text-ink-400">
+                勾选并保存后，本站将使用下面填写的账号发信（优先于环境变量）；
+                不勾选时回退环境变量，两者都没有则邮件功能不可用。
+              </span>
+            </span>
+          </label>
+
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label class="label" for="smtp-host">SMTP 服务器</label>
+              <input id="smtp-host" v-model="smtpHost" class="input input-mono" type="text" placeholder="smtpdm.aliyun.com" />
+              <p class="hint">服务商提供的 SMTP 地址，例如阿里云邮件推送为 smtpdm.aliyun.com。</p>
+            </div>
+            <div>
+              <label class="label" for="smtp-port">端口</label>
+              <input id="smtp-port" v-model.number="smtpPort" class="input input-mono tabular-nums" type="number" min="1" max="65535" />
+              <p class="hint">465 = SSL 直连（推荐）；587 = STARTTLS；不建议 25（多数云厂商封禁出站）。</p>
+            </div>
+            <div>
+              <label class="label" for="smtp-username">登录账号</label>
+              <input id="smtp-username" v-model="smtpUsername" class="input input-mono" type="text" placeholder="noreply@your-domain.com" />
+              <p class="hint">多数服务商要求登录账号与发件地址一致（阿里云邮件推送即为发信地址本身）。</p>
+            </div>
+            <div>
+              <label class="label" for="smtp-password">登录口令 / 授权码</label>
+              <input
+                id="smtp-password"
+                v-model="smtpPassword"
+                class="input input-mono"
+                type="password"
+                autocomplete="new-password"
+                :placeholder="smtpPasswordSet ? '已配置，留空表示不修改' : '请输入 SMTP 授权码'"
+              />
+              <p class="hint">
+                为安全起见，服务端永不回传已保存的口令；<strong>留空保存即沿用原口令</strong>。
+                口令以密文落库（用 AQUA_APP_KEY 加密），数据库备份流出也无法直接读取。
+              </p>
+            </div>
+            <div>
+              <label class="label" for="smtp-from">发件地址</label>
+              <input id="smtp-from" v-model="smtpFrom" class="input input-mono" type="text" placeholder="noreply@your-domain.com" />
+              <p class="hint">收件人看到的发件人地址，必须已在服务商处验证归属。</p>
+            </div>
+            <div>
+              <label class="label" for="smtp-from-name">发件人显示名</label>
+              <input id="smtp-from-name" v-model="smtpFromName" class="input" type="text" placeholder="AQUA-API" />
+              <p class="hint">收件人看到的发件人名称，可留空（留空则直接显示发件地址）。</p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2 border-t border-ink-800 pt-4">
+            <button type="button" class="btn btn-primary btn-sm" :disabled="smtpSaving" @click="handleSaveSMTP">
+              <span
+                v-if="smtpSaving"
+                class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                aria-hidden="true"
+              />
+              <AppIcon v-else name="check" :size="14" />
+              {{ smtpSaving ? '保存中…' : '保存邮件通道' }}
+            </button>
+            <span v-if="smtpUsingDatabase" class="text-xs text-emerald-700">已启用后台配置</span>
+          </div>
+
+          <!-- 测试发信：配完当场验证"到底能不能发出去"，是排查发信问题最快的手段 -->
+          <div class="rounded-lg border border-ink-800 bg-ink-950/50 p-3">
+            <p class="text-sm text-ink-100">发送测试邮件</p>
+            <p class="mt-0.5 text-xs leading-relaxed text-ink-400">
+              保存配置后点这里会立刻发一封测试邮件。常见失败原因（端口被封、授权码错、发件地址未验证）
+              都会原样显示，便于自助排查。
+            </p>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <input
+                v-model="smtpTestTo"
+                class="input input-mono max-w-[20rem]"
+                type="text"
+                placeholder="收件地址（留空则发给发件地址）"
+              />
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                :disabled="smtpTesting || !smtp?.ready"
+                @click="handleTestSMTP"
+              >
+                <span
+                  v-if="smtpTesting"
+                  class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-ink-500/40 border-t-ink-500"
+                  aria-hidden="true"
+                />
+                <AppIcon v-else name="send" :size="14" />
+                {{ smtpTesting ? '发送中…' : '发送测试邮件' }}
+              </button>
+              <span v-if="!smtp?.ready" class="text-xs text-amber-700">通道未就绪，先保存一份完整配置</span>
+            </div>
           </div>
         </div>
       </section>

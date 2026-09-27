@@ -36,6 +36,7 @@ import (
 	"net/smtp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gitee.com/xiaosu4610/aqua-api/internal/config"
@@ -64,7 +65,12 @@ var ErrNotConfigured = errors.New("mailer: SMTP 未配置（缺少 host/port/use
 //
 // 每次 Send 都新建一条连接而不复用：邮件是低频操作（注册验证码），
 // 保持"短连接、无状态"能避免连接被中间设备静默断开后难以排查的问题。
+//
+// 配置可热更新（见 Update）：站长在后台改完 SMTP 参数后无需重启进程。
+// 因此 cfg 用读写锁保护，Send 进入时先取一份快照，整个发送过程使用同一份配置——
+// 否则"发送到一半配置被换掉"会让同一次投递混用两套参数（例如连了 A 服务器却用 B 的账号认证）。
 type Sender struct {
+	mu  sync.RWMutex
 	cfg config.SMTPConfig
 }
 
@@ -73,14 +79,40 @@ func New(cfg config.SMTPConfig) *Sender {
 	return &Sender{cfg: cfg}
 }
 
+// Update 热更新 SMTP 配置（后台保存后调用）。
+//
+// 为什么需要它：SMTP 参数现在可在后台可视化配置，改完必须立即生效；
+// 若要求重启进程，站长填完表单后仍需登录服务器操作，等于没解决原来的痛点。
+func (s *Sender) Update(cfg config.SMTPConfig) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cfg = cfg
+}
+
+// snapshot 取当前配置的一份副本（调用方无需持锁）。
+func (s *Sender) snapshot() config.SMTPConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg
+}
+
 // Configured 返回邮件发送能力是否可用，供上层决定是否开放相关功能。
 func (s *Sender) Configured() bool {
-	return s.cfg.Configured()
+	return s.snapshot().Configured()
 }
 
 // From 返回发件人地址，用于在日志或界面中展示（不包含口令）。
 func (s *Sender) From() string {
-	return s.cfg.From
+	return s.snapshot().From
+}
+
+// Endpoint 返回当前 SMTP 端点信息（不含口令），供后台界面展示"现在用的是哪一套"。
+//
+// 刻意不返回 config.SMTPConfig 本身：那会把口令带到上层，
+// 而展示场景永远不需要口令，从类型上杜绝泄露路径。
+func (s *Sender) Endpoint() (host string, port int, username, from, fromName string) {
+	cfg := s.snapshot()
+	return cfg.Host, cfg.Port, cfg.Username, cfg.From, cfg.FromName
 }
 
 // Send 投递一封 HTML 邮件。
@@ -91,7 +123,9 @@ func (s *Sender) From() string {
 //   - subject：邮件主题（中文会被自动编码）；
 //   - htmlBody：HTML 正文。
 func (s *Sender) Send(ctx context.Context, to, subject, htmlBody string) error {
-	if !s.Configured() {
+	// 取一次配置快照：本次投递全程使用同一份配置（见 Sender 的并发说明）。
+	cfg := s.snapshot()
+	if !cfg.Configured() {
 		return ErrNotConfigured
 	}
 	if err := ctx.Err(); err != nil {
@@ -103,16 +137,16 @@ func (s *Sender) Send(ctx context.Context, to, subject, htmlBody string) error {
 		return errors.New("mailer: 收件人不能为空")
 	}
 
-	addr := net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.Port))
+	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 	dialer := &net.Dialer{Timeout: dialTimeout}
 
-	tlsConfig := &tls.Config{ServerName: s.cfg.Host, MinVersion: tls.VersionTLS12}
+	tlsConfig := &tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12}
 
 	var (
 		conn net.Conn
 		err  error
 	)
-	if s.cfg.Port == portImplicitTLS {
+	if cfg.Port == portImplicitTLS {
 		// 465：先握手再说话（implicit TLS）
 		conn, err = tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
 	} else {
@@ -126,7 +160,7 @@ func (s *Sender) Send(ctx context.Context, to, subject, htmlBody string) error {
 	// 整体截止时间：覆盖认证与投递，避免服务端"连上了但不回话"导致长时间挂起
 	_ = conn.SetDeadline(time.Now().Add(sendTimeout))
 
-	client, err := smtp.NewClient(conn, s.cfg.Host)
+	client, err := smtp.NewClient(conn, cfg.Host)
 	if err != nil {
 		return fmt.Errorf("mailer: 初始化 SMTP 会话失败: %w", err)
 	}
@@ -135,12 +169,12 @@ func (s *Sender) Send(ctx context.Context, to, subject, htmlBody string) error {
 
 	// 非 465 端口：尝试升级 STARTTLS。
 	// 注意：升级后再认证，凭据才不会以明文经过网络。
-	if s.cfg.Port != portImplicitTLS {
+	if cfg.Port != portImplicitTLS {
 		if ok, _ := client.Extension("STARTTLS"); ok {
 			if err := client.StartTLS(tlsConfig); err != nil {
 				return fmt.Errorf("mailer: STARTTLS 升级失败: %w", err)
 			}
-		} else if s.cfg.Port != 25 {
+		} else if cfg.Port != 25 {
 			// 587 等端口若服务端不支持 STARTTLS，直接发凭据不安全，应当拒绝
 			return errors.New("mailer: 服务端不支持 STARTTLS，已中止发送以保护凭据")
 		}
@@ -148,7 +182,7 @@ func (s *Sender) Send(ctx context.Context, to, subject, htmlBody string) error {
 
 	if ok, _ := client.Extension("AUTH"); ok {
 		// PlainAuth 会在"非 TLS 且非本机"时主动报错，这是一道额外的安全兜底
-		auth := smtp.PlainAuth("", s.cfg.Username, s.cfg.Password, s.cfg.Host)
+		auth := smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
 		if err := client.Auth(auth); err != nil {
 			return fmt.Errorf("mailer: SMTP 认证失败（请检查账号与授权码）: %w", err)
 		}
@@ -156,7 +190,7 @@ func (s *Sender) Send(ctx context.Context, to, subject, htmlBody string) error {
 
 	// 信封发件人使用登录账号：多数服务商（含阿里云邮件推送）要求
 	// MAIL FROM 与已认证的发信地址一致，否则会被拒绝或按代发处理。
-	if err := client.Mail(s.cfg.Username); err != nil {
+	if err := client.Mail(cfg.Username); err != nil {
 		return fmt.Errorf("mailer: 设置发件人失败: %w", err)
 	}
 	if err := client.Rcpt(to); err != nil {
@@ -167,7 +201,7 @@ func (s *Sender) Send(ctx context.Context, to, subject, htmlBody string) error {
 	if err != nil {
 		return fmt.Errorf("mailer: 开始投递正文失败: %w", err)
 	}
-	if _, err := writer.Write(s.buildMessage(to, subject, htmlBody)); err != nil {
+	if _, err := writer.Write(buildMessage(cfg, to, subject, htmlBody)); err != nil {
 		_ = writer.Close()
 		return fmt.Errorf("mailer: 写入邮件正文失败: %w", err)
 	}
@@ -190,12 +224,12 @@ func (s *Sender) Send(ctx context.Context, to, subject, htmlBody string) error {
 //   - 正文【必须】显式声明 charset=UTF-8 并做 base64 编码，
 //     否则出现"中文被截断"或"smtp: 行过长"错误；
 //   - 头部与正文之间必须空一行，且换行统一用 CRLF（SMTP 规范要求）。
-func (s *Sender) buildMessage(to, subject, htmlBody string) []byte {
+func buildMessage(cfg config.SMTPConfig, to, subject, htmlBody string) []byte {
 	var buf bytes.Buffer
 
-	fromHeader := s.cfg.From
-	if name := strings.TrimSpace(s.cfg.FromName); name != "" {
-		fromHeader = fmt.Sprintf("%s <%s>", mime.BEncoding.Encode("UTF-8", name), s.cfg.From)
+	fromHeader := cfg.From
+	if name := strings.TrimSpace(cfg.FromName); name != "" {
+		fromHeader = fmt.Sprintf("%s <%s>", mime.BEncoding.Encode("UTF-8", name), cfg.From)
 	}
 
 	writeHeader(&buf, "From", fromHeader)

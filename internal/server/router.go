@@ -217,6 +217,16 @@ func (s *Server) registerRoutes() {
 	admin.GET("/settings", s.handleGetSettings)
 	admin.PUT("/settings", s.handleUpdateSettings)
 
+	// 邮件通道（SMTP）配置：站长在后台填写自己的发信账号与授权码。
+	//
+	// 为什么单独成组而不是塞进 /settings：
+	// 口令的读写规则与普通设置项完全不同（只进不出、留空即沿用），
+	// 混在通用设置接口里极易被"整体覆盖保存"的语义误清空。
+	admin.GET("/smtp", s.handleGetSMTP)
+	admin.PUT("/smtp", s.handleUpdateSMTP)
+	// 发送测试邮件：配完当场验证"能不能发出去"，是排查发信问题最快的手段。
+	admin.POST("/smtp/test", s.handleTestSMTP)
+
 	// 运维监控与数据库备份（概览 / 一致性快照下载 / 备份只读校验）
 	admin.GET("/maintenance/overview", s.handleMaintenanceOverview)
 	admin.GET("/maintenance/backup", s.handleMaintenanceBackup)

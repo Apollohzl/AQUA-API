@@ -205,6 +205,8 @@ func run() error {
 	announcements := store.NewAnnouncementRepository(st.DB())
 	// 邀请返利 / 签到：注册与充值发的奖励、每人每天的签到记录。
 	referrals := store.NewReferralRepository(st.DB())
+	// SMTP 配置仓储：口令以密文落库（加密器与渠道密钥同一个）。
+	smtpSettings := store.NewSMTPRepository(st.DB(), cipher)
 	// 额度预留台账：鉴权时预扣、响应后结算/退还，堵住并发超支漏洞。
 	quotaReservations := store.NewQuotaRepository(st.DB())
 
@@ -278,13 +280,42 @@ func run() error {
 	}
 
 	// ── 邮件发送器 ──────────────────────────────────────────────
-	// 只记录"是否就绪"与发件地址，绝不打印口令（口令仅来自环境变量）。
+	//
+	// 配置来源有两条，优先级见 0023 迁移与本段说明：
+	//   1) 后台「系统设置 → 邮件通道」里显式启用的配置（口令密文落库）；
+	//   2) 环境变量 / 内置默认值（AQUA_SMTP_*），作为兜底与首次部署的预设。
+	// 后台启用即为准：站长在界面点"启用并保存"是一个明确意图，
+	// 若仍被环境变量覆盖，就会出现"我明明配好了却不生效"这类最难排查的问题。
+	//
+	// 默认值里【只有服务商地址与端口】，不含任何账号或口令——
+	// 每个站长的发信账号都不一样，账号与口令必须由站长自己提供。
+	smtpBase := cfg.SMTP
+	if stored, err := smtpSettings.Get(ctx); err != nil {
+		logger.Warn("读取后台邮件通道配置失败，本次回退环境变量", "error", err)
+	} else if stored != nil && stored.Configured() {
+		cfg.SMTP = config.SMTPConfig{
+			Host:     stored.Host,
+			Port:     stored.Port,
+			Username: stored.Username,
+			From:     stored.From,
+			FromName: stored.FromName,
+			Password: stored.Password,
+		}
+	}
+
 	mailerSender := mailer.New(cfg.SMTP)
+	// 只记录"是否就绪"与发件地址，绝不打印口令。
 	if mailerSender.Configured() {
-		logger.Info("SMTP 邮件通道已就绪", "host", cfg.SMTP.Host, "port", cfg.SMTP.Port, "from", cfg.SMTP.From)
+		source := "环境变量"
+		if cfg.SMTP.Username != strings.TrimSpace(smtpBase.Username) || cfg.SMTP.Host != smtpBase.Host {
+			source = "后台配置"
+		}
+		logger.Info("SMTP 邮件通道已就绪", "source", source,
+			"host", cfg.SMTP.Host, "port", cfg.SMTP.Port, "from", cfg.SMTP.From)
 	} else {
-		logger.Warn("SMTP 邮件通道未配置，注册邮箱验证码将不可用" +
-			"（需设置 AQUA_SMTP_USERNAME / AQUA_SMTP_FROM / AQUA_SMTP_PASSWORD）")
+		logger.Warn("SMTP 邮件通道未配置，注册邮箱验证码将不可用；" +
+			"可在后台「系统设置 → 邮件通道」填写，或设置环境变量 " +
+			"AQUA_SMTP_USERNAME / AQUA_SMTP_FROM / AQUA_SMTP_PASSWORD")
 	}
 
 	// 子命令：创建访问令牌（M2 遗留入口，保留以兼容既有脚本）
@@ -388,6 +419,9 @@ func run() error {
 		// 注册邮箱验证码：仓储 + 发信通道
 		EmailCodes: emailCodes,
 		Mailer:     mailerSender,
+		// 邮件通道（SMTP）：后台可视化配置；SMTPBase 是环境变量/默认值兜底项
+		SMTP:     smtpSettings,
+		SMTPBase: smtpBase,
 		// 前端构建产物（web/dist）已通过根包的 go:embed 嵌入二进制
 		WebFS: aqua.WebDist,
 	})

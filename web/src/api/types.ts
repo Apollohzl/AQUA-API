@@ -238,6 +238,47 @@ export interface UsageLog {
   created_at: number
 }
 
+/* ────────────────────── 邮件通道（SMTP）────────────────────── */
+
+/**
+ * 邮件通道配置状态（GET/PUT /api/admin/smtp）。
+ *
+ * 注意：这里【没有】password 字段——口令不对外输出是后端的硬约束，
+ * 界面只能"重填"，不能"查看"。
+ */
+export interface SMTPSettings {
+  host: string
+  port: number
+  username: string
+  from: string
+  from_name: string
+  /** 后台这条配置是否启用（启用则优先于环境变量） */
+  enabled: boolean
+  updated_at: number
+  /** 库里是否已保存口令（用于提示"留空即沿用"） */
+  password_set: boolean
+  /** 当前实际生效的来源：database / env / none */
+  source: 'database' | 'env' | 'none' | string
+  /** 此刻是否真的能发信 */
+  ready: boolean
+  /** 当前生效的端点（不含口令），用于展示"到底在用哪一套" */
+  effective_host: string
+  effective_port: number
+  effective_from: string
+  effective_sender: string
+}
+
+/** PUT /api/admin/smtp 的请求体；password 留空表示沿用已保存的口令 */
+export interface SMTPSettingsPayload {
+  host: string
+  port: number
+  username: string
+  from: string
+  from_name: string
+  enabled: boolean
+  password: string
+}
+
 /* ────────────────────────── 渠道 ────────────────────────── */
 
 /** 渠道对象（响应中只有 masked_key，绝不出现明文） */
