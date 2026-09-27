@@ -28,6 +28,7 @@ import { useI18n } from 'vue-i18n'
 import AppIcon from './AppIcon.vue'
 import AnnouncementBanner from './AnnouncementBanner.vue'
 import LocaleSwitcher from './LocaleSwitcher.vue'
+import SiteFooter from './SiteFooter.vue'
 import type { NavGroup } from './nav'
 import { confirmDialog } from '@/composables/useConfirm'
 import { toastInfo } from '@/composables/useToast'
@@ -244,6 +245,10 @@ async function handleSignOut(): Promise<void> {
              放在页面内容之前，让运营通知在所有后台/门户页都能被看到。 -->
         <AnnouncementBanner />
         <slot />
+
+        <!-- 统一合规页脚：门户与后台同样需要公示经营主体、备案号与必备文件入口。
+             label 用外壳名（「用户门户」/「管理后台」），便于用户确认当前所处环境。 -->
+        <SiteFooter :max-width="'max-w-[1400px]'" :label="props.variantLabel" />
       </main>
     </div>
 

@@ -88,6 +88,41 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '加入交流群' },
   },
 
+  /* ── 合规文件页（公开，页脚可从任意页面直达）───────────────── */
+  {
+    // 这五份文件是经营性服务必须公示的内容：服务协议、隐私政策、充值退款规则、
+    // 联系方式、投诉举报。它们各自独立成路由（而不是塞进某个页面的锚点），
+    // 因为核查与用户投诉时都是"直接要一个可访问的链接"。
+    path: '/terms',
+    name: 'terms',
+    component: () => import('@/views/legal/TermsView.vue'),
+    meta: { title: '服务协议' },
+  },
+  {
+    path: '/privacy',
+    name: 'privacy',
+    component: () => import('@/views/legal/PrivacyView.vue'),
+    meta: { title: '隐私政策' },
+  },
+  {
+    path: '/refund',
+    name: 'refund',
+    component: () => import('@/views/legal/RefundView.vue'),
+    meta: { title: '充值退款' },
+  },
+  {
+    path: '/contact',
+    name: 'contact',
+    component: () => import('@/views/legal/ContactView.vue'),
+    meta: { title: '联系方式' },
+  },
+  {
+    path: '/report',
+    name: 'report',
+    component: () => import('@/views/legal/ReportView.vue'),
+    meta: { title: '投诉举报' },
+  },
+
   /* ── 用户门户 ─────────────────────────────────────────── */
   {
     path: '/console',
@@ -144,7 +179,7 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '生成任务' },
       },
       {
-        // 财务记录：把"钱"的三类流水（充值/返利/消费）与四个汇总数字收在一页，
+        // 财务记录：把"钱"的三类流水（充值/奖励/消费）与四个汇总数字收在一页，
         // 用户对账不必在充值页、邀请页、日志页之间来回翻。
         path: 'finance',
         name: 'console-finance',
@@ -158,12 +193,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '账户充值' },
       },
       {
-        // 邀请返利 + 每日签到：把"推广"和"回访"两个增长动作收敛在一页，
+        // 邀请奖励 + 每日签到：把"推广"和"回访"两个增长动作收敛在一页，
         // 用户不必在多个入口之间找自己的邀请码与签到状态。
         path: 'referral',
         name: 'console-referral',
         component: () => import('@/views/console/ReferralView.vue'),
-        meta: { title: '邀请返利' },
+        meta: { title: '邀请奖励' },
       },
     ],
   },

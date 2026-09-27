@@ -22,6 +22,7 @@ import { RouterLink } from 'vue-router'
 import AppIcon from '@/components/AppIcon.vue'
 import AnnouncementBanner from '@/components/AnnouncementBanner.vue'
 import CopyButton from '@/components/CopyButton.vue'
+import SiteFooter from '@/components/SiteFooter.vue'
 import { type IconName } from '@/components/icons'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
@@ -44,8 +45,8 @@ interface Feature {
 const features: Feature[] = [
   {
     icon: 'server',
-    title: '统一上游入口',
-    desc: '把 API Key、订阅账号与自托管模型收敛成一个入口，客户端只需要认一套地址与协议。',
+    title: '统一接入入口',
+    desc: '把自有渠道与自托管模型收敛成一个入口，客户端只需要认一套地址与协议。',
   },
   {
     icon: 'layers',
@@ -167,7 +168,7 @@ const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
           <template v-else>
             <RouterLink to="/login" class="btn btn-ghost btn-sm">登录</RouterLink>
             <RouterLink v-if="site.registrationEnabled" to="/register" class="btn btn-primary btn-sm">
-              免费注册
+              注册账号
             </RouterLink>
           </template>
         </div>
@@ -207,7 +208,7 @@ const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
             </h1>
 
             <p class="mt-5 max-w-xl text-base leading-relaxed text-ink-300">
-              {{ site.siteDescription || 'AQUA-API 是自托管的 LLM API 网关：统一上游渠道与下游协议，负责路由、计费与运营。' }}
+              {{ site.siteDescription || 'AQUA-API 是自托管的 LLM API 网关：统一接入渠道与对外协议，负责路由、计费与运营。' }}
             </p>
 
             <ul class="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-ink-300">
@@ -484,25 +485,7 @@ const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
       </section>
     </main>
 
-    <!-- ── 页脚 ─────────────────────────────────────────── -->
-    <footer class="border-t border-ink-800/70">
-      <div class="mx-auto flex max-w-6xl flex-col gap-4 px-5 py-8 lg:flex-row lg:items-center lg:justify-between lg:px-8">
-        <div class="flex items-center gap-2.5">
-          <img src="/favicon.ico" alt="" class="h-6 w-6 rounded" />
-          <span class="text-xs text-ink-400">
-            {{ site.siteName }} <span v-if="site.version">· v{{ site.version }}</span> · 自托管 LLM API 网关
-          </span>
-        </div>
-        <nav class="flex flex-wrap items-center gap-4 text-xs text-ink-400">
-          <RouterLink to="/login" class="transition-colors hover:text-ink-200">登录</RouterLink>
-          <RouterLink v-if="site.registrationEnabled" to="/register" class="transition-colors hover:text-ink-200">
-            注册
-          </RouterLink>
-          <RouterLink to="/join" class="transition-colors hover:text-ink-200">加入交流群</RouterLink>
-          <a href="#features" class="transition-colors hover:text-ink-200">核心特性</a>
-          <a href="#models" class="transition-colors hover:text-ink-200">可用模型</a>
-        </nav>
-      </div>
-    </footer>
+    <!-- ── 页脚（统一合规页脚：主体 / 备案号 / 协议入口 / 服务性质声明）── -->
+    <SiteFooter label="自托管 LLM API 网关" />
   </div>
 </template>

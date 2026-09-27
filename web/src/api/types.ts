@@ -64,6 +64,18 @@ export interface SiteStatus {
    * 为 0 表示后端未提供，此时退回显示原始额度。
    */
   quota_per_yuan: number
+
+  /**
+   * 合规信息（对用户公示）。
+   *
+   * 这些值展示在全站页脚与协议页：页脚是"任何页面都能看到服务由谁提供"的地方，
+   * 也是浏览器、微信/QQ、支付通道核验站点时最常看的位置。
+   * 各字段可能为空（站长尚未填写），为空时前端不展示该项。
+   */
+  operator_name: string
+  icp_license: string
+  police_license: string
+  contact_email: string
 }
 
 /** 登录 / 注册返回的用户摘要（契约二、三节） */
@@ -99,6 +111,15 @@ export interface RegisterPayload {
   email?: string
   /** 邮箱验证码，与 email 成对出现 */
   code?: string
+  /**
+   * 是否已阅读并同意《服务协议》与《隐私政策》。
+   *
+   * 后端强制校验：收集邮箱属于个人信息处理，必须先取得同意；
+   * 前端把按钮置灰只是体验，真正拦住的是服务端这一道。
+   */
+  agreed_terms: boolean
+  /** 邀请码（由邀请链接带出，可选） */
+  invite_code?: string
 }
 
 /** POST /api/auth/email-code 请求体 */

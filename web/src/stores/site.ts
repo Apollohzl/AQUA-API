@@ -50,6 +50,29 @@ export const useSiteStore = defineStore('site', () => {
   const quotaPerYuan = computed(() => status.value?.quota_per_yuan ?? 0)
 
   /**
+   * 合规信息（主体名称、备案号、客服邮箱）。
+   *
+   * 为什么从站点信息里读而不是前端写死：这些值会随备案变更、
+   * 主体改名、换客服邮箱而变化，写死就意味着每次都要改代码发版。
+   * 未配置时返回空串，页脚据此不展示该项（而不是显示一个空白占位）。
+   */
+  const operatorName = computed(() => status.value?.operator_name || '')
+  const icpLicense = computed(() => status.value?.icp_license || '')
+  const policeLicense = computed(() => status.value?.police_license || '')
+  const contactEmail = computed(() => status.value?.contact_email || '')
+
+  /**
+   * 服务性质声明：全站页脚与协议页共用一句。
+   *
+   * 为什么固定在前端而不是做成设置项：它是一句"法律性质的定性说明"，
+   * 措辞不应当被随手改动（改错了反而制造风险），因此固化并集中在此处，
+   * 任何页面引用同一份文案，避免多处表述不一致。
+   */
+  const serviceNatureNotice =
+    '本服务为第三方 AI 模型接口接入服务，与各模型厂商无隶属、代理或授权关系；' +
+    '模型输出由 AI 生成，仅供参考，请自行核验并遵守相关法律法规。'
+
+  /**
    * 拉取站点信息。
    * @param force 忽略缓存强制刷新（用户点击「重试」时使用）
    */
@@ -78,6 +101,11 @@ export const useSiteStore = defineStore('site', () => {
     emailCodeRequired,
     emailServiceReady,
     quotaPerYuan,
+    operatorName,
+    icpLicense,
+    policeLicense,
+    contactEmail,
+    serviceNatureNotice,
     load,
   }
 })

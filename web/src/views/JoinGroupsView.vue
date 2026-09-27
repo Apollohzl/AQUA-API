@@ -21,6 +21,7 @@ import { RouterLink } from 'vue-router'
 
 import AppIcon from '@/components/AppIcon.vue'
 import CopyButton from '@/components/CopyButton.vue'
+import SiteFooter from '@/components/SiteFooter.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 
@@ -168,11 +169,7 @@ onMounted(() => {
       </section>
     </main>
 
-    <footer class="border-t border-ink-800/70 py-8">
-      <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 text-xs text-ink-500 lg:px-8">
-        <p>{{ site.siteName }} · 加入交流群</p>
-        <p v-if="site.version">版本 {{ site.version }}</p>
-      </div>
-    </footer>
+    <!-- 统一合规页脚（主体 / 备案号 / 协议入口 / 服务性质声明） -->
+    <SiteFooter label="加入交流群" />
   </div>
 </template>

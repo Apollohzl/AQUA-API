@@ -44,6 +44,11 @@ export async function fetchSiteStatus(force = false): Promise<SiteStatus> {
     // 额度↔人民币的折算比例：缺失或非正数时置 0，前端退回显示原始额度
     // （宁可不折算，也不能用一个假设的比例把余额显示成错误的金额）
     quota_per_yuan: Number(status?.quota_per_yuan) > 0 ? Number(status.quota_per_yuan) : 0,
+    // 合规信息：后端未返回时置空串，页脚据此不展示该项（不显示空标签）
+    operator_name: status?.operator_name || '',
+    icp_license: status?.icp_license || '',
+    police_license: status?.police_license || '',
+    contact_email: status?.contact_email || '',
   }
   cachedStatus = normalized
   cachedAt = Date.now()
