@@ -34,6 +34,7 @@ package payment
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
@@ -164,7 +165,12 @@ func (p *epayProvider) ParseNotify(_ context.Context, notify *Notify) (*NotifyRe
 	if provided == "" {
 		return nil, fmt.Errorf("%w：回调缺少 sign 参数", ErrSignatureInvalid)
 	}
-	if !strings.EqualFold(provided, epaySign(params, key)) {
+	// 用 hmac.Equal 常量时间比较，而不是 strings.EqualFold：
+	// 逐字节提前返回的比较会让攻击者通过响应时间差逐位试探签名。
+	// 大小写仍然不敏感（部分实现回传大写十六进制），但先把两侧统一小写，
+	// 避免 EqualFold 那种"大小写变体都算通过"带来的额外猜测空间。
+	expected := epaySign(params, key)
+	if !hmac.Equal([]byte(strings.ToLower(provided)), []byte(expected)) {
 		return nil, ErrSignatureInvalid
 	}
 

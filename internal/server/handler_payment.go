@@ -265,7 +265,9 @@ func (s *Server) handleCreateOrder(c *gin.Context) {
 		Subject:   fmt.Sprintf("充值 %s %s（%s）", order.AmountYuan(), order.Currency, user.Username),
 		NotifyURL: base + "/api/payments/" + method + "/notify",
 		ReturnURL: base + "/console/recharge?trade_no=" + tradeNo,
-		ClientIP:  c.ClientIP(),
+		// 用 middleware.ClientIP：传给支付平台的"下单人 IP"必须是可信来源，
+		// 否则用户可自带 X-Forwarded-For 伪造（部分通道会用它做风控）。
+		ClientIP: middleware.ClientIP(c),
 	})
 	if err != nil {
 		writePaymentError(c, err)
@@ -525,9 +527,19 @@ func (s *Server) handlePaymentNotify(c *gin.Context) {
 		return
 	}
 
+	// 表单参数必须从【已读出的 body】解析，不能用 c.Request.ParseForm()：
+	// 上面的 io.ReadAll 已经把 body 读空，ParseForm 再解析只会得到空的 PostForm。
+	// 而支付宝异步通知、部分易支付实现都用 POST 表单回调——那会让验签因"缺少 sign"
+	// 必然失败，线上表现为「用户付了钱、订单永远停在待支付」。
 	form := url.Values{}
-	if err := c.Request.ParseForm(); err == nil {
-		form = c.Request.PostForm
+	if c.ContentType() == "application/x-www-form-urlencoded" {
+		parsed, perr := url.ParseQuery(string(body))
+		if perr != nil {
+			// 解析失败按"无表单参数"处理：交给通道适配器给出明确的验签拒绝，
+			// 比在这里返回一个模糊的 400 更容易定位问题。
+			parsed = url.Values{}
+		}
+		form = parsed
 	}
 
 	result, err := provider.ParseNotify(c.Request.Context(), &payment.Notify{

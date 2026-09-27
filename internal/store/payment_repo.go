@@ -256,10 +256,27 @@ func (r *paymentOrderRepository) CreditOrder(ctx context.Context, tradeNo string
 		return false, fmt.Errorf("store: 累加用户 %d 额度失败: %w", userID, err)
 	}
 
-	if _, err := tx.ExecContext(ctx,
-		"UPDATE payment_orders SET credited = 1, credited_at = ?, updated_at = ? WHERE trade_no = ?",
-		at.Unix(), at.Unix(), tradeNo); err != nil {
+	// credited = 0 是"本次入账的所有权凭证"，不能只靠上面那次 SELECT。
+	//
+	// 为什么必须写进 WHERE：上面的 SELECT 只是"读时快照"，两个并发事务完全可能
+	// 都读到 credited = 0（同一笔回调被投递两次、或回调与后台人工确认同时发生），
+	// 随后各自加一次额度 → 同一笔钱发两份额度。
+	// 把 credited = 0 放进 WHERE 后，条件更新本身就是互斥闸门：
+	// 后到的事务影响行数为 0，我们据此报错回滚，把它刚加的那份额度一并撤销。
+	// （SQLite 靠写锁串行化天然安全；MySQL/PostgreSQL 靠条件更新的当前读语义同样安全。）
+	res, err := tx.ExecContext(ctx,
+		"UPDATE payment_orders SET credited = 1, credited_at = ?, updated_at = ? WHERE trade_no = ? AND credited = 0",
+		at.Unix(), at.Unix(), tradeNo)
+	if err != nil {
 		return false, fmt.Errorf("store: 标记订单 %s 已入账失败: %w", tradeNo, err)
+	}
+	claimed, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: 读取入账影响行数失败: %w", err)
+	}
+	if claimed == 0 {
+		// 已被并发事务抢先入账：回滚本次（含上面刚加的额度），避免重复给钱
+		return false, fmt.Errorf("store: 订单 %s 已被并发入账，本次回滚", tradeNo)
 	}
 
 	if err := tx.Commit(); err != nil {
