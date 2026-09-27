@@ -857,6 +857,25 @@ export interface SiteSettings {
   seo: SeoSettings
   /** 内容安全（合规过滤）配置 */
   safeguard: SafeguardSettings
+  /**
+   * 合规信息（对用户公示）：经营主体、备案号与客服邮箱。
+   *
+   * 这些值会出现在全站页脚与协议页，是浏览器、微信/QQ 与支付通道核验站点时
+   * 最常检查的一组信息；未填写时页脚不展示对应项。
+   */
+  compliance: ComplianceSettings
+}
+
+/** 合规信息（公开公示用） */
+export interface ComplianceSettings {
+  /** 经营主体名称（如「XX 科技有限公司」）；为空时页脚回退显示站点名 */
+  operator_name: string
+  /** ICP 备案号（如 京ICP备00000000号-1）；为空时不展示 */
+  icp_license: string
+  /** 公安联网备案号；为空时不展示 */
+  police_license: string
+  /** 客服/投诉邮箱；为空时不展示 */
+  contact_email: string
 }
 
 /** 内容安全（合规过滤）配置 */
@@ -900,6 +919,11 @@ export type UpdateSiteSettingsPayload = Partial<{
   payment: PaymentSettings
   seo: UpdateSeoSettingsPayload
   safeguard: Partial<SafeguardSettings>
+  /**
+   * 合规信息：允许提交空串以清空某一项（如备案号填错要删掉），
+   * 未提交的字段由后端保持原值。
+   */
+  compliance: Partial<ComplianceSettings>
 }>
 
 /* ────────────────────────── 上游进价与密钥余额核算 ────────────────────────── */

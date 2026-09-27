@@ -102,6 +102,19 @@ const seoGeoPosition = ref('')
 const seoSitemapEnabled = ref(false)
 const seoSitemapPaths = ref('')
 
+/* 合规信息（对用户公示）：经营主体 / ICP 备案号 / 公安备案号 / 客服邮箱。
+   这四项展示在全站页脚与协议页，是浏览器、微信/QQ 与支付通道核验站点时
+   最常检查的一组信息；留空时前端不展示对应项（而不是显示一个空标签）。 */
+const operatorName = ref('')
+const icpLicense = ref('')
+const policeLicense = ref('')
+const contactEmail = ref('')
+
+/** 客服邮箱：留空合法（页脚不展示）；填了就必须是邮箱格式，否则用户举报无门 */
+const contactEmailInvalid = computed(
+  () => contactEmail.value.trim() !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.value.trim()),
+)
+
 /** 逗号（兼容中英文）分隔字符串 → 去空数组；同时用于 keywords 与 sitemap_paths */
 function splitList(text: string): string[] {
   return text
@@ -476,6 +489,13 @@ function applyToForm(data: SiteSettings): void {
     seoSitemapEnabled.value = seoData.sitemap_enabled === true
     seoSitemapPaths.value = (seoData.sitemap_paths ?? []).join(',')
   }
+
+  // 合规信息：后端未下发（旧版本）时保持空串，页脚自然不展示这四项
+  const compliance = data.compliance
+  operatorName.value = compliance?.operator_name || ''
+  icpLicense.value = compliance?.icp_license || ''
+  policeLicense.value = compliance?.police_license || ''
+  contactEmail.value = compliance?.contact_email || ''
 }
 
 /** 元 → 分：用四舍五入到整数，避免 0.1+0.2 类浮点误差 */
@@ -537,6 +557,11 @@ async function handleSave(): Promise<void> {
     toastError(seoErrorText.value)
     return
   }
+  // 合规信息里的邮箱同样先拦：填错会导致用户举报/退款邮件无法送达
+  if (contactEmailInvalid.value) {
+    toastError('客服邮箱格式不正确')
+    return
+  }
 
   const payload: UpdateSiteSettingsPayload = {
     site_name: siteName.value.trim(),
@@ -565,6 +590,13 @@ async function handleSave(): Promise<void> {
     },
     // 只提交可写字段；只读的 sitemap_url / robots_url 不回传
     seo: collectSeoPayload(),
+    // 合规信息：允许提交空串表示"清空该项"（如备案号填错要删掉）
+    compliance: {
+      operator_name: operatorName.value.trim(),
+      icp_license: icpLicense.value.trim(),
+      police_license: policeLicense.value.trim(),
+      contact_email: contactEmail.value.trim(),
+    },
   }
 
   saving.value = true
@@ -599,7 +631,7 @@ onMounted(() => {
       <button
         type="button"
         class="btn btn-primary"
-        :disabled="saving || loading || emailCodeUnavailable || paymentInvalid || seoInvalid"
+        :disabled="saving || loading || emailCodeUnavailable || paymentInvalid || seoInvalid || contactEmailInvalid"
         @click="handleSave"
       >
         <span
@@ -1138,7 +1170,7 @@ onMounted(() => {
                 v-model="seoKeywords"
                 class="input"
                 type="text"
-                placeholder="LLM API 网关,大模型中转,OpenAI 兼容"
+                placeholder="LLM API 网关,大模型 API,OpenAI 兼容接口"
               />
               <p class="hint">多个关键词用逗号分隔，会写入页面的 keywords 标记。</p>
             </div>
@@ -1229,6 +1261,72 @@ onMounted(() => {
           </div>
 
           <p v-if="seoInvalid" class="field-error">{{ seoErrorText }}</p>
+        </div>
+      </section>
+
+      <!-- 合规信息：页脚与协议页展示的公示信息。单独成块，让"必须公示什么"一目了然。 -->
+      <section class="card lg:col-span-3">
+        <div class="card-head">
+          <div>
+            <h2 class="section-title flex items-center gap-2">
+              <AppIcon name="shield" :size="16" class="text-brand-700" />
+              合规信息（对用户公示）
+            </h2>
+            <p class="mt-0.5 text-xs text-ink-400">
+              这四项展示在全站页脚与「联系方式」页，是浏览器、微信/QQ 与支付通道核验站点时最常检查的信息。
+              留空的项不会展示；保存后立即生效，无需重启服务。
+            </p>
+          </div>
+        </div>
+
+        <div class="card-pad space-y-4">
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label class="label" for="compliance-operator">经营主体名称</label>
+              <input
+                id="compliance-operator"
+                v-model="operatorName"
+                class="input"
+                type="text"
+                placeholder="XX 科技有限公司"
+              />
+              <p class="hint">页脚落款使用；留空时回退显示站点名。</p>
+            </div>
+            <div>
+              <label class="label" for="compliance-email">客服邮箱</label>
+              <input
+                id="compliance-email"
+                v-model="contactEmail"
+                class="input input-mono"
+                type="email"
+                placeholder="support@example.com"
+              />
+              <p class="hint" :class="contactEmailInvalid ? 'text-red-600' : ''">
+                用于用户咨询、退款与投诉举报；留空则相关页面隐藏该入口。
+              </p>
+            </div>
+            <div>
+              <label class="label" for="compliance-icp">ICP 备案号</label>
+              <input
+                id="compliance-icp"
+                v-model="icpLicense"
+                class="input input-mono"
+                type="text"
+                placeholder="京ICP备00000000号-1"
+              />
+            </div>
+            <div>
+              <label class="label" for="compliance-police">公安联网备案号</label>
+              <input
+                id="compliance-police"
+                v-model="policeLicense"
+                class="input input-mono"
+                type="text"
+                placeholder="京公网安备 00000000000000号"
+              />
+            </div>
+          </div>
+          <p v-if="contactEmailInvalid" class="field-error">客服邮箱格式不正确。</p>
         </div>
       </section>
     </div>
