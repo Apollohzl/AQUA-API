@@ -32,6 +32,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -39,6 +40,7 @@ import (
 	"time"
 
 	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"gitee.com/xiaosu4610/aqua-api/internal/netguard"
 )
 
 // oauthRefreshTimeout 是刷新请求的超时时间。
@@ -74,6 +76,13 @@ func NewOAuthRefresher(providers model.OAuthProviderRepository, keys model.Chann
 				IdleConnTimeout:     60 * time.Second,
 				TLSHandshakeTimeout: 10 * time.Second,
 				ForceAttemptHTTP2:   true,
+				// 建连前的地址护栏：令牌端点由管理员配置，属于半可信输入，
+				// 必须拒绝链路本地与云元数据地址（见 netguard 包）。
+				DialContext: (&net.Dialer{
+					Timeout:   10 * time.Second,
+					KeepAlive: 30 * time.Second,
+					Control:   netguard.DialControl,
+				}).DialContext,
 			},
 		},
 	}

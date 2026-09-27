@@ -43,11 +43,14 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"gitee.com/xiaosu4610/aqua-api/internal/netguard"
 )
 
 // Vertex 服务账号鉴权相关常量。
@@ -70,7 +73,20 @@ const (
 //
 // 单独定义（而非复用转发客户端）的原因：这是网关自身的控制面流量，
 // 超时与连接池策略都应与转发流量解耦；测试也可替换它注入 httptest 端点。
-var vertexTokenHTTPClient = &http.Client{Timeout: vertexTokenHTTPTimeout}
+//
+// 带 netguard 的建连护栏：token_uri 来自管理员粘贴的服务账号 JSON，
+// 属于半可信输入，必须拒绝链路本地与云元数据地址。
+var vertexTokenHTTPClient = &http.Client{
+	Timeout: vertexTokenHTTPTimeout,
+	Transport: &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+			Control:   netguard.DialControl,
+		}).DialContext,
+		ForceAttemptHTTP2: true,
+	},
+}
 
 // vertexServiceAccount 是服务账号 JSON 中我们用到的字段。
 type vertexServiceAccount struct {
@@ -103,6 +119,13 @@ func parseVertexServiceAccount(apiKey string) (vertexServiceAccount, error) {
 	}
 	if strings.TrimSpace(account.TokenURI) == "" {
 		account.TokenURI = vertexDefaultTokenURI
+	}
+	// token_uri 直接决定网关把"带签名的 JWT 断言"发到哪个主机，因此必须限定协议。
+	// 不限定会带来两类问题：一是 file:// 之类协议会以晦涩的底层错误失败；
+	// 二是若将来有人把凭据打进这里，等于把私钥外送。链路本地/元数据地址
+	// 由 netguard 在拨号层拦截（见 vertexTokenHTTPClient）。
+	if !strings.HasPrefix(account.TokenURI, "http://") && !strings.HasPrefix(account.TokenURI, "https://") {
+		return vertexServiceAccount{}, fmt.Errorf("Vertex 服务账号 JSON 的 token_uri 必须以 http:// 或 https:// 开头，当前为 %q", account.TokenURI)
 	}
 	return account, nil
 }

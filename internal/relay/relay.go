@@ -33,11 +33,13 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"gitee.com/xiaosu4610/aqua-api/internal/netguard"
 	"gitee.com/xiaosu4610/aqua-api/internal/reqctx"
 )
 
@@ -179,6 +181,14 @@ func New(channels model.ChannelRepository, opts Options) *Relay {
 			Transport: &http.Transport{
 				// 走系统代理环境变量：便于在受限网络中经代理访问上游
 				Proxy: http.ProxyFromEnvironment,
+
+				// 建连前的地址护栏：拒绝链路本地与云元数据地址（见 netguard 包）。
+				// 放在拨号层而不是只校验 URL：域名可能在"校验通过"之后才解析到内网地址。
+				DialContext: (&net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 30 * time.Second,
+					Control:   netguard.DialControl,
+				}).DialContext,
 
 				// 连接复用：网关是高频转发场景，复用连接可显著降低延迟
 				MaxIdleConns:          100,
