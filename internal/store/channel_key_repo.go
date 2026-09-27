@@ -35,7 +35,8 @@ import (
 // channelKeyColumns 集中定义查询列，顺序必须与 scanChannelKey 的扫描顺序严格一致。
 const channelKeyColumns = `id, channel_id, kind, key_enc, label, status, fail_count, last_used_at, last_error, created_at, ` +
 	`refresh_token_enc, access_token_enc, expires_at, account_hint, provider, ` +
-	`weight, priority, in_flight, cooldown_until, rpm_limit, window_start, window_count`
+	`weight, priority, in_flight, cooldown_until, rpm_limit, window_start, window_count, ` +
+	`balance, balance_updated_at`
 
 // channelKeyRepository 是 model.ChannelKeyRepository 的 SQL 实现，并发安全。
 type channelKeyRepository struct {
@@ -65,6 +66,34 @@ func (r *channelKeyRepository) ReplaceAll(ctx context.Context, channelID uint64,
 			Kind:   model.CredentialKindAPIKey,
 			APIKey: key,
 			Label:  label,
+			// 显式写"未知"而不是依赖零值：CredentialInput.Balance 的零值是 0，
+			// 而 0 表示"已用尽"，留零会让所有经此入口导入的密钥被误判为余额耗尽。
+			Balance: model.BalanceUnknown,
+		})
+	}
+	return r.ReplaceCredentials(ctx, channelID, inputs)
+}
+
+// ReplaceAllWithBalance 用给定 API Key 集合替换渠道密钥池，并录入每把密钥的余额。
+//
+// 与 ReplaceAll 的唯一差别是携带 balances；其余（差集增删、保留已有统计与余额）完全一致。
+// balances 为 nil 或长度不足时，对应密钥余额取 BalanceUnknown（未录入）。
+func (r *channelKeyRepository) ReplaceAllWithBalance(ctx context.Context, channelID uint64, keys, labels []string, balances []int64) (int, int, error) {
+	inputs := make([]model.CredentialInput, 0, len(keys))
+	for i, key := range keys {
+		label := ""
+		if i < len(labels) {
+			label = strings.TrimSpace(labels[i])
+		}
+		balance := model.BalanceUnknown
+		if i < len(balances) {
+			balance = balances[i]
+		}
+		inputs = append(inputs, model.CredentialInput{
+			Kind:    model.CredentialKindAPIKey,
+			APIKey:  key,
+			Label:   label,
+			Balance: balance,
 		})
 	}
 	return r.ReplaceCredentials(ctx, channelID, inputs)
@@ -128,12 +157,25 @@ func (r *channelKeyRepository) ReplaceCredentials(ctx context.Context, channelID
 		}
 	}
 
-	// 2) 新增目标集合中缺失的凭据
+	// 2) 新增目标集合中缺失的凭据；已存在的凭据保留状态与统计（并保护已录余额）
 	now := time.Now().Unix()
 	added := 0
 	for hash, input := range desired {
 		if _, ok := existing[input.Kind][hash]; ok {
-			continue // 已存在：保留其状态与失败统计，不重置
+			// 已存在：保留其状态与失败统计，不重置。
+			//
+			// 余额的额外保护：重新粘贴同一批密钥时，绝不把已人工录入的余额
+			// 覆盖为"未知"——只有本次【显式提供了已知余额（>=0）】才更新为本次的值。
+			// 这样"补一批密钥"或"原样重贴"都不会抹掉站长辛苦录入的余额。
+			if input.Balance >= 0 {
+				if _, err := tx.ExecContext(ctx, `
+					UPDATE channel_keys SET balance = ?, balance_updated_at = ?
+					WHERE channel_id = ? AND kind = ? AND key_hash = ?`,
+					input.Balance, now, channelID, string(input.Kind), hash); err != nil {
+					return 0, 0, fmt.Errorf("store: 更新已有凭据余额失败: %w", err)
+				}
+			}
+			continue
 		}
 
 		keyEnc, err := r.encryptField(input.APIKey)
@@ -149,15 +191,28 @@ func (r *channelKeyRepository) ReplaceCredentials(ctx context.Context, channelID
 			return 0, 0, err
 		}
 
+		// 余额与更新时间：未知（负值一律归一为 BalanceUnknown）记 0 时间；
+		// 已知余额则把本次视为"录入时刻"。
+		balance := input.Balance
+		if balance < 0 {
+			balance = model.BalanceUnknown
+		}
+		balanceUpdatedAt := int64(0)
+		if balance >= 0 {
+			balanceUpdatedAt = now
+		}
+
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO channel_keys
 				(channel_id, kind, key_enc, key_hash, label, status, fail_count, last_used_at, last_error,
-				 created_at, refresh_token_enc, access_token_enc, expires_at, account_hint, provider)
-			VALUES (?, ?, ?, ?, ?, ?, 0, 0, '', ?, ?, ?, ?, ?, ?)`,
+				 created_at, refresh_token_enc, access_token_enc, expires_at, account_hint, provider,
+				 balance, balance_updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, 0, 0, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
 			channelID, string(input.Kind), keyEnc, hash, strings.TrimSpace(input.Label),
 			int(model.ChannelKeyStatusEnabled), now,
 			refreshEnc, accessEnc, unixOrZero(input.ExpiresAt),
-			strings.TrimSpace(input.AccountHint), strings.TrimSpace(input.Provider)); err != nil {
+			strings.TrimSpace(input.AccountHint), strings.TrimSpace(input.Provider),
+			balance, balanceUpdatedAt); err != nil {
 			return 0, 0, fmt.Errorf("store: 新增凭据失败: %w", err)
 		}
 		added++
@@ -626,6 +681,34 @@ func (r *channelKeyRepository) UpdateScheduling(ctx context.Context, id uint64, 
 	return nil
 }
 
+// UpdateBalance 人工更新凭据余额，并记录更新时间。
+//
+// balance 允许 BalanceUnknown(-1)（置回"未录入"）与任意 >=0 的整数；
+// 小于 -1 的值无意义（余额不可能比"未知"更负），直接拒绝而不是静默修正，
+// 免得把一次前端 bug 变成一个看不出异常的数字。
+//
+// 同时刷新 balance_updated_at：即便数值没变，也把"这次核对来自何时"记下来，
+// 方便后台展示这个余额数字的新鲜度。
+func (r *channelKeyRepository) UpdateBalance(ctx context.Context, id uint64, balance int64) error {
+	if balance < model.BalanceUnknown {
+		return fmt.Errorf("store: 凭据余额非法: %d（最小为 %d，表示未知）", balance, model.BalanceUnknown)
+	}
+	res, err := r.db.ExecContext(ctx,
+		"UPDATE channel_keys SET balance = ?, balance_updated_at = ? WHERE id = ?",
+		balance, time.Now().Unix(), id)
+	if err != nil {
+		return fmt.Errorf("store: 更新凭据 %d 的余额失败: %w", id, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: 读取影响行数失败: %w", err)
+	}
+	if affected == 0 {
+		return model.ErrChannelKeyNotFound
+	}
+	return nil
+}
+
 // scanChannelKey 把一行数据映射为凭据对象，并完成解密。
 func (r *channelKeyRepository) scanChannelKey(sc rowScanner) (*model.ChannelKey, error) {
 	var (
@@ -651,12 +734,15 @@ func (r *channelKeyRepository) scanChannelKey(sc rowScanner) (*model.ChannelKey,
 		rpmLimit     int
 		windowStart  int64
 		windowCount  int
+		balance      int64
+		balanceAt    int64
 	)
 
 	if err := sc.Scan(&id, &channelID, &kind, &encryptedKey, &label, &status,
 		&failCount, &lastUsedAt, &lastError, &createdAt,
 		&refreshEnc, &accessEnc, &expiresAt, &accountHint, &provider,
-		&weight, &priority, &inFlight, &cooldownEnd, &rpmLimit, &windowStart, &windowCount); err != nil {
+		&weight, &priority, &inFlight, &cooldownEnd, &rpmLimit, &windowStart, &windowCount,
+		&balance, &balanceAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
@@ -707,6 +793,9 @@ func (r *channelKeyRepository) scanChannelKey(sc rowScanner) (*model.ChannelKey,
 		RPMLimit:      rpmLimit,
 		WindowStart:   unixToExpiresAt(windowStart),
 		WindowCount:   windowCount,
+
+		Balance:          balance,
+		BalanceUpdatedAt: unixToExpiresAt(balanceAt),
 	}, nil
 }
 

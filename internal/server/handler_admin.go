@@ -293,7 +293,7 @@ func (s *Server) handleCreateChannel(c *gin.Context) {
 	}
 
 	// 先解析批量密钥：解析失败时直接返回，避免"渠道建好了但密钥没进去"的半成品状态
-	keys, labels, err := parseKeysText(req.KeysText)
+	keys, labels, balances, err := parseKeysText(req.KeysText)
 	if err != nil {
 		oai.WriteError(c.Writer, http.StatusBadRequest, err.Error(), oai.TypeInvalidRequest, "invalid_keys")
 		return
@@ -332,7 +332,7 @@ func (s *Server) handleCreateChannel(c *gin.Context) {
 		return
 	}
 
-	if err := s.replaceChannelKeys(ctx, channel.ID, keys, labels); err != nil {
+	if err := s.replaceChannelKeys(ctx, channel.ID, keys, labels, balances); err != nil {
 		s.respondInternalError(c, "导入渠道密钥失败")
 		return
 	}
@@ -353,25 +353,29 @@ func (s *Server) handleCreateChannel(c *gin.Context) {
 
 // parseKeysText 预解析"批量密钥"文本。
 //
-// 返回 (明文密钥列表, 备注列表, 错误)。文本为空时返回 (nil, nil, nil)，
+// 返回 (明文密钥列表, 备注列表, 余额列表, 错误)。文本为空时返回 (nil, nil, nil, nil)，
 // 表示"本次不修改密钥池"。
-func parseKeysText(keysText string) ([]string, []string, error) {
+//
+// 解析走 model.ParseKeyListWithBalance：除"每行一把密钥（可带备注）"外，
+// 还支持"余额标记行"（如 `49余额`），为【其后】的密钥批量设定余额，
+// 详见该函数的文档。
+func parseKeysText(keysText string) ([]string, []string, []int64, error) {
 	if strings.TrimSpace(keysText) == "" {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
-	keys, labels := model.ParseKeyList(keysText)
+	keys, labels, balances := model.ParseKeyListWithBalance(keysText)
 	if len(keys) == 0 {
-		return nil, nil, errors.New("未能从提交内容中解析出任何密钥，请检查格式（每行一把）")
+		return nil, nil, nil, errors.New("未能从提交内容中解析出任何密钥，请检查格式（每行一把）")
 	}
-	return keys, labels, nil
+	return keys, labels, balances, nil
 }
 
-// replaceChannelKeys 用给定密钥整体替换渠道密钥池（差集增删，幂等）。
-func (s *Server) replaceChannelKeys(ctx context.Context, channelID uint64, keys, labels []string) error {
+// replaceChannelKeys 用给定密钥整体替换渠道密钥池（差集增删，幂等），并录入余额。
+func (s *Server) replaceChannelKeys(ctx context.Context, channelID uint64, keys, labels []string, balances []int64) error {
 	if s.deps.ChannelKeys == nil || len(keys) == 0 {
 		return nil
 	}
-	_, _, err := s.deps.ChannelKeys.ReplaceAll(ctx, channelID, keys, labels)
+	_, _, err := s.deps.ChannelKeys.ReplaceAllWithBalance(ctx, channelID, keys, labels, balances)
 	return err
 }
 
@@ -439,7 +443,7 @@ func (s *Server) handleUpdateChannel(c *gin.Context) {
 	}
 
 	// 先解析批量密钥（与创建一致：解析失败直接返回，不留半成品状态）
-	keys, labels, err := parseKeysText(req.KeysText)
+	keys, labels, balances, err := parseKeysText(req.KeysText)
 	if err != nil {
 		oai.WriteError(c.Writer, http.StatusBadRequest, err.Error(), oai.TypeInvalidRequest, "invalid_keys")
 		return
@@ -489,7 +493,7 @@ func (s *Server) handleUpdateChannel(c *gin.Context) {
 	}
 
 	// 密钥池为空文本时不动（见 parseKeysText 的语义），避免误清空
-	if err := s.replaceChannelKeys(ctx, channel.ID, keys, labels); err != nil {
+	if err := s.replaceChannelKeys(ctx, channel.ID, keys, labels, balances); err != nil {
 		s.respondInternalError(c, "导入渠道密钥失败")
 		return
 	}
@@ -688,22 +692,26 @@ func (s *Server) handleListChannelKeys(c *gin.Context) {
 
 // channelKeyUpdateRequest 是修改单把凭据的请求体。
 //
-// 路径保持 PUT /api/admin/keys/:keyId，但语义已从"改状态"扩展为"改状态与调度参数"：
+// 路径保持 PUT /api/admin/keys/:keyId，语义是"改状态、调度参数与余额"：
 //   - Status 为空表示不改状态；
 //   - weight / priority / rpm_limit 为调度参数，三者需同时提供
-//     （仓储的 UpdateScheduling 是整组覆盖，缺项会把它误写成 0）。
+//     （仓储的 UpdateScheduling 是整组覆盖，缺项会把它误写成 0）；
+//   - Balance 为空（nil）表示不改余额；-1 表示置为"未知"（未录入）；
+//     >=0 表示设为该余额（0 即视为已用尽，该凭据会退出调度）。
 type channelKeyUpdateRequest struct {
-	Status   *int `json:"status"`
-	Weight   *int `json:"weight"`
-	Priority *int `json:"priority"`
-	RPMLimit *int `json:"rpm_limit"`
+	Status   *int   `json:"status"`
+	Weight   *int   `json:"weight"`
+	Priority *int   `json:"priority"`
+	RPMLimit *int   `json:"rpm_limit"`
+	Balance  *int64 `json:"balance"`
 }
 
-// handleUpdateChannelKeyStatus 更新某把密钥的状态与调度参数。
+// handleUpdateChannelKeyStatus 更新某把密钥的状态、调度参数与余额。
 //
 // 典型场景：
 //   - 恢复被误杀（连续失败自动摘除）的密钥，或临时禁用正在被限流的密钥；
-//   - 调整该凭据的权重 / 优先级 / 每分钟上限（配合渠道级的调度策略）。
+//   - 调整该凭据的权重 / 优先级 / 每分钟上限（配合渠道级的调度策略）；
+//   - 录入 / 更新该凭据的余额（余额耗尽会自动退出调度，补录后自动恢复）。
 func (s *Server) handleUpdateChannelKeyStatus(c *gin.Context) {
 	keyID, err := strconv.ParseUint(c.Param("keyId"), 10, 64)
 	if err != nil || keyID == 0 {
@@ -716,7 +724,7 @@ func (s *Server) handleUpdateChannelKeyStatus(c *gin.Context) {
 		oai.WriteError(c.Writer, http.StatusBadRequest, "请求体格式错误", oai.TypeInvalidRequest, oai.CodeInvalidJSON)
 		return
 	}
-	if req.Status == nil && req.Weight == nil && req.Priority == nil && req.RPMLimit == nil {
+	if req.Status == nil && req.Weight == nil && req.Priority == nil && req.RPMLimit == nil && req.Balance == nil {
 		oai.WriteError(c.Writer, http.StatusBadRequest, "未提供任何可更新字段", oai.TypeInvalidRequest, "empty_update")
 		return
 	}
@@ -763,6 +771,25 @@ func (s *Server) handleUpdateChannelKeyStatus(c *gin.Context) {
 		resp["weight"] = *req.Weight
 		resp["priority"] = *req.Priority
 		resp["rpm_limit"] = *req.RPMLimit
+	}
+
+	// 3) 余额（可选）：nil 不修改；-1 置为未知；>=0 设为该值（0 表示已用尽）。
+	//
+	// 余额是运营数据、不参与计费；它只影响"是否还把这把凭据纳入调度"。
+	if req.Balance != nil {
+		if *req.Balance < model.BalanceUnknown {
+			oai.WriteError(c.Writer, http.StatusBadRequest,
+				fmt.Sprintf("余额不能小于 %d（%d 表示未知，0 表示已用尽）", model.BalanceUnknown, model.BalanceUnknown),
+				oai.TypeInvalidRequest, "invalid_balance")
+			return
+		}
+		if err := s.deps.ChannelKeys.UpdateBalance(ctx, keyID, *req.Balance); err != nil {
+			s.respondKeyUpdateError(c, err)
+			return
+		}
+		resp["balance"] = *req.Balance
+		resp["balance_unknown"] = *req.Balance == model.BalanceUnknown
+		resp["balance_exhausted"] = *req.Balance >= 0 && *req.Balance <= 0
 	}
 
 	c.JSON(http.StatusOK, resp)

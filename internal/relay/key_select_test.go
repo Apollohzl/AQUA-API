@@ -476,3 +476,118 @@ func TestStickySessionKey_无会话头时为空(t *testing.T) {
 		t.Fatal("同一会话标识应得到稳定的哈希")
 	}
 }
+
+// TestKeyPicker_余额耗尽_退出调度与恢复 验证"余额已知且为 0 的凭据不被选中，
+// 补录成正数后自然重新参与，且全程不改状态"。
+func TestKeyPicker_余额耗尽_退出调度与恢复(t *testing.T) {
+	_, keys, ch, pool := addTestChannel(t, []string{"k-rich", "k-empty"})
+	ctx := context.Background()
+
+	// 把第二把置为余额耗尽
+	if err := keys.UpdateBalance(ctx, pool[1].ID, 0); err != nil {
+		t.Fatalf("设置余额失败: %v", err)
+	}
+
+	now := time.Now()
+	p := newTestPicker(keys, &now)
+	for i := 0; i < 50; i++ {
+		got, err := p.pick(ctx, ch.ID, loadPool(t, keys, ctx, ch.ID), "")
+		if err != nil {
+			t.Fatalf("选择失败: %v", err)
+		}
+		if got.ID == pool[1].ID {
+			t.Fatalf("余额耗尽的凭据不应被选中，第 %d 次命中 %d", i+1, got.ID)
+		}
+	}
+
+	// 余额耗尽不改变状态（仍为启用），只是被过滤
+	got := loadPool(t, keys, ctx, ch.ID)
+	for _, k := range got {
+		if k.BalanceExhausted() && k.Status != model.ChannelKeyStatusEnabled {
+			t.Fatalf("余额耗尽不应改变凭据状态，实际 %s", k.Status)
+		}
+	}
+
+	// 两把都耗尽 → 无可用凭据
+	if err := keys.UpdateBalance(ctx, pool[0].ID, 0); err != nil {
+		t.Fatalf("设置余额失败: %v", err)
+	}
+	if _, err := p.pick(ctx, ch.ID, loadPool(t, keys, ctx, ch.ID), ""); !errors.Is(err, ErrNoUsableCredential) {
+		t.Fatalf("全部余额耗尽应返回 ErrNoUsableCredential，实际 %v", err)
+	}
+
+	// 补录余额 → 重新参与调度
+	if err := keys.UpdateBalance(ctx, pool[0].ID, 30); err != nil {
+		t.Fatalf("补录余额失败: %v", err)
+	}
+	picked, err := p.pick(ctx, ch.ID, loadPool(t, keys, ctx, ch.ID), "")
+	if err != nil {
+		t.Fatalf("补录余额后应恢复可用: %v", err)
+	}
+	if picked.ID != pool[0].ID {
+		t.Fatalf("恢复后应选中已补录余额的凭据 %d，实际 %d", pool[0].ID, picked.ID)
+	}
+}
+
+// TestKeyPicker_余额未知_照常参与 验证"未录入余额（BalanceUnknown）"的凭据
+// 不受余额约束，照常参与调度——这是升级后既有数据行为不变的关键。
+func TestKeyPicker_余额未知_照常参与(t *testing.T) {
+	_, keys, ch, pool := addTestChannel(t, []string{"k-unknown"})
+	ctx := context.Background()
+
+	loaded := loadPool(t, keys, ctx, ch.ID)
+	if loaded[0].Balance != model.BalanceUnknown {
+		t.Fatalf("默认导入应为余额未知(%d)，实际 %d", model.BalanceUnknown, loaded[0].Balance)
+	}
+
+	now := time.Now()
+	p := newTestPicker(keys, &now)
+	got, err := p.pick(ctx, ch.ID, loaded, "")
+	if err != nil {
+		t.Fatalf("余额未知的凭据应照常参与调度: %v", err)
+	}
+	if got.ID != pool[0].ID {
+		t.Fatalf("应选中余额未知的凭据 %d，实际 %d", pool[0].ID, got.ID)
+	}
+}
+
+// TestResolveChatKey_余额耗尽不虚增备用密钥 验证解析凭据时 hasSpareKey 的判断：
+// 一批"余额已耗尽"的凭据不应让 hasSpareKey 误判为 true（否则会触发无意义的密钥级重试）。
+func TestResolveChatKey_余额耗尽不虚增备用密钥(t *testing.T) {
+	channels, keys := newTestRepos(t)
+	ctx := context.Background()
+
+	ch := addChannel(t, channels, "https://upstream.example.com", "", []string{"m"}, 10)
+	if _, _, err := keys.ReplaceAll(ctx, ch.ID, []string{"k-useful", "k-empty"}, nil); err != nil {
+		t.Fatalf("导入密钥池失败: %v", err)
+	}
+
+	pool, err := keys.ListByChannel(ctx, ch.ID)
+	if err != nil {
+		t.Fatalf("读取密钥池失败: %v", err)
+	}
+	var emptyID uint64
+	for _, k := range pool {
+		if k.Key == "k-empty" {
+			emptyID = k.ID
+		}
+	}
+	if emptyID == 0 {
+		t.Fatal("未找到测试用的 k-empty 凭据")
+	}
+	if err := keys.UpdateBalance(ctx, emptyID, 0); err != nil {
+		t.Fatalf("设置余额失败: %v", err)
+	}
+
+	r := New(channels, Options{Keys: keys})
+	_, keyID, _, ok, hasSpare := r.resolveChatKey(ctx, ch, map[uint64]struct{}{})
+	if !ok {
+		t.Fatal("应能解析出可用密钥")
+	}
+	if keyID == emptyID {
+		t.Fatal("不应选中余额耗尽的密钥")
+	}
+	if hasSpare {
+		t.Fatal("余额耗尽的密钥不应让 hasSpareKey 判定为 true")
+	}
+}

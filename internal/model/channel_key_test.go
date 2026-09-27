@@ -137,3 +137,109 @@ func TestPickKey_池内选择(t *testing.T) {
 		t.Fatalf("随机挑选应在池内分散，实际只命中了 %d 个元素", len(seen))
 	}
 }
+
+// TestParseKeyListWithBalance_按余额标记分段 覆盖站长实际粘贴的核心格式：
+// 一个"49余额"标记之后的所有密钥都记 49，直到出现下一个标记。
+func TestParseKeyListWithBalance_按余额标记分段(t *testing.T) {
+	raw := `49余额
+sk-aaaaaaaa
+62余额
+sk-bbbbbbbb
+55余额
+sk-cccccccc
+sk-dddddddd`
+
+	keys, labels, balances := ParseKeyListWithBalance(raw)
+
+	wantKeys := []string{"sk-aaaaaaaa", "sk-bbbbbbbb", "sk-cccccccc", "sk-dddddddd"}
+	wantBalances := []int64{49, 62, 55, 55}
+	if len(keys) != len(wantKeys) {
+		t.Fatalf("解析出 %d 把密钥，期望 %d 把：%v", len(keys), len(wantKeys), keys)
+	}
+	for i, k := range wantKeys {
+		if keys[i] != k {
+			t.Errorf("第 %d 把密钥应为 %q，实际 %q", i+1, k, keys[i])
+		}
+		if balances[i] != wantBalances[i] {
+			t.Errorf("第 %d 把密钥余额应为 %d，实际 %d", i+1, wantBalances[i], balances[i])
+		}
+	}
+	// labels 必须与 keys 一一对应
+	if len(labels) != len(keys) {
+		t.Fatalf("备注数量(%d)应与密钥数量(%d)一致", len(labels), len(keys))
+	}
+	// 余额标记行本身不能变成密钥
+	for _, k := range keys {
+		if strings.Contains(k, "余额") {
+			t.Fatalf("余额标记行被误当成密钥：%q", k)
+		}
+	}
+}
+
+// TestParseKeyListWithBalance_标记写法与注释与去重 覆盖各种余额标记写法、
+// 注释忽略、无标记为未知、以及去重时"保留首次出现的余额"。
+func TestParseKeyListWithBalance_标记写法与注释与去重(t *testing.T) {
+	raw := `sk-before
+余额 30
+余额49
+# 这一行是注释，不该影响余额
+sk-a
+余额: 62
+sk-b
+余额：95
+sk-c
+sk-a`
+
+	keys, _, balances := ParseKeyListWithBalance(raw)
+
+	wantKeys := []string{"sk-before", "sk-a", "sk-b", "sk-c"}
+	wantBalances := []int64{BalanceUnknown, 49, 62, 95}
+	if len(keys) != len(wantKeys) {
+		t.Fatalf("解析出 %d 把密钥，期望 %d 把：%v", len(keys), len(wantKeys), keys)
+	}
+	for i := range wantKeys {
+		if keys[i] != wantKeys[i] {
+			t.Errorf("第 %d 把密钥应为 %q，实际 %q", i+1, wantKeys[i], keys[i])
+		}
+		if balances[i] != wantBalances[i] {
+			t.Errorf("第 %d 把密钥余额应为 %d，实际 %d", i+1, wantBalances[i], balances[i])
+		}
+	}
+}
+
+// TestParseKeyListWithBalance_行内数字备注不当作余额 固化"刻意不支持 sk-xxx 49"的取舍：
+// 末尾的纯数字仍按备注处理，余额保持未知，避免误伤合法的数字备注。
+func TestParseKeyListWithBalance_行内数字备注不当作余额(t *testing.T) {
+	keys, labels, balances := ParseKeyListWithBalance("sk-aaa 49")
+
+	if len(keys) != 1 || keys[0] != "sk-aaa" {
+		t.Fatalf("密钥解析错误：keys=%v", keys)
+	}
+	if labels[0] != "49" {
+		t.Fatalf("末尾数字应被当作备注 %q，实际 %q", "49", labels[0])
+	}
+	if balances[0] != BalanceUnknown {
+		t.Fatalf("行内数字不应被当作余额，期望未知(%d)，实际 %d", BalanceUnknown, balances[0])
+	}
+}
+
+// TestChannelKey_BalanceExhausted_语义 固化余额"未知/已知/耗尽"的判定边界。
+func TestChannelKey_BalanceExhausted_语义(t *testing.T) {
+	cases := []struct {
+		name    string
+		balance int64
+		want    bool
+	}{
+		{"未知(-1)", BalanceUnknown, false},
+		{"余额为0(已用尽)", 0, true},
+		{"余额为正", 55, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			k := &ChannelKey{Balance: tc.balance}
+			if got := k.BalanceExhausted(); got != tc.want {
+				t.Fatalf("Balance=%d 时 BalanceExhausted 应为 %v，实际 %v", tc.balance, tc.want, got)
+			}
+		})
+	}
+}

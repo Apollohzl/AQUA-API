@@ -33,9 +33,19 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// BalanceUnknown 是"余额未知"的哨兵值。
+//
+// 为什么用 -1 而不是 0：
+//   - 0 有明确含义——"已知余额为 0，即已用尽"；
+//   - 若把"未录入"也表示为 0，则所有老数据会在升级瞬间被判定为"已用尽"
+//     而集体退出调度，这是不可接受的线上事故。
+//     -1 与任何真实余额都不冲突，且能自然表达"这条凭据我们不掌握它的余额"。
+const BalanceUnknown int64 = -1
 
 // KeyAutoRemoveThreshold 是密钥被自动摘除前允许的连续失败次数。
 //
@@ -246,6 +256,18 @@ type ChannelKey struct {
 	WindowStart   time.Time // 限速窗口起点；零值表示尚未开始计数
 	WindowCount   int       // 限速窗口内已用请求数
 
+	// 以下为「余额维度」字段（迁移 0022 新增）。
+	//
+	// 余额是【运营数据】，由站长人工维护（网关无法得知上游实际扣费，故不自动扣减）。
+	// 它不参与任何计费计算，唯一作用是"已知耗尽时不再把请求浪费在这把凭据上"：
+	//   - Balance 为 BalanceUnknown(-1) 表示"未录入"，不做任何约束；
+	//   - Balance >= 0 表示已知余额，0 即"已用尽"，会被调度过滤掉（见 BalanceExhausted）；
+	//   - BalanceUpdatedAt 记录该数字被人工更新的时间，便于判断是否过时。
+	// 注意：余额耗尽只是"本次不选它"，不改 status——
+	// 站长补录成正数后它自然会重新参与调度。
+	Balance          int64     // 余额；-1 表示未知（见 BalanceUnknown）
+	BalanceUpdatedAt time.Time // 余额被人工更新的时间；零值表示从未录入
+
 	// 以下字段仅 OAuth 类型使用。
 	//
 	// RefreshToken / AccessToken 均为明文，仅在内存中流转，落库由仓储加密。
@@ -278,6 +300,20 @@ func (k *ChannelKey) IsUsable() bool {
 // 冷却到期即自动可用，无需任何后台动作；这与 status 的人工摘除语义完全不同。
 func (k *ChannelKey) CoolingDown(now time.Time) bool {
 	return !k.CooldownUntil.IsZero() && k.CooldownUntil.After(now)
+}
+
+// BalanceExhausted 判断凭据是否"已知且余额已用尽"。
+//
+// 判定规则：Balance >= 0（已知）且 Balance <= 0（用尽）——
+// 即只有恰好为 0 时成立；BalanceUnknown(-1) 表示未录入，一律视为"不受约束"。
+//
+// 为什么余额耗尽不算"失败"、也不改 status：
+//
+//	余额是人工维护的运营数据，耗尽不是凭据本身坏了，而是"暂时没有额度了"。
+//	把它当作永久失效摘除，会在站长补完余额后仍看到它被摘除、需要再手动恢复；
+//	因此这里只作为调度过滤条件——补录成正数后它自然重新参与。
+func (k *ChannelKey) BalanceExhausted() bool {
+	return k.Balance >= 0 && k.Balance <= 0
 }
 
 // IsOAuth 判断是否为 OAuth 凭据。
@@ -382,6 +418,12 @@ type CredentialInput struct {
 	AccountHint  string         // 可选：账号标识（邮箱等）
 	Provider     string         // kind=oauth 时建议填写：关联的 OAuth 提供方
 	Label        string         // 可选：备注
+	// Balance 是人工录入的余额（迁移 0022）；BalanceUnknown(-1) 表示未知。
+	//
+	// 注意零值陷阱：Go 的零值是 0，而 0 在余额语义里表示"已知且已用尽"。
+	// 因此调用方【必须显式赋值】——没有余额信息时写 BalanceUnknown，切勿留 0，
+	// 否则新导入的凭据会被误判为"余额耗尽"而立即退出调度。
+	Balance int64
 }
 
 // IdentityHash 返回该凭据的去重标识。
@@ -439,6 +481,8 @@ func ParseCredentialList(raw, provider string) []CredentialInput {
 			AccountHint: label,
 			Label:       label,
 			Provider:    provider,
+			// OAuth 账号的余额是上游订阅额度，网关无法得知，统一按"未知"处理。
+			Balance: BalanceUnknown,
 		})
 	}
 	return inputs
@@ -458,6 +502,17 @@ type ChannelKeyRepository interface {
 	// labels 与 keys 一一对应（可为 nil，此时备注留空）。
 	// 返回 added（新增数）、removed（删除数）。
 	ReplaceAll(ctx context.Context, channelID uint64, keys, labels []string) (added, removed int, err error)
+
+	// ReplaceAllWithBalance 与 ReplaceAll 语义一致，额外为每把密钥录入余额。
+	//
+	// balances 与 keys 一一对应；为 nil 或长度不足时的对应项取 BalanceUnknown。
+	//
+	// 余额的更新规则（防误覆盖，务必保持）：
+	//   - 新增的密钥：写入本次提供的余额（未知则写 BalanceUnknown）；
+	//   - 已存在的密钥：默认保留其人工录入的余额——重新粘贴同一批密钥
+	//     不会把已知余额覆盖为"未知"；仅当本次【显式提供了已知余额（>=0）】
+	//     时才更新为本次的值。
+	ReplaceAllWithBalance(ctx context.Context, channelID uint64, keys, labels []string, balances []int64) (added, removed int, err error)
 
 	// ReplaceCredentials 用给定凭据集合整体替换某渠道的凭据池。
 	//
@@ -538,6 +593,12 @@ type ChannelKeyRepository interface {
 
 	// UpdateScheduling 更新凭据的调度参数（权重 / 优先级 / RPM 上限）。
 	UpdateScheduling(ctx context.Context, id uint64, weight, priority, rpmLimit int) error
+
+	// UpdateBalance 人工更新某把凭据的余额，并记录更新时间（balance_updated_at）。
+	//
+	// balance 取值：BalanceUnknown(-1) 表示置为"未知"；>=0 设为该值（0 即视为已用尽）。
+	// 余额是运营数据、不参与计费，只影响"是否还把这把凭据纳入调度"。
+	UpdateBalance(ctx context.Context, id uint64, balance int64) error
 }
 
 // ErrChannelKeyNotFound 表示密钥不存在。
@@ -590,6 +651,125 @@ func splitKeyAndLabel(line string) (key, label string) {
 		return strings.TrimSpace(line[:idx]), strings.TrimSpace(line[idx+1:])
 	}
 	return line, ""
+}
+
+// ParseKeyListWithBalance 解析"带余额标记"的批量密钥文本。
+//
+// 相比 ParseKeyList，它额外识别「余额标记行」，让站长可以把
+// "余额不同的一批密钥"按段粘贴，而无需在每把密钥上重复写余额。
+//
+// 支持的实际粘贴格式（这是本函数的核心易用性目标）：
+//
+//	49余额
+//	sk-aaaaaaaa
+//	62余额
+//	sk-bbbbbbbb
+//	55余额
+//	sk-cccccccc
+//	sk-dddddddd
+//
+// 规则：
+//  1. 单独一行若形如「<整数>余额」「余额<整数>」「余额: <整数>」「余额 <整数>」
+//     （允许前后空白与全角冒号「：」），则该行是"余额标记"，为【其后】的密钥
+//     设定余额；同一标记持续生效，直到遇到下一个标记。
+//  2. 其它非空、非注释行按 ParseKeyList 的规则解析（密钥 + 可选备注，
+//     备注用逗号 / 制表符 / 空白分隔）。
+//  3. 任何余额标记之前出现的密钥（没有任何标记生效）余额为 BalanceUnknown。
+//  4. 忽略空行与以 # 开头的注释行；重复密钥自动去重（保留首次出现的余额）。
+//
+// 返回 keys / labels / balances 三者一一对应。
+//
+// 关于"行内直接带余额"（形如 `sk-xxx 49`）的取舍——刻意【不支持】：
+//
+//	这种写法与"密钥 + 数字备注"（如 `sk-xxx 49` 表示第 49 号密钥）
+//	在文本上完全无法区分，任何猜测都可能把一条合法的数字备注误当成余额，
+//	从而静默改变已录数据的语义。既然①的余额标记写法已经足够清晰且无歧义，
+//	就让"对号入座"这件事交给更明确的标记形式，避免歧义。
+func ParseKeyListWithBalance(raw string) (keys []string, labels []string, balances []int64) {
+	seen := make(map[string]struct{})
+	// current 是当前生效的余额标记；初始为"未知"，即第一个标记之前的密钥不受约束。
+	current := BalanceUnknown
+
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// 余额标记行：只更新"其后密钥的余额"，本身不是密钥。
+		if value, ok := parseBalanceMarker(line); ok {
+			current = value
+			continue
+		}
+
+		key, label := splitKeyAndLabel(line)
+		if key == "" {
+			continue
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+		labels = append(labels, label)
+		balances = append(balances, current)
+	}
+	return keys, labels, balances
+}
+
+// parseBalanceMarker 判断一行文本是否为余额标记，并返回其中的余额。
+//
+// 接受四种写法（允许前后空白；"余额"与数字之间允许半角或全角冒号）：
+//
+//	49余额 / 余额49 / 余额: 49 / 余额 49
+//
+// 数字部分必须是纯数字（不允许正负号、小数、千分位），避免把密钥或备注误判为标记。
+func parseBalanceMarker(line string) (int64, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return 0, false
+	}
+
+	// 形式一：余额在前 —— 余额49 / 余额: 49 / 余额：49 / 余额 49
+	if rest, ok := strings.CutPrefix(trimmed, "余额"); ok {
+		rest = strings.TrimSpace(rest)
+		rest = strings.TrimLeft(rest, ":：")
+		rest = strings.TrimSpace(rest)
+		if value, ok := parseNonNegativeInt(rest); ok {
+			return value, true
+		}
+		return 0, false
+	}
+
+	// 形式二：余额在后 —— 49余额
+	if rest, ok := strings.CutSuffix(trimmed, "余额"); ok {
+		rest = strings.TrimSpace(rest)
+		if value, ok := parseNonNegativeInt(rest); ok {
+			return value, true
+		}
+	}
+
+	return 0, false
+}
+
+// parseNonNegativeInt 解析一个非负整数；含任何非数字字符即视为不成立。
+//
+// 之所以不用 strconv.Atoi 直接判断：Atoi 会接受 "+5" / "-3" 这类带符号写法，
+// 而余额标记里出现符号说明它更可能是别的东西（如密钥片段），应当让它走普通解析。
+func parseNonNegativeInt(s string) (int64, bool) {
+	if s == "" {
+		return 0, false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+	}
+	value, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
 }
 
 // PickKey 从可用密钥中挑一把（随机）。

@@ -173,6 +173,19 @@ type channelKeyDTO struct {
 	RPMLimit      int   `json:"rpm_limit"`
 	InFlight      int   `json:"in_flight"`
 	CooldownUntil int64 `json:"cooldown_until"`
+
+	// 余额维度字段（迁移 0022）。
+	//
+	// 安全约束：余额属于运营数据，只允许出现在管理员接口（本 DTO 仅在
+	// GET /api/admin/channels/:id/keys 使用），绝不可进入公开的模型广场或 /v1/**。
+	//   - balance：-1 表示未录入，>=0 为已知余额；
+	//   - balance_unknown / balance_exhausted 是给前端直接判定的派生布尔，
+	//     避免前端自己实现"-1 表示未知"的规则（规则只在领域层维护一处）；
+	//   - balance_updated_at：余额最近一次被人工更新的时间（Unix 秒，0=未录入）。
+	Balance          int64 `json:"balance"`
+	BalanceUnknown   bool  `json:"balance_unknown"`
+	BalanceExhausted bool  `json:"balance_exhausted"`
+	BalanceUpdatedAt int64 `json:"balance_updated_at"`
 }
 
 // toChannelKeyDTO 把凭据模型转为对外 DTO。
@@ -202,6 +215,11 @@ func toChannelKeyDTO(key *model.ChannelKey) channelKeyDTO {
 		RPMLimit:      key.RPMLimit,
 		InFlight:      key.InFlight,
 		CooldownUntil: unixOrZero(key.CooldownUntil),
+
+		Balance:          key.Balance,
+		BalanceUnknown:   key.Balance == model.BalanceUnknown,
+		BalanceExhausted: key.BalanceExhausted(),
+		BalanceUpdatedAt: unixOrZero(key.BalanceUpdatedAt),
 	}
 }
 

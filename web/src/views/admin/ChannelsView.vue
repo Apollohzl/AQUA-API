@@ -34,7 +34,6 @@ import {
   fetchKeyStrategies,
   fetchUpstreamModels,
   getChannel,
-  listChannelKeys,
   listChannels,
   listGroups,
   testChannel,
@@ -42,13 +41,17 @@ import {
   updateChannelKey,
 } from '@/api/admin'
 import {
+  listChannelKeysWithBalance,
+  updateChannelKeyBalance,
+  type ChannelKeyWithBalance,
+} from '@/api/channel'
+import {
   KEY_STATUS_AUTO_REMOVED,
   KEY_STATUS_DISABLED,
   KEY_STATUS_ENABLED,
   STATUS_DISABLED,
   STATUS_ENABLED,
   type Channel,
-  type ChannelKey,
   type ChannelPayload,
   type ChannelTestResult,
   type ChannelType,
@@ -90,24 +93,28 @@ const upstreamError = ref('')
 const keysDrawerOpen = ref(false)
 /** 当前查看密钥池的渠道 */
 const keysOfChannel = ref<Channel | null>(null)
-const channelKeys = ref<ChannelKey[]>([])
+const channelKeys = ref<ChannelKeyWithBalance[]>([])
 const keysLoading = ref(false)
 const keysError = ref('')
 /** 正在切换状态的密钥 id（避免重复点击） */
 const keyBusyId = ref<number | null>(null)
 /** 正在保存调度参数的密钥 id */
 const savingKeyId = ref<number | null>(null)
-/** 每把密钥的调度参数草稿（id → {weight, priority, rpm_limit}），支持内联编辑 */
+/** 正在保存余额的密钥 id */
+const savingBalanceId = ref<number | null>(null)
+/** 每把密钥的调度参数草稿（id → {weight, priority, rpm_limit, balance}），支持内联编辑 */
 const keyDrafts = ref<Record<number, KeySchedulingDraft>>({})
 /** 冷却剩余时间的参照时刻：每秒刷新，让"剩余 xx 分 xx 秒"实时递减 */
 const now = ref(Date.now())
 let clockTimer: number | undefined
 
-/** 单把凭据的可编辑调度参数 */
+/** 单把凭据的可编辑参数（调度参数 + 余额） */
 interface KeySchedulingDraft {
   weight: number
   priority: number
   rpm_limit: number
+  /** 余额草稿：-1 表示未录入（与后端 BalanceUnknown 一致） */
+  balance: number
 }
 
 /* ── 列表 ─────────────────────────────────────────────── */
@@ -501,7 +508,7 @@ async function loadChannelKeys(channelId: number): Promise<void> {
   keysLoading.value = true
   keysError.value = ''
   try {
-    const result = await listChannelKeys(channelId)
+    const result = await listChannelKeysWithBalance(channelId)
     channelKeys.value = result.items ?? []
     syncKeyDrafts(channelKeys.value)
   } catch (err) {
@@ -514,16 +521,21 @@ async function loadChannelKeys(channelId: number): Promise<void> {
 }
 
 /** 用最新读到的密钥数据重置草稿，避免上一次编辑残留在界面上 */
-function syncKeyDrafts(keys: ChannelKey[]): void {
+function syncKeyDrafts(keys: ChannelKeyWithBalance[]): void {
   const drafts: Record<number, KeySchedulingDraft> = {}
   for (const key of keys) {
-    drafts[key.id] = { weight: key.weight, priority: key.priority, rpm_limit: key.rpm_limit }
+    drafts[key.id] = {
+      weight: key.weight,
+      priority: key.priority,
+      rpm_limit: key.rpm_limit,
+      balance: key.balance,
+    }
   }
   keyDrafts.value = drafts
 }
 
 /** 保存某把密钥的调度参数（weight / priority / rpm_limit） */
-async function saveKeyScheduling(key: ChannelKey): Promise<void> {
+async function saveKeyScheduling(key: ChannelKeyWithBalance): Promise<void> {
   const draft = keyDrafts.value[key.id]
   if (!draft) return
   // 前端先做一次校验：避免把负数提交给后端再拿回一条错误
@@ -548,12 +560,38 @@ async function saveKeyScheduling(key: ChannelKey): Promise<void> {
 }
 
 /**
+ * 保存某把密钥的余额。
+ *
+ * 约定：-1 表示"未录入"（清空），>=0 为实际余额（0 表示已用尽，会自动退出调度）。
+ * 前端做一次下限校验，避免把 < -1 的值提交给后端。
+ */
+async function saveKeyBalance(key: ChannelKeyWithBalance): Promise<void> {
+  const draft = keyDrafts.value[key.id]
+  if (!draft) return
+  const balance = Number(draft.balance)
+  if (!Number.isFinite(balance) || balance < -1) {
+    toastError('余额不能小于 -1（-1 表示未录入）')
+    return
+  }
+  savingBalanceId.value = key.id
+  try {
+    await updateChannelKeyBalance(key.id, { balance })
+    toastSuccess('凭据余额已保存')
+    if (keysOfChannel.value) await loadChannelKeys(keysOfChannel.value.id)
+  } catch (err) {
+    toastError(err instanceof ApiError ? err.message : '保存余额失败')
+  } finally {
+    savingBalanceId.value = null
+  }
+}
+
+/**
  * 把冷却截止时间换算成"剩余多久"的文案。
  *
  * 后端下发的是 Unix 秒；`now` 每秒刷新，因此文案会实时递减。
  * 未冷却（0 或已到期）显示 "—"，避免用"0 秒"造成仍在冷却的误解。
  */
-function cooldownText(key: ChannelKey): string {
+function cooldownText(key: ChannelKeyWithBalance): string {
   if (!key.cooldown_until) return '—'
   const remainMs = key.cooldown_until * 1000 - now.value
   if (remainMs <= 0) return '—'
@@ -568,7 +606,7 @@ function cooldownText(key: ChannelKey): string {
 }
 
 /** 启用 / 禁用 / 恢复某把密钥 */
-async function setKeyStatus(key: ChannelKey, status: number): Promise<void> {
+async function setKeyStatus(key: ChannelKeyWithBalance, status: number): Promise<void> {
   keyBusyId.value = key.id
   try {
     await updateChannelKey(key.id, { status })
@@ -1109,6 +1147,21 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
             填了本项即启用池化轮询：请求会在池内轮换，某把失效会被自动摘除并换下一把。
             <span v-if="editing" class="text-amber-700">编辑时留空表示不修改现有密钥池。</span>
           </p>
+
+          <!-- 余额标记写法说明：上游密钥池“每把余额不同”时按段粘贴 -->
+          <div class="mt-2 rounded-lg border border-ink-800 bg-ink-950/60 p-2.5 text-xs text-ink-400">
+            <p class="mb-1.5">
+              若每把密钥余额不同，可先写一行「余额标记」再写该余额下的密钥；同一标记下的密钥共用该余额：
+            </p>
+            <pre class="input input-mono overflow-x-auto whitespace-pre leading-relaxed">49余额
+sk-xxxxxxxxxxxx
+62余额
+sk-yyyyyyyyyyyy</pre>
+            <p class="mt-1.5">
+              余额标记支持 <code>49余额</code> / <code>余额 49</code> / <code>余额: 49</code> 三种写法；
+              <strong>不写余额标记则为"未录入"</strong>（不限制调度）。余额耗尽的密钥会自动退出调度，补录后自动恢复。
+            </p>
+          </div>
           <p v-if="editing && editing.key_pool && editing.key_pool.total > 0" class="mt-1 text-xs text-ink-300">
             当前池：
             共 {{ editing.key_pool.total }} 把 ·
@@ -1284,6 +1337,7 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
                 <th>密钥</th>
                 <th>备注</th>
                 <th>状态</th>
+                <th>余额</th>
                 <th class="text-right">连续失败</th>
                 <th class="text-right">权重</th>
                 <th class="text-right">优先级</th>
@@ -1303,6 +1357,40 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
                     {{ key.status_text }}
                   </span>
                 </td>
+
+                <!-- 余额：可内联编辑，-1 表示未录入；耗尽的密钥会自动退出调度 -->
+                <td data-label="余额">
+                  <div class="flex flex-col gap-1">
+                    <div class="flex items-center gap-1.5">
+                      <input
+                        v-model.number="keyDrafts[key.id].balance"
+                        class="input w-24 px-2 py-1 text-right tabular-nums"
+                        type="number"
+                        title="-1 表示未录入；0 及以上为实际余额（0 视为已用尽）"
+                      />
+                      <button
+                        type="button"
+                        class="btn btn-row"
+                        title="保存余额"
+                        :disabled="savingBalanceId === key.id"
+                        @click="saveKeyBalance(key)"
+                      >
+                        <span
+                          v-if="savingBalanceId === key.id"
+                          class="mx-auto block h-3.5 w-3.5 animate-spin rounded-full border-2 border-ink-600 border-t-brand-400"
+                        />
+                        <AppIcon v-else name="check" :size="14" />
+                      </button>
+                    </div>
+                    <span v-if="key.balance_exhausted" class="badge badge-err">余额已耗尽</span>
+                    <span v-else-if="key.balance_unknown" class="text-xs text-ink-300">未录入</span>
+                    <span v-else class="text-xs text-ink-400">余额 {{ key.balance }}</span>
+                    <span class="text-xs text-ink-300">
+                      {{ key.balance_updated_at ? '更新于 ' + formatDateTime(key.balance_updated_at) : '未录入' }}
+                    </span>
+                  </div>
+                </td>
+
                 <td class="cell-num" data-label="连续失败">{{ key.fail_count }}</td>
 
                 <!-- 调度参数：可直接内联编辑，改完点右侧「保存调度参数」 -->

@@ -201,10 +201,18 @@ func (p *keyPicker) selectByStrategy(ctx context.Context, channelID uint64, stra
 
 // filterUsableKeys 过滤出当前可参与选择的凭据。
 //
-// 三类排除：
+// 四类排除：
 //   - 状态不是"启用"（手动禁用 / 已摘除）；
 //   - 处于冷却期（时间语义，到点自动恢复）；
-//   - 限速窗口内已用满（rpm_limit > 0 且当前窗口计数已达上限）。
+//   - 限速窗口内已用满（rpm_limit > 0 且当前窗口计数已达上限）；
+//   - 余额已知且已耗尽（BalanceExhausted）。
+//
+// 关于"余额耗尽"为什么不算失败、也不改状态：
+//
+//	余额是站长人工维护的运营数据，耗尽只说明"这把凭据暂时没额度了"，
+//	而不是凭据本身失效。因此这里只把它排除在本轮选择之外，
+//	既不记失败计数也不改 status——站长把余额补录成正数后，
+//	它会在下一次选择时自然重新参与，无需任何额外的人工恢复动作。
 func filterUsableKeys(keys []*model.ChannelKey, now time.Time) []*model.ChannelKey {
 	usable := make([]*model.ChannelKey, 0, len(keys))
 	for _, k := range keys {
@@ -215,6 +223,9 @@ func filterUsableKeys(keys []*model.ChannelKey, now time.Time) []*model.ChannelK
 			continue
 		}
 		if rpmExhausted(k, now) {
+			continue
+		}
+		if k.BalanceExhausted() {
 			continue
 		}
 		usable = append(usable, k)

@@ -19,6 +19,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -498,5 +499,134 @@ func TestChannelKey_轮询游标与策略_持久化(t *testing.T) {
 	strategy, cursor, err = repo.ChannelKeyStrategy(ctx, 999)
 	if err != nil || strategy != model.DefaultKeyStrategy() || cursor != 0 {
 		t.Fatalf("渠道不存在时应返回默认策略: strategy=%s cursor=%d err=%v", strategy, cursor, err)
+	}
+}
+
+// TestChannelKey_ReplaceAllWithBalance_录入与不足补未知 验证余额随导入落库，
+// 以及 balances 比 keys 短时缺失项取"未知"。
+func TestChannelKey_ReplaceAllWithBalance_录入与不足补未知(t *testing.T) {
+	repo, _ := newTestKeyRepo(t)
+	ctx := context.Background()
+
+	keys := []string{"k-1", "k-2", "k-3"}
+	// balances 故意比 keys 短：第三把应落为"未知"
+	if _, _, err := repo.ReplaceAllWithBalance(ctx, 1, keys, nil, []int64{10, 0}); err != nil {
+		t.Fatalf("导入失败: %v", err)
+	}
+
+	byKey := map[string]*model.ChannelKey{}
+	got, err := repo.ListByChannel(ctx, 1)
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	for _, k := range got {
+		byKey[k.Key] = k
+	}
+
+	if byKey["k-1"].Balance != 10 {
+		t.Fatalf("k-1 余额应为 10，实际 %d", byKey["k-1"].Balance)
+	}
+	if !byKey["k-2"].BalanceExhausted() {
+		t.Fatalf("k-2 余额为 0，应判定为已耗尽，实际 %d", byKey["k-2"].Balance)
+	}
+	if byKey["k-3"].Balance != model.BalanceUnknown {
+		t.Fatalf("k-3 未提供余额，应为未知(%d)，实际 %d", model.BalanceUnknown, byKey["k-3"].Balance)
+	}
+	// 已知余额应记录更新时间；未知的保持零值
+	if byKey["k-1"].BalanceUpdatedAt.IsZero() {
+		t.Fatal("已知余额应记录更新时间")
+	}
+	if !byKey["k-3"].BalanceUpdatedAt.IsZero() {
+		t.Fatal("未知余额不应记录更新时间")
+	}
+}
+
+// TestChannelKey_重贴密钥_不覆盖已录余额 是本任务最关键的不变量：
+// ReplaceAll 系列是"差集增删 + 保留已有统计"语义，重新粘贴同一批密钥时
+// 绝不能把人工录入的余额覆盖为"未知"。
+func TestChannelKey_重贴密钥_不覆盖已录余额(t *testing.T) {
+	repo, _ := newTestKeyRepo(t)
+	ctx := context.Background()
+
+	if _, _, err := repo.ReplaceAllWithBalance(ctx, 1, []string{"keep-me"}, nil, nil); err != nil {
+		t.Fatalf("首次导入失败: %v", err)
+	}
+	keys, err := repo.ListByChannel(ctx, 1)
+	if err != nil || len(keys) != 1 {
+		t.Fatalf("读取密钥失败: %v", err)
+	}
+	id := keys[0].ID
+	if keys[0].Balance != model.BalanceUnknown {
+		t.Fatalf("未提供余额应为未知(%d)，实际 %d", model.BalanceUnknown, keys[0].Balance)
+	}
+
+	// 人工录入余额 50
+	if err := repo.UpdateBalance(ctx, id, 50); err != nil {
+		t.Fatalf("更新余额失败: %v", err)
+	}
+	got, _ := repo.ListByChannel(ctx, 1)
+	if got[0].Balance != 50 {
+		t.Fatalf("余额应为 50，实际 %d", got[0].Balance)
+	}
+	if got[0].BalanceUpdatedAt.IsZero() {
+		t.Fatal("更新余额应记录更新时间")
+	}
+
+	// 重贴同一批密钥且未提供余额 → 已录余额必须保留
+	if _, _, err := repo.ReplaceAllWithBalance(ctx, 1, []string{"keep-me"}, nil, nil); err != nil {
+		t.Fatalf("重贴失败: %v", err)
+	}
+	got, _ = repo.ListByChannel(ctx, 1)
+	if got[0].Balance != 50 {
+		t.Fatalf("重贴未提供余额时不应覆盖已录余额，期望 50，实际 %d", got[0].Balance)
+	}
+
+	// 走旧入口 ReplaceAll 重贴 → 同样不能把余额重置为未知
+	if _, _, err := repo.ReplaceAll(ctx, 1, []string{"keep-me"}, nil); err != nil {
+		t.Fatalf("ReplaceAll 重贴失败: %v", err)
+	}
+	got, _ = repo.ListByChannel(ctx, 1)
+	if got[0].Balance != 50 {
+		t.Fatalf("ReplaceAll 重贴不应把余额重置，期望 50，实际 %d", got[0].Balance)
+	}
+
+	// 本次显式提供已知余额 → 允许更新
+	if _, _, err := repo.ReplaceAllWithBalance(ctx, 1, []string{"keep-me"}, nil, []int64{70}); err != nil {
+		t.Fatalf("显式更新余额失败: %v", err)
+	}
+	got, _ = repo.ListByChannel(ctx, 1)
+	if got[0].Balance != 70 {
+		t.Fatalf("显式提供余额时应更新为 70，实际 %d", got[0].Balance)
+	}
+}
+
+// TestChannelKey_UpdateBalance_边界与不存在 验证余额的取值边界与"找不到"语义。
+func TestChannelKey_UpdateBalance_边界与不存在(t *testing.T) {
+	repo, _ := newTestKeyRepo(t)
+	ctx := context.Background()
+
+	if _, _, err := repo.ReplaceAll(ctx, 1, []string{"b1"}, nil); err != nil {
+		t.Fatalf("导入失败: %v", err)
+	}
+	keys, _ := repo.ListByChannel(ctx, 1)
+	id := keys[0].ID
+
+	// 非法值（小于 -1）应被拒绝
+	if err := repo.UpdateBalance(ctx, id, model.BalanceUnknown-1); err == nil {
+		t.Fatal("余额小于 -1 应被拒绝")
+	}
+
+	// 置为未知：既不耗尽，也不带更新时间语义上的"已知"
+	if err := repo.UpdateBalance(ctx, id, model.BalanceUnknown); err != nil {
+		t.Fatalf("置为未知失败: %v", err)
+	}
+	got, _ := repo.ListByChannel(ctx, 1)
+	if got[0].Balance != model.BalanceUnknown || got[0].BalanceExhausted() {
+		t.Fatalf("置为未知后应为未知且不耗尽: %+v", got[0])
+	}
+
+	// 更新不存在的凭据 → 返回 not found
+	if err := repo.UpdateBalance(ctx, 999999, 10); !errors.Is(err, model.ErrChannelKeyNotFound) {
+		t.Fatalf("更新不存在的凭据应返回 ErrChannelKeyNotFound，实际 %v", err)
 	}
 }

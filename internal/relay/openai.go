@@ -359,10 +359,20 @@ func (r *Relay) resolveChatKey(ctx context.Context, ch *model.Channel, used map[
 					return "", 0, 0, false, false
 				}
 
-				// 策略选择：过滤（状态/冷却/限速）+ 五策略择优 + 会话粘性。
-				picked, err := r.SelectKey(ctx, ch, available, sessionHash)
+				// 先按"当前是否可用"过滤（状态/冷却/限速/余额耗尽），再交给策略挑选。
+				//
+				// 为什么要在这里提前过滤而不是只靠 SelectKey：下面的 hasSpareKey
+				// 直接由本切片的长度推断，若不过滤，一批"余额已耗尽"的凭据会
+				// 让 hasSpareKey 误判为 true，进而触发无意义的密钥级重试。
+				usable := filterUsableKeys(available, time.Now())
+				if len(usable) == 0 {
+					// 过滤后无可用凭据（全部冷却/限速/禁用/余额耗尽）：让上层换渠道
+					return "", 0, 0, false, false
+				}
+
+				// 策略选择：五策略择优 + 会话粘性（内部会再做一次幂等的可用性过滤）。
+				picked, err := r.SelectKey(ctx, ch, usable, sessionHash)
 				if err != nil {
-					// 过滤后无可用凭据（全部冷却/限速/禁用）：让上层换渠道
 					return "", 0, 0, false, false
 				}
 
@@ -395,7 +405,7 @@ func (r *Relay) resolveChatKey(ctx context.Context, ch *model.Channel, used map[
 				if picked.RPMLimit > 0 {
 					_ = r.keys.RecordRequest(ctx, picked.ID, now, rpmWindow)
 				}
-				return value, picked.ID, picked.FailCount, true, len(available) > 1
+				return value, picked.ID, picked.FailCount, true, len(usable) > 1
 			}
 			return "", 0, 0, false, false
 		}
