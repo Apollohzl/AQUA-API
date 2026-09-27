@@ -1835,6 +1835,11 @@ func (s *Server) handleGetSettings(c *gin.Context) {
 			"checkin_enabled":     settings.Referral.CheckinEnabled,
 			"checkin_daily_quota": settings.Referral.CheckinDailyQuota,
 		},
+
+		// 内容安全参数（敏感词过滤）：开关在此，词表在 /api/admin/sensitive-words。
+		"safeguard": gin.H{
+			"sensitive_filter_enabled": settings.Safeguard.SensitiveFilterEnabled,
+		},
 	})
 }
 
@@ -2018,6 +2023,26 @@ type settingsUpdateRequest struct {
 
 	// 邀请返利 / 每日签到参数（逐项覆盖，见 mergeReferralSettings）
 	Referral *referralSettingsDTO `json:"referral"`
+
+	// 内容安全参数（逐项覆盖，见 mergeSafeguardSettings）
+	Safeguard *safeguardSettingsDTO `json:"safeguard"`
+}
+
+// safeguardSettingsDTO 是内容安全（合规过滤）设置的可写入参。
+//
+// 字段用指针：未提交的项保持原值，避免前端只改一项却把其他项清空。
+type safeguardSettingsDTO struct {
+	SensitiveFilterEnabled *bool `json:"sensitive_filter_enabled"`
+}
+
+// mergeSafeguardSettings 把提交的内容安全参数并入当前设置。
+func mergeSafeguardSettings(target *model.SafeguardSettings, req *safeguardSettingsDTO) {
+	if target == nil || req == nil {
+		return
+	}
+	if req.SensitiveFilterEnabled != nil {
+		target.SensitiveFilterEnabled = *req.SensitiveFilterEnabled
+	}
 }
 
 // referralSettingsDTO 是邀请返利 / 签到设置的可写入参。
@@ -2118,10 +2143,19 @@ func (s *Server) handleUpdateSettings(c *gin.Context) {
 			return
 		}
 	}
+	if req.Safeguard != nil {
+		mergeSafeguardSettings(&current.Safeguard, req.Safeguard)
+	}
 
 	if err := s.deps.Settings.SetMany(ctx, current.ToMap()); err != nil {
 		s.respondInternalError(c, "保存系统设置失败")
 		return
+	}
+
+	// 敏感词过滤开关可能刚被改动：主动失效缓存，让新状态对下一个请求立即生效，
+	// 而不是等 30 秒 TTL 到期（否则管理员会以为"开了没效果"）。
+	if s.sensitiveFilter != nil {
+		s.sensitiveFilter.Invalidate()
 	}
 
 	// 清空 sitemap 缓存：否则站长改完域名/路径要等到第二天才生效（日期键才失效）。

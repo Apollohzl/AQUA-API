@@ -161,6 +161,18 @@ const (
 	// SettingKeyCheckinDailyQuota 每次签到发放的额度，默认 0（0 表示签到不发放额度，
 	// 仅记录连续天数）。若要"签到得额度"，站长需同时把本项设为正数。
 	SettingKeyCheckinDailyQuota = "checkin_daily_quota"
+
+	// ── 内容安全（敏感词过滤）────────────────────────────────────
+	//
+	// 默认【关闭】：开启后会对 /v1 的请求正文做关键词扫描，命中即拒绝。
+	// 之所以默认关闭，是因为"拦截"会直接改变用户可用性——
+	// 升级到新版本就悄悄开始拦请求，属于最糟的一种惊喜；
+	// 由站长在后台显式开启，并自行填充词表。
+
+	// SettingKeySensitiveFilterEnabled 敏感词过滤总开关（"true" / "false"）。
+	//
+	// 关闭时中间件直接放行，连词表都不加载，不产生任何额外开销。
+	SettingKeySensitiveFilterEnabled = "sensitive_filter_enabled"
 )
 
 // SiteSettings 是站点设置的强类型视图。
@@ -185,6 +197,21 @@ type SiteSettings struct {
 
 	// Referral 是邀请返利与每日签到的运营参数（关闭时不影响任何既有功能）。
 	Referral ReferralSettings
+
+	// Safeguard 是内容安全相关的运营参数（敏感词过滤等）。
+	Safeguard SafeguardSettings
+}
+
+// SafeguardSettings 是内容安全（合规过滤）的运营参数。
+//
+// 单独成块的原因：内容安全日后还会扩展（输出侧过滤、按分组启用、白名单用户等），
+// 聚在一起可让新增子项时的键名前缀与后台渲染区块都保持清晰。
+type SafeguardSettings struct {
+	// SensitiveFilterEnabled 是敏感词过滤总开关。
+	//
+	// 关闭时 /v1 入口中间件直接放行且不加载词表；开启后命中词条即拒绝请求。
+	// 默认 false：拦截会直接改变用户可用性，必须由站长显式开启。
+	SensitiveFilterEnabled bool
 }
 
 // ReferralSettings 是邀请返利 / 每日签到的运营参数。
@@ -416,6 +443,13 @@ func DefaultSiteSettings() SiteSettings {
 			CheckinEnabled:    false,
 			CheckinDailyQuota: 0,
 		},
+		// 内容安全默认值：敏感词过滤关闭。
+		//
+		// 为什么默认关闭：开启即"命中就拒绝请求"，属于直接影响用户可用性的行为；
+		// 新装/升级的站点应当在站长知情并准备好词表之后再启用。
+		Safeguard: SafeguardSettings{
+			SensitiveFilterEnabled: false,
+		},
 	}
 }
 
@@ -459,6 +493,8 @@ func (s SiteSettings) ToMap() map[string]string {
 		SettingKeyReferralRechargeRatio: strconv.Itoa(s.Referral.RechargeRatio),
 		SettingKeyCheckinEnabled:        strconv.FormatBool(s.Referral.CheckinEnabled),
 		SettingKeyCheckinDailyQuota:     strconv.FormatInt(s.Referral.CheckinDailyQuota, 10),
+
+		SettingKeySensitiveFilterEnabled: strconv.FormatBool(s.Safeguard.SensitiveFilterEnabled),
 	}
 }
 
@@ -502,8 +538,21 @@ func LoadSiteSettings(ctx context.Context, repo SettingRepository) (SiteSettings
 	loadPaymentSettings(&settings.Payment, values)
 	loadSEOSettings(&settings.SEO, values)
 	loadReferralSettings(&settings.Referral, values)
+	loadSafeguardSettings(&settings.Safeguard, values)
 
 	return settings, nil
+}
+
+// loadSafeguardSettings 把 KV 中的内容安全参数合并进强类型结构。
+//
+// 与其余 load* 一致：只在"存在且解析成功"时覆盖，脏值一律回退默认（关闭），
+// 避免一个被手工写坏的值反而把过滤打开（那会突然开始拦请求）。
+func loadSafeguardSettings(target *SafeguardSettings, values map[string]string) {
+	if v, ok := values[SettingKeySensitiveFilterEnabled]; ok {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			target.SensitiveFilterEnabled = parsed
+		}
+	}
 }
 
 // loadReferralSettings 把 KV 中的邀请/签到参数合并进强类型结构。

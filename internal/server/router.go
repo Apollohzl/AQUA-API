@@ -190,6 +190,14 @@ func (s *Server) registerRoutes() {
 	// 费用试算：给定模型与 token 数，返回应扣额度
 	admin.GET("/prices/quote", s.handleQuotePreview)
 
+	// 敏感词过滤：词表维护（总开关在系统设置里）
+	admin.GET("/sensitive-words", s.handleListSensitiveWords)
+	admin.POST("/sensitive-words", s.handleCreateSensitiveWord)
+	// 批量导入放在单条新增之后注册：路径更长更具体，语义上属于"新增"的变体
+	admin.POST("/sensitive-words/import", s.handleImportSensitiveWords)
+	admin.PUT("/sensitive-words/:id", s.handleUpdateSensitiveWord)
+	admin.DELETE("/sensitive-words/:id", s.handleDeleteSensitiveWord)
+
 	// 模型分组（分组本身是实体，可配置计费倍率）
 	admin.GET("/groups", s.handleListGroups)
 	admin.POST("/groups", s.handleCreateGroup)
@@ -271,6 +279,11 @@ func (s *Server) registerRoutes() {
 	// 第三个参数（计费组件）用于"请求前额度预扣"：额度不足直接 429，
 	// 避免并发请求全部通过检查后再各自扣费导致超支。
 	v1.Use(middleware.TokenAuth(s.deps.Tokens, s.deps.Users, s.deps.Billing))
+	// 内容合规过滤：在【鉴权之后、转发之前】扫描请求正文，命中敏感词即拒绝。
+	//
+	// 放在鉴权之后的原因：过滤本身要读完整请求体，未鉴权的请求没必要为其付出这个成本；
+	// 放在转发之前则是为了"命中的请求根本不产生上游成本"。
+	v1.Use(s.sensitiveFilter.Middleware())
 	// OpenAI 兼容的模型清单：客户端（SDK / IDE 插件 / Web UI）启动时普遍会先调它，
 	// 缺了会显示"未获取到模型列表"，使用者容易误判为网关故障。
 	v1.GET("/models", s.handleListModels)
@@ -302,5 +315,7 @@ func (s *Server) registerRoutes() {
 	// 因此用通配段承接，由适配器自行解析路径。
 	gemini := r.Group("/v1beta")
 	gemini.Use(middleware.TokenAuth(s.deps.Tokens, s.deps.Users, s.deps.Billing))
+	// Gemini 原生协议同样受内容合规过滤约束（同一个组件，同一份词表）。
+	gemini.Use(s.sensitiveFilter.Middleware())
 	gemini.POST("/models/*action", gin.WrapF(s.deps.Relay.ServeGeminiGenerate))
 }

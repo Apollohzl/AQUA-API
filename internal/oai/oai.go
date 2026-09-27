@@ -72,6 +72,11 @@ const (
 	TypePermission     = "permission_error"      // 已认证但无权访问
 	TypeRateLimit      = "rate_limit_error"      // 触发限流或额度不足
 	TypeServer         = "server_error"          // 服务端问题
+	// TypeContentFilter 表示内容被安全策略拒绝。
+	//
+	// 沿用 OpenAI / Anthropic 的通用叫法（content_filter）：现成的客户端与 SDK
+	// 已经认识这个类型，能给出比"unknown error"更有意义的提示。
+	TypeContentFilter = "content_filter"
 )
 
 // 错误码（对应 OpenAI 错误体中的 error.code，供客户端程序化判断）。
@@ -88,6 +93,8 @@ const (
 	CodeNoAvailableChannel    = "no_available_channel"    // 无可用上游渠道
 	CodeUpstreamRequestFailed = "upstream_request_failed" // 上游请求失败
 	CodeInternal              = "internal_error"          // 网关内部错误
+	// CodeSensitiveWordBlocked 表示请求内容命中站点配置的敏感词黑名单。
+	CodeSensitiveWordBlocked = "sensitive_word_blocked"
 )
 
 // 本包对外暴露的哨兵错误，供调用方用 errors.Is 精确判断。

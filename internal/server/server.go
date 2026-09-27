@@ -98,6 +98,11 @@ type Deps struct {
 	// Referrals 是邀请返利与签到仓储（邀请码、邀请关系、奖励台账、签到记录）。
 	Referrals model.ReferralRepository
 
+	// SensitiveWords 是敏感词表仓储（内容合规过滤的词条来源；中间件自行编译并缓存）。
+	//
+	// 为 nil 时过滤中间件退化为直接放行（见 middleware.SensitiveFilter）。
+	SensitiveWords model.SensitiveWordRepository
+
 	// EmailCodes 是注册邮箱验证码仓储（由 main 注入；验证码相关接口依赖它）。
 	EmailCodes model.EmailCodeRepository
 	// Mailer 是出站邮件发送器；未配置时验证码接口会返回明确的"邮件服务未配置"提示，
@@ -133,6 +138,12 @@ type Server struct {
 	// 不限流时攻击者可用少量并发请求打满 CPU（生产实例仅 2 核且与转发共享）。
 	loginLimiter *middleware.RateLimiter
 
+	// sensitiveFilter 是 /v1 入口的内容合规过滤器（敏感词）。
+	//
+	// 与登录限流器一样属于"进程内状态"：它缓存编译好的词表匹配器；
+	// 后台改词表后调用 Invalidate 让新词立即生效（见 handler_sensitive.go）。
+	sensitiveFilter *middleware.SensitiveFilter
+
 	// sitemapMu 保护 sitemapCache（见 seo.go）。
 	// sitemap.xml 是"读多写少"的端点，用互斥锁而非原子指针，保持实现直观。
 	sitemapMu sync.Mutex
@@ -162,6 +173,8 @@ func New(deps Deps) *Server {
 		// 每个来源 IP 每 5 分钟最多 20 次登录/注册尝试：
 		// 正常使用者远达不到该频率，而爆破攻击会被有效拖慢。
 		loginLimiter: middleware.NewRateLimiter(20, 5*time.Minute),
+		// 内容合规过滤器：词表编译结果在组件内缓存，改词后由后台主动失效。
+		sensitiveFilter: middleware.NewSensitiveFilter(deps.SensitiveWords, deps.Settings),
 	}
 	s.registerRoutes()
 
