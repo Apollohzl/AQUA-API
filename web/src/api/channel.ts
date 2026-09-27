@@ -94,6 +94,9 @@ export interface UpdateChannelKeyBalancePayload {
   weight?: number
   priority?: number
   rpm_limit?: number
+  /** 路由分叉（迁移 0038）：可服务的分组与模型；空数组 = 不限。两项需同时提供 */
+  groups?: string[]
+  models?: string[]
 }
 
 /**

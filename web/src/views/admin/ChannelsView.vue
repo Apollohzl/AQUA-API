@@ -360,13 +360,23 @@ const keyDrafts = ref<Record<number, KeySchedulingDraft>>({})
 const now = ref(Date.now())
 let clockTimer: number | undefined
 
-/** 单把凭据的可编辑参数（调度参数 + 余额） */
+/** 单把凭据的可编辑参数（调度参数 + 余额 + 路由分叉） */
 interface KeySchedulingDraft {
   weight: number
   priority: number
   rpm_limit: number
   /** 余额草稿：-1 表示未录入（与后端 BalanceUnknown 一致） */
   balance: number
+  /**
+   * 可服务分组草稿（文本形态，逗号或空格分隔）。
+   *
+   * 留空 = 不限分组（继承渠道级路由）。用文本而不是多选控件：
+   * 分组名可由运营方自定义，且一个渠道通常只涉及少数几个分组，
+   * 手写比先拉分组清单再勾选更直接。
+   */
+  groupsText: string
+  /** 可服务模型草稿（文本形态，支持尾部通配符 *）；留空 = 不限模型 */
+  modelsText: string
 }
 
 /* ── 列表 ─────────────────────────────────────────────── */
@@ -1171,12 +1181,20 @@ function syncKeyDrafts(keys: ChannelKeyWithBalance[]): void {
       priority: key.priority,
       rpm_limit: key.rpm_limit,
       balance: key.balance,
+      groupsText: joinModelList(key.groups),
+      modelsText: joinModelList(key.models),
     }
   }
   keyDrafts.value = drafts
 }
 
-/** 保存某把密钥的调度参数（weight / priority / rpm_limit） */
+/**
+ * 保存某把凭据的调度参数与路由分叉（weight / priority / rpm_limit / groups / models）。
+ *
+ * 为什么把分叉与调度参数放在同一个保存动作里：它们都是"这把凭据怎么被选中"的配置，
+ * 分成两个按钮只会让站长多点一次、且容易只改一半；后端也支持一次请求提交全部字段。
+ * 注意分叉两项必须同时提交（后端整组覆盖，缺项会被误写成"不限"）。
+ */
 async function saveKeyScheduling(key: ChannelKeyWithBalance): Promise<void> {
   const draft = keyDrafts.value[key.id]
   if (!draft) return
@@ -1185,17 +1203,26 @@ async function saveKeyScheduling(key: ChannelKeyWithBalance): Promise<void> {
     toastError('权重 / 优先级 / 每分钟上限不能为负数')
     return
   }
+  const groups = parseModelList(draft.groupsText)
+  const models = parseModelList(draft.modelsText)
+  // 模型名含空白时后端会 400；这里提前拦住并给出更具体的提示（多半是误用了中文逗号之外的空白）
+  if (models.some((name) => /\s/.test(name))) {
+    toastError('模型名不能包含空白字符（多个模型请用逗号分隔）')
+    return
+  }
   savingKeyId.value = key.id
   try {
     await updateChannelKey(key.id, {
       weight: Number(draft.weight) || 0,
       priority: Number(draft.priority) || 0,
       rpm_limit: Number(draft.rpm_limit) || 0,
+      groups,
+      models,
     })
-    toastSuccess('凭据调度参数已保存')
+    toastSuccess('凭据配置已保存')
     if (keysOfChannel.value) await loadChannelKeys(keysOfChannel.value.id)
   } catch (err) {
-    toastError(err instanceof ApiError ? err.message : '保存调度参数失败')
+    toastError(err instanceof ApiError ? err.message : '保存凭据配置失败')
   } finally {
     savingKeyId.value = null
   }
@@ -2500,6 +2527,12 @@ sk-yyyyyyyyyyyy</pre>
           </button>
         </div>
 
+        <p class="text-xs leading-relaxed text-ink-400">
+          「可服务分组 / 可服务模型」留空表示<strong>不限</strong>（跟随渠道配置）；
+          填了就只在这些范围内被选中——同一上游里"能调 A 模型的账号"与"能调 B 模型的账号"
+          因此可以挂在同一个渠道下，各自分流。改完点右侧对勾保存。
+        </p>
+
         <div class="table-wrap table-cards">
           <table class="data-table">
             <thead>
@@ -2513,6 +2546,8 @@ sk-yyyyyyyyyyyy</pre>
                 <th class="text-right">权重</th>
                 <th class="text-right">优先级</th>
                 <th class="text-right">每分钟上限</th>
+                <th>可服务分组</th>
+                <th>可服务模型</th>
                 <th class="text-right">在途</th>
                 <th>冷却</th>
                 <th>最近使用</th>
@@ -2662,6 +2697,29 @@ sk-yyyyyyyyyyyy</pre>
                   />
                 </td>
 
+                <!--
+                  路由分叉（迁移 0038）：这把凭据服务哪些分组与模型。
+                  留空 = 不限（继承渠道级路由），因此不填不会改变任何既有行为。
+                -->
+                <td data-label="可服务分组">
+                  <input
+                    v-model="keyDrafts[key.id].groupsText"
+                    class="input input-mono w-40 px-2 py-1"
+                    type="text"
+                    placeholder="不限"
+                    title="留空 = 不限分组；多个分组用逗号分隔"
+                  />
+                </td>
+                <td data-label="可服务模型">
+                  <input
+                    v-model="keyDrafts[key.id].modelsText"
+                    class="input input-mono w-44 px-2 py-1"
+                    type="text"
+                    placeholder="不限"
+                    title="留空 = 不限模型；支持尾部通配符 *（如 gpt-4*），多个用逗号分隔"
+                  />
+                </td>
+
                 <!-- 运行态：只读展示，供判断当前是否可用 -->
                 <td class="cell-num" data-label="在途">{{ key.in_flight }}</td>
                 <td class="cell-muted whitespace-nowrap" data-label="冷却" :title="key.last_error || undefined">
@@ -2675,7 +2733,7 @@ sk-yyyyyyyyyyyy</pre>
                   <button
                     type="button"
                     class="btn btn-row"
-                    title="保存调度参数"
+                    title="保存该凭据的调度参数与可服务范围"
                     :disabled="savingKeyId === key.id"
                     @click="saveKeyScheduling(key)"
                   >

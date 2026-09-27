@@ -520,6 +520,14 @@ export interface ChannelKey {
   quota_known: boolean
   /** 额度是否已用满（后端已考虑"重置时间已过视为已恢复"） */
   quota_exhausted: boolean
+  /**
+   * 路由分叉（迁移 0038）：本凭据可服务的分组与模型。
+   *
+   * 空数组 = 不限（继承渠道级路由），这是默认值；
+   * models 支持尾部通配符 *（如 "gpt-4*"）。
+   */
+  groups: string[]
+  models: string[]
 }
 
 /** POST /api/admin/channels/{id}/keys/{keyId}/quota 响应 */
@@ -548,6 +556,14 @@ export interface UpdateChannelKeyPayload {
   weight?: number
   priority?: number
   rpm_limit?: number
+  /**
+   * 路由分叉（迁移 0038）：本凭据可服务的分组与模型。
+   *
+   * 两项必须同时提供（后端整组覆盖，缺项会被误写成"不限"）。
+   * 空数组 = 不限，即继承渠道级路由。
+   */
+  groups?: string[]
+  models?: string[]
 }
 
 /** 一种凭据调度策略（GET /api/admin/key-strategies 的 items 项） */
