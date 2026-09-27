@@ -227,6 +227,12 @@ type channelKeyDTO struct {
 	QuotaCheckedAt   int64  `json:"quota_checked_at"`
 	QuotaKnown       bool   `json:"quota_known"`
 	QuotaExhausted   bool   `json:"quota_exhausted"`
+
+	// 路由分叉（迁移 0038）：本凭据可服务的分组与模型。
+	//
+	// 恒为非 nil 空数组（空 = 不限，即继承渠道级路由），前端直接读取即可。
+	Groups []string `json:"groups"`
+	Models []string `json:"models"`
 }
 
 // toChannelKeyDTO 把凭据模型转为对外 DTO。
@@ -276,7 +282,22 @@ func toChannelKeyDTO(key *model.ChannelKey, reveal bool) channelKeyDTO {
 		QuotaCheckedAt:   unixOrZero(key.QuotaCheckedAt),
 		QuotaKnown:       key.QuotaKnown(),
 		QuotaExhausted:   key.QuotaExhausted(time.Now()),
+
+		// 路由分叉：恒以非 nil 数组下发（空数组 = 不限），前端不必判空。
+		Groups: retryRulesStringsOrEmpty(key.Groups),
+		Models: retryRulesStringsOrEmpty(key.Models),
 	}
+}
+
+// retryRulesStringsOrEmpty 保证字符串清单以非 nil 形式下发。
+//
+// 与 retryRulesOrEmpty 同样的取舍：让前端直接读取即可，
+// 不必为"字段可能是 null"写额外的兜底分支。
+func retryRulesStringsOrEmpty(values []string) []string {
+	if values == nil {
+		return make([]string, 0)
+	}
+	return values
 }
 
 // toChannelKeyDTOList 批量转换密钥；reveal 为真时一并填充原文。

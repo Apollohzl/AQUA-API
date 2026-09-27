@@ -295,7 +295,8 @@ retryLoop:
 			break
 		}
 
-		cred, ok, hasSpareKey := r.resolveChatCredential(keyCtx, ch, usedKeys)
+		cred, ok, hasSpareKey := r.resolveChatCredential(keyCtx, ch, usedKeys,
+			credentialScope{Group: group, Model: modelName})
 		if !ok {
 			// 该渠道当前没有可用凭据（池内全部被禁用、冷却中、限速用满或额度用尽）：
 			// 直接放弃这个渠道，避免白白消耗一次尝试预算。
@@ -395,8 +396,8 @@ retryLoop:
 //
 // 容错：凭据池查询失败时不阻断转发，而是退回单密钥——
 // 统计能力不应该成为转发链路上的单点故障。
-func (r *Relay) resolveChatKey(ctx context.Context, ch *model.Channel, used map[uint64]struct{}) (string, uint64, int, bool, bool) {
-	cred, ok, hasSpare := r.resolveChatCredential(ctx, ch, used)
+func (r *Relay) resolveChatKey(ctx context.Context, ch *model.Channel, used map[uint64]struct{}, scope credentialScope) (string, uint64, int, bool, bool) {
+	cred, ok, hasSpare := r.resolveChatCredential(ctx, ch, used, scope)
 	return cred.Value, cred.KeyID, cred.FailCount, ok, hasSpare
 }
 
@@ -416,7 +417,10 @@ type resolvedCredential struct {
 }
 
 // resolveChatCredential 与 resolveChatKey 同源，额外回传账号级元数据。
-func (r *Relay) resolveChatCredential(ctx context.Context, ch *model.Channel, used map[uint64]struct{}) (resolvedCredential, bool, bool) {
+//
+// 参数 scope 携带本次请求的分组与模型：凭据可声明"只服务某些分组 / 某些模型"
+// （迁移 0038），因此挑凭据前必须按它过滤（见 filterUsableKeysForRequest）。
+func (r *Relay) resolveChatCredential(ctx context.Context, ch *model.Channel, used map[uint64]struct{}, scope credentialScope) (resolvedCredential, bool, bool) {
 	if r.keys != nil {
 		if pool, err := r.keys.ListUsable(ctx, ch.ID); err == nil && len(pool) > 0 {
 			sessionHash := credentialSessionFrom(ctx)
@@ -434,14 +438,16 @@ func (r *Relay) resolveChatCredential(ctx context.Context, ch *model.Channel, us
 					return resolvedCredential{}, false, false
 				}
 
-				// 先按"当前是否可用"过滤（状态/冷却/限速/余额/额度窗口），再交给策略挑选。
+				// 先按"当前是否可用"过滤（状态/冷却/限速/余额/额度窗口），再按本次请求的
+				// 分组与模型过滤（凭据可声明只服务某些分组/模型），最后交给策略挑选。
 				//
 				// 为什么要在这里提前过滤而不是只靠 SelectKey：下面的 hasSpareKey
-				// 直接由本切片的长度推断，若不过滤，一批"余额已耗尽"的凭据会
-				// 让 hasSpareKey 误判为 true，进而触发无意义的密钥级重试。
-				usable := filterUsableKeys(available, time.Now())
+				// 直接由本切片的长度推断，若不过滤，一批"余额已耗尽"或"不支持该模型"的
+				// 凭据会让 hasSpareKey 误判为 true，进而触发无意义的密钥级重试。
+				usable := filterUsableKeysForRequest(available, time.Now(), scope)
 				if len(usable) == 0 {
-					// 过滤后无可用凭据（全部冷却/限速/禁用/余额耗尽/额度用满）：让上层换渠道
+					// 过滤后无可用凭据（全部冷却/限速/禁用/余额耗尽/额度用满，
+					// 或都不服务本次的分组/模型）：让上层换渠道
 					return resolvedCredential{}, false, false
 				}
 

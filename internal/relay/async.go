@@ -490,7 +490,10 @@ func (s *TaskService) pickTarget(ctx context.Context, group, modelName string) (
 		if ch == nil {
 			break
 		}
-		apiKey, keyID, _, ok, _ := s.relay.resolveChatKey(ctx, ch, nil)
+		// 按"任务所属分组 + 模型"挑凭据：凭据可声明只服务某些分组/模型（迁移 0038），
+		// 与对话请求走同一套过滤，避免"任务能选到一把其实不服务该模型的凭据"。
+		apiKey, keyID, _, ok, _ := s.relay.resolveChatKey(ctx, ch, nil,
+			credentialScope{Group: group, Model: modelName})
 		if !ok {
 			excluded[ch.ID] = struct{}{}
 			continue
@@ -509,7 +512,10 @@ func (s *TaskService) channelForTask(ctx context.Context, task *model.Task) (*mo
 	if err != nil {
 		return nil, "", 0, err
 	}
-	apiKey, keyID, _, ok, _ := s.relay.resolveChatKey(ctx, ch, nil)
+	// 分组无法在这里还原（task 上只存了渠道与模型），因此只按模型过滤；
+	// 渠道本身是提交任务时按分组选定的，凭据的分组限制已在 Submit 路径生效过。
+	apiKey, keyID, _, ok, _ := s.relay.resolveChatKey(ctx, ch, nil,
+		credentialScope{Model: task.Model})
 	if !ok {
 		return nil, "", 0, ErrTaskUnavailable
 	}

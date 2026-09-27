@@ -37,7 +37,8 @@ const channelKeyColumns = `id, channel_id, kind, key_enc, label, status, fail_co
 	`refresh_token_enc, access_token_enc, expires_at, account_hint, provider, ` +
 	`weight, priority, in_flight, cooldown_until, rpm_limit, window_start, window_count, ` +
 	`balance, balance_updated_at, ` +
-	`account_id, plan_type, quota_used_percent, quota_reset_at, quota_checked_at`
+	`account_id, plan_type, quota_used_percent, quota_reset_at, quota_checked_at, ` +
+	`group_names, models`
 
 // channelKeyRepository 是 model.ChannelKeyRepository 的 SQL 实现，并发安全。
 type channelKeyRepository struct {
@@ -686,6 +687,31 @@ func (r *channelKeyRepository) UpdateScheduling(ctx context.Context, id uint64, 
 	return nil
 }
 
+// UpdateRouting 更新凭据可服务的分组与模型（迁移 0038）。
+//
+// 空切片一律落成空串（= 不限），因此"清空分组/模型限制"是一个明确且可完成的动作。
+//
+// 为什么整组替换：后台按"一把凭据一个表单"编辑，整组替换保证界面所见即落库结果，
+// 也不会因两次并发编辑拼出一个谁都没提交过的组合。
+func (r *channelKeyRepository) UpdateRouting(ctx context.Context, id uint64, groups, models []string) error {
+	// 复用 channel_repo.go 的 encodeModels：去空白、去重、CSV，
+	// 与渠道级 group_names/models 的落库格式完全一致（读取侧也用同一解码函数）。
+	res, err := r.db.ExecContext(ctx,
+		"UPDATE channel_keys SET group_names = ?, models = ? WHERE id = ?",
+		encodeModels(groups), encodeModels(models), id)
+	if err != nil {
+		return fmt.Errorf("store: 更新凭据 %d 的分组/模型失败: %w", id, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: 读取影响行数失败: %w", err)
+	}
+	if affected == 0 {
+		return model.ErrChannelKeyNotFound
+	}
+	return nil
+}
+
 // UpdateBalance 人工更新凭据余额，并记录更新时间。
 //
 // balance 允许 BalanceUnknown(-1)（置回"未录入"）与任意 >=0 的整数；
@@ -806,6 +832,9 @@ func (r *channelKeyRepository) scanChannelKey(sc rowScanner) (*model.ChannelKey,
 		quotaUsed    int
 		quotaReset   int64
 		quotaChecked int64
+		// 凭据级路由分叉（迁移 0038）：可服务的分组与模型（CSV，空 = 不限）
+		groupNames string
+		modelsCSV  string
 	)
 
 	if err := sc.Scan(&id, &channelID, &kind, &encryptedKey, &label, &status,
@@ -813,7 +842,8 @@ func (r *channelKeyRepository) scanChannelKey(sc rowScanner) (*model.ChannelKey,
 		&refreshEnc, &accessEnc, &expiresAt, &accountHint, &provider,
 		&weight, &priority, &inFlight, &cooldownEnd, &rpmLimit, &windowStart, &windowCount,
 		&balance, &balanceAt,
-		&accountID, &planType, &quotaUsed, &quotaReset, &quotaChecked); err != nil {
+		&accountID, &planType, &quotaUsed, &quotaReset, &quotaChecked,
+		&groupNames, &modelsCSV); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
@@ -873,6 +903,10 @@ func (r *channelKeyRepository) scanChannelKey(sc rowScanner) (*model.ChannelKey,
 		QuotaUsedPercent: quotaUsed,
 		QuotaResetAt:     unixToExpiresAt(quotaReset),
 		QuotaCheckedAt:   unixToExpiresAt(quotaChecked),
+
+		// 路由分叉：与渠道级同格式（CSV），解码规则一致故复用 encodeModels/decodeModels。
+		Groups: decodeModels(groupNames),
+		Models: decodeModels(modelsCSV),
 	}, nil
 }
 

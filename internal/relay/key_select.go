@@ -238,6 +238,39 @@ func filterUsableKeys(keys []*model.ChannelKey, now time.Time) []*model.ChannelK
 	return usable
 }
 
+// credentialScope 描述"本次请求要从池里挑什么样的凭据"（迁移 0038 的凭据级分叉）。
+//
+// 为什么用一个具名结构体而不是两个 string 参数：调用点分散在转发、异步任务与测试里，
+// 两个裸字符串（分组名与模型名）传反了编译器不会报错，只会表现为"凭据莫名选不上"。
+type credentialScope struct {
+	// Group 是请求分组；空表示不按分组过滤（等价于"不限"）。
+	Group string
+	// Model 是对外模型名；空表示不按模型过滤。
+	Model string
+}
+
+// filterUsableKeysForRequest 在 filterUsableKeys 的基础上叠加"分组 + 模型"两个维度。
+//
+// 为什么要单独一层而不是把参数并进 filterUsableKeys：
+// 后者是纯粹的"运行态可用性"判断（状态 / 冷却 / 限速 / 余额 / 额度窗口），
+// 与请求内容无关且被多处复用；把请求维度混进去，会让"这把凭据现在能不能用"
+// 变成依赖调用上下文，日后很容易在某个调用点漏传而静默改变调度行为。
+func filterUsableKeysForRequest(keys []*model.ChannelKey, now time.Time, scope credentialScope) []*model.ChannelKey {
+	usable := filterUsableKeys(keys, now)
+	if scope.Group == "" && scope.Model == "" {
+		// 未提供请求维度（或未配置分叉的部署）时不做任何额外过滤，
+		// 保持与迁移前完全一致的调度结果。
+		return usable
+	}
+	filtered := make([]*model.ChannelKey, 0, len(usable))
+	for _, k := range usable {
+		if k.MatchesScope(scope.Group, scope.Model) {
+			filtered = append(filtered, k)
+		}
+	}
+	return filtered
+}
+
 // rpmExhausted 判断凭据在当前 RPM 窗口内是否已用满。
 //
 // 窗口过期后计数视为失效（不再限速），等待下一次请求把窗口重置。

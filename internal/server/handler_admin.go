@@ -905,6 +905,15 @@ type channelKeyUpdateRequest struct {
 	Priority *int   `json:"priority"`
 	RPMLimit *int   `json:"rpm_limit"`
 	Balance  *int64 `json:"balance"`
+	// Groups / Models 是本凭据可服务的分组与模型（迁移 0038，凭据级分叉）。
+	//
+	// 用指针区分"未提交"（nil，不修改）与"显式提交空数组"（清空限制 = 不限）：
+	// 把某把凭据从"只服务自营组"改回"不限分组"是常见操作，
+	// 若用空数组兼任"不修改"，这个操作就永远做不成。
+	//
+	// 两者需同时提供（UpdateRouting 是整组覆盖，缺项会被误写成"不限"）。
+	Groups *[]string `json:"groups"`
+	Models *[]string `json:"models"`
 }
 
 // channelKeyQuotaResponse 是额度探测的响应。
@@ -1033,7 +1042,8 @@ func (s *Server) handleUpdateChannelKeyStatus(c *gin.Context) {
 		oai.WriteError(c.Writer, http.StatusBadRequest, "请求体格式错误", oai.TypeInvalidRequest, oai.CodeInvalidJSON)
 		return
 	}
-	if req.Status == nil && req.Weight == nil && req.Priority == nil && req.RPMLimit == nil && req.Balance == nil {
+	if req.Status == nil && req.Weight == nil && req.Priority == nil && req.RPMLimit == nil &&
+		req.Balance == nil && req.Groups == nil && req.Models == nil {
 		oai.WriteError(c.Writer, http.StatusBadRequest, "未提供任何可更新字段", oai.TypeInvalidRequest, "empty_update")
 		return
 	}
@@ -1101,7 +1111,49 @@ func (s *Server) handleUpdateChannelKeyStatus(c *gin.Context) {
 		resp["balance_exhausted"] = *req.Balance >= 0 && *req.Balance <= 0
 	}
 
+	// 4) 分组 / 模型分叉（可选，迁移 0038）：决定"这把凭据服务哪些分组与模型"。
+	//
+	// 两者必须同时提供：UpdateRouting 是整组覆盖，只给一项会把另一项误写成"不限"，
+	// 而"不限"意味着这把凭据会重新参与所有请求——一个不易察觉的越权分叉。
+	if req.Groups != nil || req.Models != nil {
+		if req.Groups == nil || req.Models == nil {
+			oai.WriteError(c.Writer, http.StatusBadRequest,
+				"更新分组/模型限制时需同时提供 groups 与 models 两项",
+				oai.TypeInvalidRequest, "incomplete_routing")
+			return
+		}
+		groups := model.NormalizeGroupNames(*req.Groups)
+		models := model.NormalizeGroupNames(*req.Models)
+		if err := validateKeyRoutingModels(models); err != nil {
+			oai.WriteError(c.Writer, http.StatusBadRequest, err.Error(), oai.TypeInvalidRequest, "invalid_routing")
+			return
+		}
+		if err := s.deps.ChannelKeys.UpdateRouting(ctx, keyID, groups, models); err != nil {
+			s.respondKeyUpdateError(c, err)
+			return
+		}
+		resp["groups"] = groups
+		resp["models"] = models
+	}
+
 	c.JSON(http.StatusOK, resp)
+}
+
+// validateKeyRoutingModels 校验凭据级"可服务模型"清单。
+//
+// 只做两件必要的事：不接受空项（空项等于一条永不命中的规则，纯属配置噪声），
+// 不接受含空白的模型名（它永远匹配不上任何模型，站长却会以为规则生效了）。
+func validateKeyRoutingModels(models []string) error {
+	for _, model := range models {
+		name := strings.TrimSpace(model)
+		if name == "" {
+			return errors.New("模型清单里存在空项")
+		}
+		if strings.ContainsAny(name, " \t\r\n") {
+			return fmt.Errorf("模型名 %q 不能包含空白字符（否则永远匹配不上）", name)
+		}
+	}
+	return nil
 }
 
 // respondKeyUpdateError 统一翻译密钥更新的领域错误。

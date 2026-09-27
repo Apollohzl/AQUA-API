@@ -641,7 +641,7 @@ func TestResolveChatKey_余额耗尽不虚增备用密钥(t *testing.T) {
 	}
 
 	r := New(channels, Options{Keys: keys})
-	_, keyID, _, ok, hasSpare := r.resolveChatKey(ctx, ch, map[uint64]struct{}{})
+	_, keyID, _, ok, hasSpare := r.resolveChatKey(ctx, ch, map[uint64]struct{}{}, credentialScope{})
 	if !ok {
 		t.Fatal("应能解析出可用密钥")
 	}

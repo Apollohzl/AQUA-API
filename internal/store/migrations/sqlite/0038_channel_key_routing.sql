@@ -1,0 +1,42 @@
+-- 迁移 0038：凭据级「分组」与「模型」分叉
+--
+-- 意图（Why）：
+--   一个上游接口下往往挂着多把凭据，而它们在业务上并不等价：
+--     · 不同账号/子账号能访问的模型不同（免费账号只有部分模型、企业账号才有全量）；
+--     · 不同账号面向的业务线不同（A 账号供免费组、B 账号供自营组）。
+--   在此之前只能把这类差异表达成"多建一个渠道"——渠道列表会膨胀，
+--   改一次 base_url 要改很多遍，且同一池子的负载均衡/冷却统计被割裂开来。
+--
+-- 两列语义（都为空 = 不限，即完全继承渠道级路由结果）：
+--   group_names —— 本凭据可服务的分组（CSV，与 channels.group_names 同格式）。
+--                  为空表示"不限分组"：请求按渠道匹配到什么分组，它就能服务什么分组。
+--   models      —— 本凭据可服务的模型（CSV，支持尾部通配符 *，如 "gpt-4*"）。
+--                  为空表示"不限模型"。
+--
+-- 路由关系（重要，别理解反）：
+--   channels 决定"这个请求能不能走这条上游"，channel_keys 决定"走这条上游时用哪把凭据"。
+--   因此渠道级 models 仍是粗筛（渠道声称支持哪些模型），凭据级 models 是细筛
+--   （这一把凭据是否真的能调这个模型）。两者都不配置时行为与迁移前完全一致。
+--
+-- 设计说明：
+--   1) 用 CSV 而不是关联表：与 channels.group_names / channels.models 的做法一致
+--      （见迁移 0025），读取路径一次扫描即可拿到，无需 JOIN；
+--      凭据数量可达几百，关联表会让"读一个池子"变成 N 次查询。
+--   2) 默认空串 = 不限，因此升级后既有凭据的可用性【完全不变】，
+--      不存在"升级后某把凭据突然不被选中"的风险；需要分叉的站长逐把显式配置。
+--   3) 两列都参与调度过滤，且过滤算法是"留空即不参与过滤"——
+--      避免出现"忘了配置某把凭据 → 它永远选不上"的静默失效。
+--
+-- 流转（Flow）：
+--   channel_keys.group_names / models
+--     → store/channel_key_repo.go 读写 → model.ChannelKey.MatchesScope(分组, 模型)
+--       → relay.credentialScope（一次请求的分组与模型）
+--         → filterUsableKeysForRequest 逐把过滤 → 策略挑选
+--
+-- 扩展（Extend）：
+--   若将来要按"令牌/用户"进一步分叉，在本目录追加 NNNN_*.sql，
+--   并在 model/channel_key.go 的 MatchesScope 里补充判定（保持"越具体越优先"）。
+
+ALTER TABLE channel_keys ADD COLUMN group_names TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE channel_keys ADD COLUMN models TEXT NOT NULL DEFAULT '';

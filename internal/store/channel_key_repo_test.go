@@ -630,3 +630,59 @@ func TestChannelKey_UpdateBalance_边界与不存在(t *testing.T) {
 		t.Fatalf("更新不存在的凭据应返回 ErrChannelKeyNotFound，实际 %v", err)
 	}
 }
+
+// TestChannelKey_UpdateRouting_往返与清空 验证凭据级分组/模型的落库与读回（迁移 0038）。
+//
+// 两个关键点：
+//  1. 落库后必须能原样读回（CSV 编解码两侧对称，否则调度会按错误的分叉过滤）；
+//  2. 提交空清单必须能真正清空限制（= 不限）——否则站长改不回"不限分组"，
+//     只能靠手工改库，这属于不可完成的操作。
+func TestChannelKey_UpdateRouting_往返与清空(t *testing.T) {
+	repo, _ := newTestKeyRepo(t)
+	ctx := context.Background()
+
+	if _, _, err := repo.ReplaceAll(ctx, 1, []string{"r1"}, nil); err != nil {
+		t.Fatalf("导入失败: %v", err)
+	}
+	keys, _ := repo.ListByChannel(ctx, 1)
+	id := keys[0].ID
+
+	// 新导入的凭据默认不限（空清单），保证升级后既有行为不变
+	if len(keys[0].Groups) != 0 || len(keys[0].Models) != 0 {
+		t.Fatalf("默认应为不限分组/模型，实际 groups=%v models=%v", keys[0].Groups, keys[0].Models)
+	}
+
+	// 写入分组与模型（含通配符）；重复项与空白应被归一
+	if err := repo.UpdateRouting(ctx, id, []string{"vip", " vip ", "svip"}, []string{"gpt-4o", "gpt-4*"}); err != nil {
+		t.Fatalf("更新分叉失败: %v", err)
+	}
+	got, _ := repo.ListByChannel(ctx, 1)
+	key := got[0]
+	if len(key.Groups) != 2 || key.Groups[0] != "vip" || key.Groups[1] != "svip" {
+		t.Fatalf("分组应去重并保持顺序，实际 %v", key.Groups)
+	}
+	if len(key.Models) != 2 || key.Models[1] != "gpt-4*" {
+		t.Fatalf("模型清单读回不符，实际 %v", key.Models)
+	}
+	// 读回后的判定必须与写入一致（否则分叉会在调度层静默失效）
+	if !key.MatchesScope("svip", "gpt-4o-mini") {
+		t.Fatalf("读回后应命中 svip 分组下的 gpt-4* 模型，实际不命中：%+v", key)
+	}
+
+	// 清空：空清单 = 不限，必须能真正生效
+	if err := repo.UpdateRouting(ctx, id, nil, nil); err != nil {
+		t.Fatalf("清空分叉失败: %v", err)
+	}
+	got, _ = repo.ListByChannel(ctx, 1)
+	if len(got[0].Groups) != 0 || len(got[0].Models) != 0 {
+		t.Fatalf("清空后应为不限，实际 groups=%v models=%v", got[0].Groups, got[0].Models)
+	}
+	if !got[0].MatchesScope("任意分组", "任意模型") {
+		t.Fatal("清空限制后该凭据应对所有分组与模型可用")
+	}
+
+	// 更新不存在的凭据 → 返回 not found
+	if err := repo.UpdateRouting(ctx, 999999, []string{"vip"}, nil); !errors.Is(err, model.ErrChannelKeyNotFound) {
+		t.Fatalf("更新不存在的凭据应返回 ErrChannelKeyNotFound，实际 %v", err)
+	}
+}

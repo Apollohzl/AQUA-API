@@ -430,6 +430,17 @@ type ChannelKey struct {
 	// QuotaCheckedAt 是上次探测额度的时刻；零值表示从未探测。
 	QuotaCheckedAt time.Time
 
+	// 以下为「路由分叉」字段（迁移 0038 新增）。
+	//
+	// 用途：同一个上游接口下挂多把凭据时，它们能服务的分组与模型往往不同
+	// （免费账号只有部分模型、不同账号面向不同业务线）。
+	// 这两列把差异表达在【凭据】上，而不必为此多建一个渠道：
+	//   - Groups 为空 = 不限分组（继承渠道级路由结果），这是默认值；
+	//   - Models 为空 = 不限模型；非空时支持尾部通配符 *（如 "gpt-4*"）。
+	// 判定见 MatchesScope。
+	Groups []string // 本凭据可服务的分组（空 = 不限）
+	Models []string // 本凭据可服务的模型（对外模型名，空 = 不限，支持尾部 *）
+
 	// LastUsedAt 为最近被选中使用的时间；零值表示从未使用。
 	LastUsedAt time.Time
 	// LastError 为最近一次失败原因（已脱敏，只记状态码与简短描述）。
@@ -507,6 +518,62 @@ func (k *ChannelKey) QuotaResetPending(now time.Time) time.Duration {
 // IsOAuth 判断是否为 OAuth 凭据。
 func (k *ChannelKey) IsOAuth() bool {
 	return k.Kind == CredentialKindOAuth
+}
+
+// MatchesGroup 判断该凭据能否服务指定分组的请求（迁移 0038）。
+//
+// 语义：Groups 为空表示"不限分组"，即继承渠道级路由结果——
+// 这是默认值，"只给个别凭据限分组"是最常见的用法（例如池里大部分账号通用，
+// 少数企业账号只供自营组），若要求每把凭据都必须写明分组，配置成本会高到没人愿意用。
+//
+// group 为空（未按分组过滤的调用路径）同样返回 true。
+func (k *ChannelKey) MatchesGroup(group string) bool {
+	if k == nil {
+		return false
+	}
+	group = strings.TrimSpace(group)
+	if group == "" || len(k.Groups) == 0 {
+		return true
+	}
+	for _, name := range k.Groups {
+		if strings.TrimSpace(name) == group {
+			return true
+		}
+	}
+	return false
+}
+
+// HasModel 判断该凭据是否声明支持指定模型（迁移 0038）。
+//
+// 语义：Models 为空表示"不限模型"（默认）。
+// 非空时逐条按尾部通配符匹配（复用计价规则那套 PricePattern，语义一致：
+// "gpt-4*" 命中 gpt-4o；模型名大小写敏感，因为上游把它当标识符）。
+func (k *ChannelKey) HasModel(modelName string) bool {
+	if k == nil {
+		return false
+	}
+	if len(k.Models) == 0 {
+		return true
+	}
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		// 调用方没给出模型名（如只按分组挑选的场景）：不因此排除任何凭据。
+		return true
+	}
+	for _, pattern := range k.Models {
+		if PricePattern(strings.TrimSpace(pattern)).Matches(modelName) {
+			return true
+		}
+	}
+	return false
+}
+
+// MatchesScope 判断该凭据是否可用于"分组 + 模型"这两个维度的本次请求。
+//
+// 这是凭据级路由的唯一入口：两个维度都是"留空即不限"，
+// 因此未配置分叉的凭据在任何请求下都返回 true，行为与迁移前完全一致。
+func (k *ChannelKey) MatchesScope(group, modelName string) bool {
+	return k.MatchesGroup(group) && k.HasModel(modelName)
 }
 
 // NeedsRefresh 判断 OAuth 凭据是否需要在本次使用前刷新。
@@ -1005,6 +1072,14 @@ type ChannelKeyRepository interface {
 
 	// UpdateScheduling 更新凭据的调度参数（权重 / 优先级 / RPM 上限）。
 	UpdateScheduling(ctx context.Context, id uint64, weight, priority, rpmLimit int) error
+
+	// ---- 以下为凭据级路由分叉（迁移 0038）的方法 ----
+
+	// UpdateRouting 更新凭据可服务的分组与模型（空切片 = 不限，即继承渠道配置）。
+	//
+	// 之所以整组替换而不是增量增删：后台是"一把凭据一个表单"的编辑方式，
+	// 整组替换能保证"界面所见 = 落库结果"，也不会因并发编辑留下孤儿配置。
+	UpdateRouting(ctx context.Context, id uint64, groups, models []string) error
 
 	// UpdateBalance 人工更新某把凭据的余额，并记录更新时间（balance_updated_at）。
 	//
