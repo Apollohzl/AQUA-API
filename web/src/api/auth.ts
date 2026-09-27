@@ -42,7 +42,12 @@ export function adminLogin(password: string): Promise<AuthResult> {
  * 后端对非法邀请码会忽略并照常注册，因此这里只在有值时透传。
  */
 export function register(payload: RegisterPayload & { invite_code?: string }): Promise<AuthResult> {
-  const body: RegisterPayload & { invite_code?: string } = { username: payload.username, password: payload.password }
+  const body: RegisterPayload & { invite_code?: string } = {
+    username: payload.username,
+    password: payload.password,
+    // 协议同意必须有值：后端强制校验，缺失会被直接拒绝
+    agreed_terms: payload.agreed_terms,
+  }
   if (payload.email) body.email = payload.email
   if (payload.code) body.code = payload.code
   if (payload.invite_code) body.invite_code = payload.invite_code

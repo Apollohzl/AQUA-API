@@ -53,6 +53,15 @@ const sendingCode = ref(false)
  */
 const inviteCode = ref(typeof route.query.invite === 'string' ? route.query.invite.trim() : '')
 
+/**
+ * 是否已勾选同意《服务协议》与《隐私政策》。
+ *
+ * 为什么必须要有这一项：注册要收集邮箱等个人信息，必须先取得用户明示同意。
+ * 前端把按钮置灰只是体验优化，真正的强制点在服务端（见 handler_auth.go 的 agreed_terms 校验），
+ * 两者缺一不可——只做前端能被绕过，只做后端则用户不知道为何失败。
+ */
+const agreedTerms = ref(false)
+
 /** 重发倒计时（秒）。0 表示可以发送。 */
 const countdown = ref(0)
 /** 用于清理计时器；组件卸载时必须清掉，否则会在页面切换后继续跑。 */
@@ -146,6 +155,11 @@ async function handleSubmit(): Promise<void> {
       return
     }
   }
+  // 协议同意：与后端一致的前置校验（后端会再次强制校验，前端此处只为给出明确提示）
+  if (!agreedTerms.value) {
+    errorMessage.value = '请先阅读并同意《服务协议》与《隐私政策》'
+    return
+  }
 
   submitting.value = true
   try {
@@ -156,6 +170,7 @@ async function handleSubmit(): Promise<void> {
       password: password.value,
       email: email.value.trim() || undefined,
       code: emailCode.value.trim() || undefined,
+      agreed_terms: agreedTerms.value,
     }
     if (inviteCode.value) payload.invite_code = inviteCode.value
 
@@ -358,6 +373,28 @@ async function handleSubmit(): Promise<void> {
               <p v-else class="hint">验证码 5 分钟内有效，请留意垃圾邮件目录。</p>
             </div>
 
+            <!-- 协议同意：未勾选时提交按钮置灰，并在提交时给出明确提示。
+                 协议入口指向公开文件页，用户可先阅读再决定。 -->
+            <label class="flex items-start gap-2 text-xs leading-relaxed text-ink-400">
+              <input
+                v-model="agreedTerms"
+                type="checkbox"
+                class="mt-0.5 h-4 w-4 shrink-0 rounded border-ink-600"
+                :disabled="submitting"
+              />
+              <span>
+                我已阅读并同意
+                <RouterLink to="/terms" target="_blank" class="font-medium text-brand-700 hover:underline">
+                  《服务协议》
+                </RouterLink>
+                与
+                <RouterLink to="/privacy" target="_blank" class="font-medium text-brand-700 hover:underline">
+                  《隐私政策》
+                </RouterLink>
+                ，并了解本服务为第三方 AI 模型接口接入服务。
+              </span>
+            </label>
+
             <p
               v-if="errorMessage"
               class="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-800"
@@ -366,7 +403,7 @@ async function handleSubmit(): Promise<void> {
               {{ errorMessage }}
             </p>
 
-            <button type="submit" class="btn btn-primary w-full" :disabled="submitting">
+            <button type="submit" class="btn btn-primary w-full" :disabled="submitting || !agreedTerms">
               <span
                 v-if="submitting"
                 class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
