@@ -24,6 +24,7 @@ package server
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -161,7 +162,11 @@ func (s *Server) createTokenAndRespond(c *gin.Context, ownerID uint64, name stri
 	}
 
 	if err := s.deps.Tokens.Create(c.Request.Context(), token); err != nil {
-		oai.WriteError(c.Writer, http.StatusBadRequest, "创建令牌失败："+err.Error(), oai.TypeInvalidRequest, "invalid_token")
+		// 不把仓储错误原文回给使用者：它可能包含表名、约束名甚至 SQL 片段。
+		// 这类底层细节只进服务端日志，对外一律给可自助判断的固定文案。
+		slog.Error("创建令牌失败", "error", err, "user_id", ownerID)
+		oai.WriteError(c.Writer, http.StatusBadRequest, "创建令牌失败，请稍后重试",
+			oai.TypeInvalidRequest, "invalid_token")
 		return
 	}
 
