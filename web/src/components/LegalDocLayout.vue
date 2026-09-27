@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 合规文档页的统一外壳（服务协议 / 隐私政策 / 充值退款 / 联系方式 / 投诉举报共用）。
+ * 合规文档页的统一外壳（用户协议 / 隐私政策 / 充值退款 / 联系方式 / 投诉举报共用）。
  *
  * 意图（Why）：
  *   这五份文件在版式上完全一致（公开页头 + 标题区 + 正文 + 统一页脚），
@@ -23,7 +23,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 
 const props = defineProps<{
-  /** 页面标题（如「服务协议」） */
+  /** 页面标题（如「用户协议」） */
   title: string
   /** 标题下方的一句话说明 */
   description?: string

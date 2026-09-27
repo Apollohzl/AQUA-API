@@ -188,12 +188,12 @@ var catalog = Catalog{
 	// 注册前的协议同意校验：个人信息保护要求"先告知同意、再收集信息"，
 	// 因此这是注册链路的第一步校验，文案需明确指向两份文件。
 	"auth.terms_required": {
-		ZhCN: "请先阅读并同意《服务协议》与《隐私政策》",
-		En:   "Please read and accept the Terms of Service and Privacy Policy first",
-		Fr:   "Veuillez d'abord lire et accepter les Conditions d'utilisation et la Politique de confidentialité",
-		Ru:   "Сначала прочитайте и примите Условия использования и Политику конфиденциальности",
-		Es:   "Lee y acepta primero los Términos del servicio y la Política de privacidad",
-		Ar:   "يرجى قراءة شروط الخدمة وسياسة الخصوصية والموافقة عليهما أولاً",
+		ZhCN: "请先阅读并同意《用户协议》与《隐私政策》",
+		En:   "Please read and accept the User Agreement and Privacy Policy first",
+		Fr:   "Veuillez d'abord lire et accepter le Contrat d'utilisation et la Politique de confidentialité",
+		Ru:   "Сначала прочитайте и примите Пользовательское соглашение и Политику конфиденциальности",
+		Es:   "Lee y acepta primero el Acuerdo de usuario y la Política de privacidad",
+		Ar:   "يرجى قراءة اتفاقية المستخدم وسياسة الخصوصية والموافقة عليهما أولاً",
 	},
 	"auth.register_disabled": {
 		ZhCN: "本站当前未开放注册，请联系管理员开通账号",

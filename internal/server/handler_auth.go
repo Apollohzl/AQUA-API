@@ -194,7 +194,7 @@ type registerRequest struct {
 	//
 	// 语义：非法邀请码一律【忽略】并照常注册成功（取舍理由见 applyInviteOnRegister）。
 	InviteCode string `json:"invite_code"`
-	// AgreedTerms 表示用户已阅读并同意《服务协议》与《隐私政策》。
+	// AgreedTerms 表示用户已阅读并同意《用户协议》与《隐私政策》。
 	//
 	// 这是个人信息保护的硬要求：收集邮箱等个人信息前必须取得同意。
 	// 必须由后端强制校验，不能只靠前端把按钮置灰——否则直接调接口就能绕过，

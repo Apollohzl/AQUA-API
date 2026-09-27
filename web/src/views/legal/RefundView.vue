@@ -70,7 +70,7 @@ import LegalDocLayout from '@/components/LegalDocLayout.vue'
     <section>
       <h2 class="section-title">五、不予退款的情形</h2>
       <ul class="list-disc space-y-1.5 pl-5">
-        <li>账号因违反《服务协议》（如违法用途、攻击、批量注册、牟利性转售）被限制或终止的；</li>
+        <li>账号因违反《用户协议》（如违法用途、攻击、批量注册、牟利性转售）被限制或终止的；</li>
         <li>已消费金额；</li>
         <li>赠送、返利等非实付部分。</li>
       </ul>

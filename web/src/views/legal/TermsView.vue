@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 服务协议（公开页）。
+ * 用户协议（公开页）。文件名与路由沿用 terms（/terms），对外名称为《用户协议》。
  *
  * 意图（Why）：
  *   这是全站第一份"法律性质的文件"，作用有三个：
@@ -11,7 +11,7 @@
  *        避免用户把上游波动当成"平台骗钱"。
  *
  * 流转（Flow）：
- *   页脚「服务协议」/ 注册页勾选文案 → /terms
+ *   页脚「用户协议」/ 注册页与登录页勾选文案 → /terms
  *
  * 扩展（Extend）：
  *   条款变更请在正文顶部更新"更新日期"；重大变更建议同时发一条站内公告
@@ -22,8 +22,8 @@ import LegalDocLayout from '@/components/LegalDocLayout.vue'
 
 <template>
   <LegalDocLayout
-    title="服务协议"
-    description="使用本站服务前，请阅读并理解以下条款。注册即视为你已阅读并同意本协议与《隐私政策》。"
+    title="用户协议"
+    description="使用本站服务前，请阅读并理解以下条款。注册与登录时须阅读并同意本协议与《隐私政策》。"
     updated-at="2026-09-27"
   >
     <section>

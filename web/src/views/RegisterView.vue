@@ -54,7 +54,7 @@ const sendingCode = ref(false)
 const inviteCode = ref(typeof route.query.invite === 'string' ? route.query.invite.trim() : '')
 
 /**
- * 是否已勾选同意《服务协议》与《隐私政策》。
+ * 是否已勾选同意《用户协议》与《隐私政策》。
  *
  * 为什么必须要有这一项：注册要收集邮箱等个人信息，必须先取得用户明示同意。
  * 前端把按钮置灰只是体验优化，真正的强制点在服务端（见 handler_auth.go 的 agreed_terms 校验），
@@ -157,7 +157,7 @@ async function handleSubmit(): Promise<void> {
   }
   // 协议同意：与后端一致的前置校验（后端会再次强制校验，前端此处只为给出明确提示）
   if (!agreedTerms.value) {
-    errorMessage.value = '请先阅读并同意《服务协议》与《隐私政策》'
+    errorMessage.value = '请先阅读并同意《用户协议》与《隐私政策》'
     return
   }
 
@@ -385,7 +385,7 @@ async function handleSubmit(): Promise<void> {
               <span>
                 我已阅读并同意
                 <RouterLink to="/terms" target="_blank" class="font-medium text-brand-700 hover:underline">
-                  《服务协议》
+                  《用户协议》
                 </RouterLink>
                 与
                 <RouterLink to="/privacy" target="_blank" class="font-medium text-brand-700 hover:underline">
