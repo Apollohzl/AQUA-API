@@ -1302,6 +1302,9 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
                   </p>
                   <p v-if="testResults[channel.id].model" class="text-ink-400">
                     探测模型：<code>{{ testResults[channel.id].model }}</code>
+                    <span v-if="testResults[channel.id].upstream_model && testResults[channel.id].upstream_model !== testResults[channel.id].model">
+                      　上游实际收到：<code>{{ testResults[channel.id].upstream_model }}</code>
+                    </span>
                     <span v-if="testResults[channel.id].status_code">
                       　HTTP 状态：<code>{{ testResults[channel.id].status_code }}</code>
                     </span>

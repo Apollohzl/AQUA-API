@@ -600,6 +600,11 @@ type channelTestResponse struct {
 	// 透出它是为了让管理员看到上游的原话："model not found" 与
 	// "insufficient permissions" 指向完全不同的处置动作。
 	UpstreamBody string `json:"upstream_body"`
+	// UpstreamModel 是本次真正发给上游的模型名（可能被渠道级映射改写）。
+	//
+	// 测活报 404 时，第一件要确认的就是"上游到底收到了哪个名字"：
+	// 映射没生效与上游真没有该模型，处置动作完全不同。
+	UpstreamModel string `json:"upstream_model"`
 
 	// 以下字段回答"这次测活用了什么、池里还剩多少"——
 	// 没有它们，测活结论无法解释：测活用的是哪把凭据？池是不是已经空了？
@@ -1080,6 +1085,18 @@ func (s *Server) probeChannel(ctx context.Context, channel *model.Channel) chann
 	result.LatencyMS = probe.LatencyMS
 	result.StatusCode = probe.StatusCode
 	result.UpstreamBody = probe.Body
+	result.UpstreamModel = probe.UpstreamModel
+
+	// 结论里同时交代"用了哪把凭据"与"上游实际收到的模型名"：
+	// 这两条信息决定了 404/401 这类失败到底该改映射、改模型名还是改密钥。
+	note := keySourceText(cred)
+	if probe.UpstreamModel != "" && probe.UpstreamModel != probeModel {
+		mapping := fmt.Sprintf("模型映射：%s → %s", probeModel, probe.UpstreamModel)
+		if note != "" {
+			mapping += "　" + note
+		}
+		note = mapping
+	}
 
 	if probe.Err != nil {
 		// 区分"超时"与"连不上"：两者的处置方式完全不同——
@@ -1097,7 +1114,7 @@ func (s *Server) probeChannel(ctx context.Context, channel *model.Channel) chann
 
 	ok := probe.StatusCode >= 200 && probe.StatusCode < 300
 	result.OK = ok
-	result.Message = describeProbeStatus(probe.StatusCode, probe.Body, keySourceText(cred))
+	result.Message = describeProbeStatus(probe.StatusCode, probe.Body, note)
 	return result
 }
 

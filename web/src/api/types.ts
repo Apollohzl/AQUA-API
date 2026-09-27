@@ -547,6 +547,8 @@ export interface ChannelTestResult {
   status_code: number
   /** 上游响应片段（已截断）；失败时是最有价值的排查线索 */
   upstream_body?: string
+  /** 本次真正发给上游的模型名（可能被渠道级模型映射改写） */
+  upstream_model?: string
   /** 本次探测使用的凭据掩码；空表示无凭据可用 */
   key_masked?: string
   /** 凭据来源：pool（密钥池）/ single（渠道单密钥） */

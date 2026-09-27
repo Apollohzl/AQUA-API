@@ -54,6 +54,13 @@ type ProbeResult struct {
 	StatusCode int
 	// LatencyMS 是本次探测耗时（毫秒）。
 	LatencyMS int
+	// UpstreamModel 是本次真正发给上游的模型名。
+	//
+	// 与请求用的对外模型名可能不同（渠道级映射会改写它）。
+	// 把它回传的原因是：测活报 404 时，管理员第一件要确认的事就是
+	// "上游到底收到了哪个名字"——映射没生效与上游真没有该模型，
+	// 处置动作完全不同。
+	UpstreamModel string
 	// Body 是上游响应体片段（已截断、已去掉多余空白）。
 	//
 	// 为什么要把上游原话透给管理员：这是排查测活失败最有效的信息——
@@ -94,17 +101,24 @@ func (r *Relay) ProbeChannel(ctx context.Context, ch *model.Channel, apiKey, mod
 		return ProbeResult{Err: fmt.Errorf("relay: 构造探测请求体失败: %w", err)}
 	}
 
-	// 与转发链路完全一致的组装：路径模板（Azure 的 deployment、Gemini 的
-	// {model}:generateContent）、鉴权头（api-key / x-api-key / SigV4 / Bearer）都在这里决定。
+	// 与转发链路完全一致的两步改写：
+	//  1) 先解析渠道级模型映射，把「平台模型 ID」换成上游真正的模型名；
+	//  2) 再按渠道类型组装路径与鉴权（Azure 的 deployment、Gemini 的 {model}:generateContent、
+	//     api-key / x-api-key / SigV4 / Bearer 都在这里决定）。
+	//
+	// 第 1 步极易被忽略但后果严重：漏了它，配了映射的渠道测活会把平台名原样发给上游，
+	// 得到一个与真实调用无关的 404（线上实测：AQUA/GLM-5.3-Flash 被原样发出，
+	// 上游回 model_not_found，而真实转发是正常的）。
+	upstreamModel, outboundBody, _ := r.resolveUpstreamModel(ctx, ch.ID, modelName, body)
 	spec, outBody, built, err := prepareChannelUpstream(
-		ch, apiKey, modelName, oai.ChatCompletionsPath, body, nil, false)
+		ch, apiKey, upstreamModel, oai.ChatCompletionsPath, outboundBody, nil, false)
 	if err != nil {
-		return ProbeResult{Err: fmt.Errorf("channeltype %s: %w", spec.Key, err)}
+		return ProbeResult{UpstreamModel: upstreamModel, Err: fmt.Errorf("channeltype %s: %w", spec.Key, err)}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, built.URL, bytes.NewReader(outBody))
 	if err != nil {
-		return ProbeResult{Err: fmt.Errorf("relay: 构造探测请求失败: %w", err)}
+		return ProbeResult{UpstreamModel: upstreamModel, Err: fmt.Errorf("relay: 构造探测请求失败: %w", err)}
 	}
 	req.Header = built.Header
 
@@ -117,16 +131,17 @@ func (r *Relay) ProbeChannel(ctx context.Context, ch *model.Channel, apiKey, mod
 	resp, err := client.Do(req)
 	latency := int(time.Since(start).Milliseconds())
 	if err != nil {
-		return ProbeResult{LatencyMS: latency, Err: err}
+		return ProbeResult{LatencyMS: latency, UpstreamModel: upstreamModel, Err: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	// 读一小段响应体：既是排查依据，也让连接可复用。
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, probeMaxBodyBytes))
 	return ProbeResult{
-		StatusCode: resp.StatusCode,
-		LatencyMS:  latency,
-		Body:       normalizeProbeBody(raw),
+		StatusCode:    resp.StatusCode,
+		LatencyMS:     latency,
+		UpstreamModel: upstreamModel,
+		Body:          normalizeProbeBody(raw),
 	}
 }
 

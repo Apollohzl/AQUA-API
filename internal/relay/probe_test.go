@@ -7,6 +7,7 @@ package relay
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -111,6 +112,65 @@ func TestProbeChannel_OpenAI兼容渠道保持Bearer鉴权(t *testing.T) {
 	}
 	if gotAuth != "Bearer sk-openai" {
 		t.Errorf("Authorization = %q，期望 Bearer sk-openai", gotAuth)
+	}
+}
+
+// TestProbeChannel_先套用模型映射再探测 验证测活与真实转发的模型名口径一致。
+//
+// 这是线上实测暴露过的缺陷：测活漏掉模型映射时，会把「平台模型 ID」原样发给上游，
+// 得到一个与真实调用无关的 404（AQUA/GLM-5.3-Flash → 上游回 model_not_found），
+// 而真实转发其实完全正常——管理员会因此去改本来正确的配置。
+func TestProbeChannel_先套用模型映射再探测(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		gotBody  string
+		gotPath  string
+		gotModel string
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 2048)
+		n, _ := r.Body.Read(buf)
+		var parsed map[string]any
+		_ = json.Unmarshal(buf[:n], &parsed)
+		modelName, _ := parsed["model"].(string)
+		mu.Lock()
+		gotBody = string(buf[:n])
+		gotPath = r.URL.Path
+		gotModel = modelName
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	defer upstream.Close()
+
+	// 渠道 ID=7 配了映射：平台名 AQUA/GLM-5.3-Flash → 上游名 GLM-5.3-Flash
+	mappings := &fakeMappingRepo{byChannel: map[uint64][]*model.ChannelModelMapping{
+		7: {{ChannelID: 7, PublicModel: "AQUA/GLM-5.3-Flash", UpstreamModel: "GLM-5.3-Flash", Enabled: true}},
+	}}
+	r := New(nil, Options{ChannelModelMappings: mappings})
+	ch := &model.Channel{
+		ID: 7, Name: "自营渠道", Type: 1, TypeKey: "openai",
+		BaseURL: upstream.URL, APIKey: "sk-aqua", Models: []string{"AQUA/GLM-5.3-Flash"},
+	}
+
+	res := r.ProbeChannel(context.Background(), ch, "sk-aqua", "AQUA/GLM-5.3-Flash")
+	if res.Err != nil || res.StatusCode != http.StatusOK {
+		t.Fatalf("探测失败: err=%v status=%d body=%s", res.Err, res.StatusCode, res.Body)
+	}
+	if res.UpstreamModel != "GLM-5.3-Flash" {
+		t.Fatalf("结果应回传上游实际收到的模型名，实际 %q", res.UpstreamModel)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gotModel != "GLM-5.3-Flash" {
+		t.Fatalf("上游收到的 model 应为 GLM-5.3-Flash，实际 %q（体：%s）", gotModel, gotBody)
+	}
+	if strings.Contains(gotBody, "AQUA/") {
+		t.Fatalf("不应把平台模型 ID 发给上游，实际 %s", gotBody)
+	}
+	if gotPath != "/v1/chat/completions" {
+		t.Fatalf("路径不应被映射改写：%q", gotPath)
 	}
 }
 
