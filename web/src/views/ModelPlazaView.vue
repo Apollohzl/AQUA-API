@@ -83,7 +83,7 @@ onMounted(() => {
           </RouterLink>
           <RouterLink v-else to="/register" class="btn btn-primary btn-sm">
             <AppIcon name="bolt" :size="15" />
-            免费注册
+            注册账号
           </RouterLink>
         </div>
       </div>
