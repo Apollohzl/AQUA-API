@@ -331,6 +331,76 @@ func TestModelMetaReferences_统计引用(t *testing.T) {
 	}
 }
 
+// TestModelMappingOverview_聚合映射与无映射渠道 覆盖全站映射总览接口。
+//
+// 验证两件事：
+//  1. 有映射的渠道：每行都带上渠道名/分组/状态，界面无需再逐渠道拼装；
+//  2. 无映射的渠道：单独归入 channels_without_mapping，避免管理员以为"映射丢了"。
+func TestModelMappingOverview_聚合映射与无映射渠道(t *testing.T) {
+	fx := newModelMetaFixture(t)
+	ctx := context.Background()
+
+	mapped := &model.Channel{
+		Name: "AQUA自营", Type: 1, BaseURL: "https://tierflow.example.com", APIKey: "sk-x",
+		Models: []string{"AQUA/GLM-5.3-Flash"}, Group: "aqua",
+		Priority: 1, Weight: 1, Status: model.ChannelStatusEnabled,
+	}
+	if err := fx.channels.Create(ctx, mapped); err != nil {
+		t.Fatalf("创建渠道失败: %v", err)
+	}
+	if err := fx.mappings.ReplaceForChannel(ctx, mapped.ID, []*model.ChannelModelMapping{
+		{UpstreamModel: "GLM-5.3-Flash", PublicModel: "AQUA/GLM-5.3-Flash", Enabled: true},
+	}); err != nil {
+		t.Fatalf("写入映射失败: %v", err)
+	}
+
+	plain := &model.Channel{
+		Name: "NVIDIA NIM", Type: 1, BaseURL: "https://integrate.example.com", APIKey: "nvapi-x",
+		Models: []string{"nvidia/nemotron-3-super-120b-a12b", "z-ai/glm-5.3"}, Group: "free",
+		Priority: 1, Weight: 1, Status: model.ChannelStatusEnabled,
+	}
+	if err := fx.channels.Create(ctx, plain); err != nil {
+		t.Fatalf("创建渠道失败: %v", err)
+	}
+
+	rec, body := doBearerJSON(t, fx.srv, http.MethodGet, "/api/admin/model-mappings", fx.adminTok, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("查询映射总览失败：%d %s", rec.Code, rec.Body.String())
+	}
+	if total, _ := body["total"].(float64); total != 1 {
+		t.Fatalf("应聚合 1 条映射，实际 %v", body["total"])
+	}
+
+	items := modelItems(t, body)
+	if len(items) != 1 {
+		t.Fatalf("items 应只有 1 条，实际 %d", len(items))
+	}
+	if v, _ := items[0]["channel_name"].(string); v != "AQUA自营" {
+		t.Fatalf("应带上渠道名，实际 %q", v)
+	}
+	if v, _ := items[0]["group"].(string); v != "aqua" {
+		t.Fatalf("应带上分组，实际 %q", v)
+	}
+	if v, _ := items[0]["public_model"].(string); v != "AQUA/GLM-5.3-Flash" {
+		t.Fatalf("平台模型 ID 不符，实际 %q", v)
+	}
+	if v, _ := items[0]["upstream_model"].(string); v != "GLM-5.3-Flash" {
+		t.Fatalf("上游模型 ID 不符，实际 %q", v)
+	}
+
+	plainItems, ok := body["channels_without_mapping"].([]any)
+	if !ok || len(plainItems) != 1 {
+		t.Fatalf("应列出 1 个无映射渠道，实际 %v", body["channels_without_mapping"])
+	}
+	entry, _ := plainItems[0].(map[string]any)
+	if v, _ := entry["channel_name"].(string); v != "NVIDIA NIM" {
+		t.Fatalf("无映射渠道名不符，实际 %q", v)
+	}
+	if v, _ := entry["model_count"].(float64); v != 2 {
+		t.Fatalf("无映射渠道的模型数应为 2，实际 %v", v)
+	}
+}
+
 // TestResolveMapping_精确优先于通配 验证精确匹配压过通配匹配。
 func TestResolveMapping_精确优先于通配(t *testing.T) {
 	mappings := []*model.ChannelModelMapping{

@@ -361,13 +361,13 @@ func toTokenDTO(t *model.Token, status model.TokenStatus) tokenDTO {
 
 // usageLogDTO 是对外的调用日志信息。
 type usageLogDTO struct {
-	ID               uint64 `json:"id"`
-	UserID           uint64 `json:"user_id"`
-	Username         string `json:"username"`
-	TokenName        string `json:"token_name"`
-	ChannelID        uint64 `json:"channel_id"`
-	ChannelName      string `json:"channel_name"`
-	Model            string `json:"model"`
+	ID          uint64 `json:"id"`
+	UserID      uint64 `json:"user_id"`
+	Username    string `json:"username"`
+	TokenName   string `json:"token_name"`
+	ChannelID   uint64 `json:"channel_id"`
+	ChannelName string `json:"channel_name"`
+	Model       string `json:"model"`
 	// UpstreamModel 是本次【实际发给上游】的模型名（渠道级映射改写后的名字）。
 	//
 	// 为什么要把它暴露出来：站长配置了"平台模型 ID → 上游模型 ID"的映射后，

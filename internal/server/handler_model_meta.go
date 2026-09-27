@@ -569,3 +569,102 @@ func (s *Server) channelExists(c *gin.Context, id uint64) bool {
 	}
 	return true
 }
+
+// ---------------------------------------------------------------------------
+// 全站模型 ID 映射总览
+// ---------------------------------------------------------------------------
+
+// modelMappingOverviewItem 是映射总览里的一行（已带上渠道信息，界面无需再拼装）。
+type modelMappingOverviewItem struct {
+	ID          uint64 `json:"id"`
+	ChannelID   uint64 `json:"channel_id"`
+	ChannelName string `json:"channel_name"`
+	// ChannelStatus 是渠道状态（1 启用 / 2 停用 / 3 自动停用）；界面据此提示
+	// "映射配置正确但渠道已停用，请求仍不会走这条映射"。
+	ChannelStatus int    `json:"channel_status"`
+	Group         string `json:"group"`
+	// PublicModel 是平台模型 ID（用户调用时使用）；UpstreamModel 是实际发给上游的名字。
+	PublicModel   string `json:"public_model"`
+	UpstreamModel string `json:"upstream_model"`
+	Priority      int    `json:"priority"`
+	Enabled       bool   `json:"enabled"`
+	Remark        string `json:"remark"`
+}
+
+// modelMappingPlainChannel 是"没有任何映射"的渠道摘要。
+//
+// 为什么要把这类渠道单独列出来：它们走的是"模型名原样透传"，
+// 站长排查"为什么这个渠道没生效映射"时，需要一眼看到"这个渠道本来就没配映射"，
+// 而不是在一张空表里反复找。
+type modelMappingPlainChannel struct {
+	ChannelID     uint64 `json:"channel_id"`
+	ChannelName   string `json:"channel_name"`
+	ChannelStatus int    `json:"channel_status"`
+	Group         string `json:"group"`
+	ModelCount    int    `json:"model_count"`
+}
+
+// handleListAllModelMappings 处理 GET /api/admin/model-mappings：全站映射总览。
+//
+// 为什么需要这个接口（而不是让前端逐渠道拉）：
+//
+//	映射编辑分散在各渠道表单里，站长想看"我的平台一共有哪些模型 ID、分别映射到
+//	哪个上游 ID"时必须逐个渠道点开，既慢又容易漏。这里一次性聚合，用一页回答
+//	"我的平台模型 ID 清单 + 各自的去向"。
+//
+// 实现取舍：渠道与映射总量都是几百条量级，全量扫描即可，不做分页——
+// 分页会把"总览"变成"翻页找"，反而违背它存在的意义。
+func (s *Server) handleListAllModelMappings(c *gin.Context) {
+	if s.deps.Channels == nil || s.deps.ChannelModelMappings == nil {
+		oai.WriteError(c.Writer, http.StatusServiceUnavailable,
+			"模型映射模块未启用", oai.TypeServer, oai.CodeInternal)
+		return
+	}
+
+	ctx := c.Request.Context()
+	channels, err := s.deps.Channels.List(ctx, model.ChannelQuery{Limit: nameLookupLimit})
+	if err != nil {
+		s.respondInternalError(c, "查询渠道列表失败")
+		return
+	}
+
+	items := make([]modelMappingOverviewItem, 0)
+	plain := make([]modelMappingPlainChannel, 0)
+	for _, channel := range channels {
+		mappings, err := s.deps.ChannelModelMappings.ListByChannel(ctx, channel.ID)
+		if err != nil {
+			// 单个渠道读取失败不阻断总览：其余渠道的信息仍然有用
+			continue
+		}
+		if len(mappings) == 0 {
+			plain = append(plain, modelMappingPlainChannel{
+				ChannelID:     channel.ID,
+				ChannelName:   channel.Name,
+				ChannelStatus: int(channel.Status),
+				Group:         channel.Group,
+				ModelCount:    len(channel.Models),
+			})
+			continue
+		}
+		for _, m := range mappings {
+			items = append(items, modelMappingOverviewItem{
+				ID:            m.ID,
+				ChannelID:     channel.ID,
+				ChannelName:   channel.Name,
+				ChannelStatus: int(channel.Status),
+				Group:         channel.Group,
+				PublicModel:   m.PublicModel,
+				UpstreamModel: m.UpstreamModel,
+				Priority:      m.Priority,
+				Enabled:       m.Enabled,
+				Remark:        m.Remark,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"items":                    items,
+		"channels_without_mapping": plain,
+		"total":                    len(items),
+	})
+}

@@ -203,6 +203,11 @@ func (s *Server) registerRoutes() {
 	admin.GET("/channels/:id/mappings", s.handleListChannelMappings)
 	admin.PUT("/channels/:id/mappings", s.handleReplaceChannelMappings)
 
+	// 全站模型 ID 映射总览（跨渠道聚合）：
+	// 用一页回答「我的平台有哪些模型 ID、分别映射到哪个上游 ID、走哪个渠道/分组」。
+	// 刻意独立于渠道路由：它是"总览"视角，不是某个渠道的属性。
+	admin.GET("/model-mappings", s.handleListAllModelMappings)
+
 	// OAuth 提供方配置（订阅账号池刷新令牌时使用）
 	admin.GET("/oauth-providers", s.handleListOAuthProviders)
 	admin.POST("/oauth-providers", s.handleCreateOAuthProvider)
