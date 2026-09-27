@@ -12,15 +12,22 @@
 //	  ├─ extractAPIKey        从请求头提取令牌明文
 //	  ├─ tokens.GetByKey      按摘要索引查库（O(1)，不解密全表）
 //	  ├─ EffectiveStatus      结合时间与额度判定令牌自身状态
-//	  ├─ users.GetByID        账号级校验：是否禁用、可用额度是否耗尽
-//	  ├─ 模型白名单校验        仅当白名单非空时才读请求体（省开销）
-//	  ├─ 额度预留             计费模型且额度紧张时预扣额度（额度不足 → 429），按令牌分组计价
+//	  ├─ users.GetByID        账号级校验：账号是否被禁用
+//	  ├─ 解析模型名            白名单校验 + 判断"本次是否计费"（两者都需要模型名）
+//	  ├─ 计费判定              不计费（未定价 / 显式免费）→ 完全跳过额度墙
+//	  ├─ 额度校验与预留        仅对计费模型：可用额度不足 → 429；额度紧张时预扣
 //	  └─ SetToken → c.Next()  放行并把令牌、幂等键与分组写入上下文
+//
+// 顺序为什么必须是这样（别随意调换）：
+//
+//	额度校验必须在"判断本次是否计费"之后。否则额度为 0 的用户连免费模型
+//	都会被拦成 429，站长为了让免费模型可用，只能把用户额度设成"不限"（-1）
+//	——用一个哨兵值掩盖校验顺序错了这一真正原因（历史上就是这么来的）。
 //
 // 扩展（Extend）：
 //
-//	新增校验维度（IP 白名单、RPM 限制）时：在"模型白名单校验"之后插入新的步骤，
-//	  并保持"先廉价判定、后昂贵判定"的顺序（如先查内存/缓存，再读请求体）。
+//	新增校验维度（IP 白名单、RPM 限制）时：插在"模型白名单校验"之后、
+//	  计费判定之前，并保持"先廉价判定、后昂贵判定"的顺序（如先查内存/缓存，再读请求体）。
 //	新增鉴权方式（如 JWT）：新建同级文件，复用 SetToken 的上下文约定。
 //	新增预留的例外情形：改 tryReserveQuota，务必保持"不计费模型跳过预留"
 //	  这一条（否则免费模型会被额度墙挡住）。
@@ -150,21 +157,14 @@ func TokenAuth(tokens model.TokenRepository, users model.UserRepository, reserve
 		// 保持"只传递、不判断"的职责（路由与计费规则都不该出现在鉴权层）。
 		tokenGroup := token.EffectiveGroupName("")
 
-		// ── 步骤 4：账号级额度校验 ──────────────────────────────
+		// ── 步骤 4：查询用户（账号级上限的载体）────────────────
 		//
 		// 为什么令牌之外还要查用户额度：令牌是"发给某个用户的凭据"，
 		// 用户额度才是账号级上限。若只校验令牌额度，用户可以随手新建
 		// 若干个令牌来绕过总量限制——限额就形同虚设。
 		//
-		// 可用额度 = 总额度 − 已用 − 在途预留（而不是只看"总额度 − 已用"）。
-		// 必须减去在途预留：并发的多个请求会读到同一个 used_quota，
-		// 若只看"总额度 − 已用"就会全部通过、各自扣费，最终"已用"超过"总额度"。
-		//
-		// 两个容易写错的地方（都曾真实踩过）：
-		//  1) 必须显式排除「不限额度」：它的 RemainingQuota() 返回 -1，
-		//     若直接拿去比较大小，会把所有不限额度的账号全部拦死；
-		//  2) 判定要用 <= 0 而不是 == 0：已用超过总额度时剩余为负数，
-		//     只判 0 会把"已经超额"的账号放行。
+		// 注意：这里只查用户、不做额度判定。额度判定被后移到【步骤 7】，
+		// 因为只有先拿到模型名才能知道"这次调用是否要花钱"（见步骤 5、6）。
 		var (
 			owner   *model.User
 			pending int64
@@ -188,7 +188,77 @@ func TokenAuth(tokens model.TokenRepository, users model.UserRepository, reserve
 					"auth.account_disabled", oai.TypePermission, oai.CodeTokenDisabled)
 				return
 			}
+		}
 
+		// ── 步骤 5：解析模型名（白名单与"是否计费"都要用它）──────
+		//
+		// 顺序说明（本次修复的关键）：模型名必须在【额度校验之前】拿到。
+		// 只有知道是哪个模型，才能判断"这次调用要不要花钱"；
+		// 而免费模型必须能被额度为 0 的用户正常调用。
+		//
+		//   - 白名单非空时【必须】拿到模型名，拿不到就按错误响应返回；
+		//   - 白名单为空时，为判断计费而【尽力】读取模型名：
+		//     读不到（请求体非法/缺 model/超限）不报错，但也不豁免额度墙（保守），
+		//     畸形请求随后会在转发阶段被拒绝，不存在"靠畸形请求白嫖计费模型"的可能。
+		var (
+			modelName   string
+			promptBytes int
+		)
+		if len(token.Models) > 0 {
+			name, size, err := peekModelFromBody(c)
+			if err != nil {
+				writeModelBodyError(c, err)
+				return
+			}
+			modelName, promptBytes = name, size
+			if !token.AllowsModel(modelName) {
+				abortWithErrorKey(c, http.StatusForbidden,
+					"model.not_allowed", oai.TypePermission, oai.CodeModelNotAllowed)
+				return
+			}
+		} else if owner != nil && reserver != nil && owner.Quota != model.QuotaUnlimited {
+			// 只有"额度有限、可能被额度墙拦住"的账号才需要为判断计费而读请求体：
+			// 不限额度的账号无论如何都会放行，读它纯属浪费（保持"绝大多数请求零额外开销"）。
+			if name, size, err := peekModelFromBody(c); err == nil {
+				modelName, promptBytes = name, size
+			}
+		}
+
+		// ── 步骤 6：判断本次调用是否计费 ────────────────────────
+		//
+		// 这是"免费模型能不能被 0 额度用户调用"的判定点，也是本次修复的核心：
+		//
+		//	明确不计费（未命中任何计价规则，或规则被【显式设为免费】）
+		//	  → 既不做额度校验、也不做额度预留，直接放行；
+		//	计费（或因拿不到模型名而无法判断）
+		//	  → 沿用严格的"可用额度 = 总额度 − 已用 − 在途预留"判定。
+		//
+		// 为什么必须这样分：若把额度校验放在判断计费之前，0 额度用户连免费模型
+		// 都会被拦成 429，站长为了让免费模型可用，只能把用户额度设成"不限"(-1)
+		// ——那等于用一个哨兵值掩盖"校验顺序错了"这个真正原因。
+		var (
+			reserveAmount int64
+			modelPriced   bool
+		)
+		if reserver != nil && modelName != "" {
+			reserveAmount, modelPriced = reserver.EstimateReserve(
+				c.Request.Context(), tokenGroup, modelName, promptBytes)
+		}
+		exemptFromQuota := reserver != nil && modelName != "" && !modelPriced
+
+		// ── 步骤 7：账号级额度校验（仅对计费模型生效）──────────
+		//
+		// 可用额度 = 总额度 − 已用 − 在途预留（而不是只看"总额度 − 已用"）。
+		// 必须减去在途预留：并发的多个请求会读到同一个 used_quota，
+		// 若只看"总额度 − 已用"就会全部通过、各自扣费，最终"已用"超过"总额度"。
+		//
+		// 两个容易写错的地方（都曾真实踩过）：
+		//  1) 必须显式排除「不限额度」：它的 RemainingQuota() 返回 -1，
+		//     若直接拿去比较大小，会把所有不限额度的账号全部拦死；
+		//  2) 判定要用 <= 0 而不是 == 0：已用超过总额度时剩余为负数，
+		//     只判 0 会把"已经超额"的账号放行。
+		needReserve := false
+		if owner != nil && !exemptFromQuota {
 			// 统计在途预留：仅在"有限额度 + 启用了预留"时才需要查库。
 			if reserver != nil && owner.Quota != model.QuotaUnlimited {
 				if p, perr := reserver.PendingReserved(c.Request.Context(), owner.ID); perr == nil {
@@ -208,44 +278,15 @@ func TokenAuth(tokens model.TokenRepository, users model.UserRepository, reserve
 					owner.Quota, owner.UsedQuota, pending)
 				return
 			}
+
+			needReserve = reserver != nil && owner.Quota != model.QuotaUnlimited
 		}
 
-		// ── 步骤 5：模型白名单校验 + 额度预留 ───────────────────
-		//
-		// 两件事都需要模型名，因此这里按需读取请求体并复用同一次解析：
-		//   - 白名单非空时【必须】拿到模型名，拿不到就按错误响应返回；
-		//   - 白名单为空时，只有"需要预留"的请求才读取请求体，
-		//     且拿不到模型名时【跳过预留】而不报错（畸形请求交由转发阶段拒绝）。
-		//
-		// 性能考量：未配置白名单、也无需预留时（绝大多数请求）零额外开销。
-		reserveNeeded := reserver != nil && owner != nil && owner.Quota != model.QuotaUnlimited
-
-		var (
-			modelName   string
-			promptBytes int
-		)
-		if len(token.Models) > 0 {
-			name, size, err := peekModelFromBody(c)
-			if err != nil {
-				writeModelBodyError(c, err)
-				return
-			}
-			modelName, promptBytes = name, size
-			if !token.AllowsModel(modelName) {
-				abortWithErrorKey(c, http.StatusForbidden,
-					"model.not_allowed", oai.TypePermission, oai.CodeModelNotAllowed)
-				return
-			}
-		} else if reserveNeeded {
-			if name, size, err := peekModelFromBody(c); err == nil {
-				modelName, promptBytes = name, size
-			}
-			// 解析失败（请求体非法/缺 model/超限）：跳过预留，交给转发阶段处理。
-		}
-
+		// ── 步骤 8：额度预留（避免并发超支）────────────────────
 		requestID := ""
-		if reserveNeeded && modelName != "" {
-			id, ok := tryReserveQuota(c, reserver, token, owner, tokenGroup, modelName, promptBytes, pending)
+		if needReserve && modelName != "" {
+			id, ok := tryReserveQuota(c, reserver, token, owner,
+				modelName, reserveAmount, pending)
 			if !ok {
 				// 额度不足：tryReserveQuota 已写出 429
 				return
@@ -274,19 +315,21 @@ func TokenAuth(tokens model.TokenRepository, users model.UserRepository, reserve
 
 // tryReserveQuota 尝试为本次调用预扣额度。
 //
-// group 为本次请求的分组（空表示未指定，由计费组件回退到默认分组）；
-// 预留必须与后续结算使用同一分组，否则会出现"按 A 分组预扣、按 B 分组结算"的错账。
+// amount 由调用方（鉴权主流程）算出并传入，而不是在这里重新估算：
+// 同一个金额既用于"要不要走额度墙"的判定，也用于预留，
+// 分成两次估算会让两条判断有机会基于不同的价格快照，从而出现
+// "判定说免费、预留却扣钱"这类自相矛盾的行为。
 //
 // 返回的第二个值为 false 表示已写出错误响应（额度不足），调用方应立即返回。
 // 返回空 requestID 且 true 表示"本次不预留"（不计费模型 / 信任额度旁路 / 台账降级）。
 func tryReserveQuota(c *gin.Context, reserver QuotaReserver, token *model.Token,
-	owner *model.User, group, modelName string, promptBytes int, pending int64) (string, bool) {
+	owner *model.User, modelName string, amount, pending int64) (string, bool) {
 	ctx := c.Request.Context()
 
-	amount, priced := reserver.EstimateReserve(ctx, group, modelName, promptBytes)
-	if !priced || amount <= 0 {
-		// 【例外一】该模型未命中任何计价规则：调用不计费，跳过预留。
-		// 否则免费模型会被额度墙挡住——这正是此前线上事故的根因。
+	if amount <= 0 {
+		// 【例外一】该模型不计费（未命中计价规则，或被显式设为免费）：金额为 0 就无需预留。
+		// 调用方已在额度校验之前据此放行（免费模型对 0 额度用户也开放），
+		// 这里是第二道闸门，确保"没有金额就一定不写预留台账"。
 		return "", true
 	}
 
