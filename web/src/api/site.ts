@@ -41,6 +41,9 @@ export async function fetchSiteStatus(force = false): Promise<SiteStatus> {
     // 缺失只可能出现在极早期的旧版本，此时按宽松处理可避免注册页被锁死。
     email_code_required: Boolean(status?.email_code_required),
     email_service_ready: status?.email_service_ready !== false,
+    // 额度↔人民币的折算比例：缺失或非正数时置 0，前端退回显示原始额度
+    // （宁可不折算，也不能用一个假设的比例把余额显示成错误的金额）
+    quota_per_yuan: Number(status?.quota_per_yuan) > 0 ? Number(status.quota_per_yuan) : 0,
   }
   cachedStatus = normalized
   cachedAt = Date.now()

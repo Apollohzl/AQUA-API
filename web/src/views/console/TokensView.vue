@@ -30,11 +30,15 @@ import { STATUS_DISABLED, STATUS_ENABLED, type AccessToken, type PlazaGroup } fr
 import { confirmDialog } from '@/composables/useConfirm'
 import { emptyTokenForm, toTokenPayload, validateTokenForm, type TokenFormState } from '@/composables/tokenForm'
 import { toastError, toastSuccess } from '@/composables/useToast'
+import { useQuotaUnit } from '@/composables/useQuotaUnit'
 import { useSiteStore } from '@/stores/site'
 import { statusBadgeClass } from '@/utils/display'
-import { formatDateTime, formatExpiry, formatNumber, formatQuota } from '@/utils/format'
+import { formatDateTime, formatExpiry } from '@/utils/format'
 
 const site = useSiteStore()
+
+/** 令牌的额度上限与已用额度按人民币展示（比例来自后端设置，见 useQuotaUnit） */
+const { yuanText } = useQuotaUnit()
 
 const tokens = ref<AccessToken[]>([])
 const total = ref(0)
@@ -283,8 +287,8 @@ const isEmpty = computed(() => !loading.value && !error.value && tokens.value.le
             <th>密钥</th>
             <th>分组</th>
             <th>状态</th>
-            <th class="text-right">剩余额度</th>
-            <th class="text-right">已用额度</th>
+            <th class="text-right">剩余金额</th>
+            <th class="text-right">已用金额</th>
             <th>有效期</th>
             <th>最近使用</th>
             <th>创建时间</th>
@@ -330,8 +334,10 @@ const isEmpty = computed(() => !loading.value && !error.value && tokens.value.le
                 </span>
               </td>
 
-              <td class="cell-num" data-label="剩余额度">{{ formatQuota(token.remain_quota, token.unlimited_quota) }}</td>
-              <td class="cell-num text-ink-300" data-label="已用额度">{{ formatNumber(token.used_quota) }}</td>
+              <td class="cell-num" data-label="剩余金额">
+                {{ token.unlimited_quota ? '不限额度' : yuanText(token.remain_quota) }}
+              </td>
+              <td class="cell-num text-ink-300" data-label="已用金额">{{ yuanText(token.used_quota) }}</td>
               <td class="cell-muted whitespace-nowrap" data-label="有效期">{{ formatExpiry(token.expires_at) }}</td>
               <td class="cell-muted whitespace-nowrap" data-label="最近使用">{{ token.last_used_at ? formatDateTime(token.last_used_at) : '从未使用' }}</td>
               <td class="cell-muted whitespace-nowrap" data-label="创建时间">{{ formatDateTime(token.created_at) }}</td>

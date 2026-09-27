@@ -33,9 +33,13 @@ import { fetchPaymentInfo } from '@/api/site'
 import type { PaymentOrder, PublicPaymentInfo } from '@/api/types'
 import { ORDER_STATUS_PAID, ORDER_STATUS_PENDING } from '@/api/types'
 import { toastError, toastSuccess } from '@/composables/useToast'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { useQuotaUnit } from '@/composables/useQuotaUnit'
+import { formatDateTime } from '@/utils/format'
 
 const route = useRoute()
+
+/** 余额 / 到账 / 消费一律折算成人民币展示（比例来自后端设置，见 useQuotaUnit） */
+const { yuanText, quotaText: rawQuotaText, rateText, quotaPerYuan } = useQuotaUnit()
 
 const info = ref<PublicPaymentInfo | null>(null)
 const infoLoading = ref(true)
@@ -107,11 +111,17 @@ const ordersError = ref('')
 
 let pollTimer = 0
 
-/** 兑换比例文案：让用户在付款前就明确"到账多少" */
+/**
+ * 到账口径文案。
+ *
+ * 为什么不再出现"1 CNY = 100 额度"：额度是站内计费单位，用户只认人民币，
+ * 页面上显示"充 1 元到账 100"曾被误认为算错。现在余额、到账、消费一律显示 ¥
+ * （充 1 元到账 ¥1.00），额度只在后台配置与模型单价换算里出现。
+ */
 const exchangeHint = computed(() => {
   const rate = info.value?.exchange_rate ?? 0
   if (rate <= 0) return '充值比例未配置，请联系管理员'
-  return `1 ${info.value?.currency || 'CNY'} = ${formatNumber(rate)} 额度`
+  return '充值金额实时到账，余额以人民币显示。'
 })
 
 /** 预计到账额度：与后端口径一致（元 × 汇率，向下取整） */
@@ -121,6 +131,9 @@ const estimatedQuota = computed(() => {
   if (cents <= 0 || rate <= 0) return 0
   return Math.floor((cents * rate) / 100)
 })
+
+/** 预计到账金额（人民币）：即服务端实际入账的额度折算回来，避免展示与到账不一致 */
+const estimatedYuan = computed(() => yuanText(estimatedQuota.value))
 
 const minYuan = computed(() => ((info.value?.min_cents ?? 0) / 100).toFixed(2))
 const maxYuan = computed(() => {
@@ -196,7 +209,7 @@ function startPolling(tradeNo: string): void {
       if (order.status !== ORDER_STATUS_PENDING) {
         stopPolling()
         if (order.status === ORDER_STATUS_PAID) {
-          toastSuccess(`充值成功，已到账 ${formatNumber(order.quota)} 额度`)
+          toastSuccess(`充值成功，已到账 ${yuanText(order.quota)}`)
         }
         await loadOrders()
       }
@@ -387,7 +400,7 @@ onBeforeUnmount(stopPolling)
           </div>
           <p class="hint">
             单笔限额：{{ minYuan }} 元{{ maxYuan ? ` ~ ${maxYuan} 元` : ' 起，不限上限' }}；
-            预计到账 <strong class="text-ink-100">{{ formatNumber(estimatedQuota) }}</strong> 额度。
+            预计到账 <strong class="text-ink-100">{{ estimatedYuan }}</strong>。
           </p>
         </div>
 
@@ -431,9 +444,9 @@ onBeforeUnmount(stopPolling)
               <code class="chip">{{ pendingOrder.trade_no }}</code>
             </div>
             <div class="flex items-center justify-between gap-3">
-              <span class="text-ink-400">金额 / 额度</span>
+              <span class="text-ink-400">支付 / 到账</span>
               <span class="font-mono text-ink-100">
-                ¥{{ pendingOrder.amount_text }} → {{ formatNumber(pendingOrder.quota) }}
+                ¥{{ pendingOrder.amount_text }} → {{ yuanText(pendingOrder.quota) }}
               </span>
             </div>
             <div class="flex items-center justify-between gap-3">
@@ -476,10 +489,14 @@ onBeforeUnmount(stopPolling)
             充值说明
           </h3>
           <ul class="mt-3 space-y-1.5 text-xs leading-relaxed text-ink-400">
-            <li>· 额度到账后立即可用，可直接用于所有已定价的模型调用。</li>
+            <li>· 充值金额实时到账，余额可直接用于所有已定价的模型调用。</li>
             <li>· 支付超时的订单会被自动关闭，关闭后不再受理，重新下单即可。</li>
-            <li>· 已支付订单如需退款，请联系管理员在后台处理（会扣回已入账额度）。</li>
-            <li>· 本页展示的金额与额度均由服务端计算，请以到账记录为准。</li>
+            <li>· 已支付订单如需退款，请联系管理员在后台处理（会扣回已入账余额）。</li>
+            <li>
+              · 余额以人民币显示；站内计费使用更细的计量单位「额度」
+              <template v-if="rateText">（{{ rateText }}，即 {{ rawQuotaText(quotaPerYuan) }} = ¥1.00）</template>
+              ，仅用于换算模型单价，不影响你的实际扣费金额。
+            </li>
           </ul>
         </div>
       </section>
@@ -495,7 +512,7 @@ onBeforeUnmount(stopPolling)
             <tr>
               <th>订单号</th>
               <th>金额</th>
-              <th class="text-right">到账额度</th>
+              <th class="text-right">到账金额</th>
               <th>方式</th>
               <th>状态</th>
               <th>创建时间</th>
@@ -517,7 +534,7 @@ onBeforeUnmount(stopPolling)
             <tr v-for="order in orders" :key="order.trade_no">
               <td data-label="订单号"><code class="font-mono text-[12px] text-ink-200">{{ order.trade_no }}</code></td>
               <td class="cell-num" data-label="金额">¥{{ order.amount_text }}</td>
-              <td class="cell-num" data-label="到账额度">{{ formatNumber(order.quota) }}</td>
+              <td class="cell-num" data-label="到账金额">{{ yuanText(order.quota) }}</td>
               <td class="cell-muted" data-label="方式">{{ orderMethodText(order) }}</td>
               <td data-label="状态">
                 <span :class="orderBadgeClass(order)">{{ order.status_text }}</span>

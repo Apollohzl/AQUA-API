@@ -41,6 +41,13 @@ export const useSiteStore = defineStore('site', () => {
   const emailCodeRequired = computed(() => status.value?.email_code_required === true)
   /** 邮件通道是否就绪：未就绪时注册页提前给出"请联系管理员"的提示 */
   const emailServiceReady = computed(() => status.value?.email_service_ready !== false)
+  /**
+   * 1 元可兑换的额度数（额度 ↔ 人民币 的展示折算比例）。
+   *
+   * 未拿到站点信息时为 0：调用方（useQuotaUnit）据此退回显示原始额度，
+   * 而不是用一个假设的比例把余额算成错的金额。
+   */
+  const quotaPerYuan = computed(() => status.value?.quota_per_yuan ?? 0)
 
   /**
    * 拉取站点信息。
@@ -70,6 +77,7 @@ export const useSiteStore = defineStore('site', () => {
     registrationEnabled,
     emailCodeRequired,
     emailServiceReady,
+    quotaPerYuan,
     load,
   }
 })

@@ -18,6 +18,7 @@ import { computed } from 'vue'
 
 import AppIcon from './AppIcon.vue'
 import type { TokenFormState } from '@/composables/tokenForm'
+import { useQuotaUnit } from '@/composables/useQuotaUnit'
 
 const props = withDefaults(
   defineProps<{
@@ -34,6 +35,25 @@ const emit = defineEmits<{ (e: 'update:modelValue', value: TokenFormState): void
 
 /** 有效期预设：契约里 0 表示永不过期，其余为天数 */
 const EXPIRY_PRESETS = [0, 7, 30, 90, 365]
+
+const { yuanText, rateText } = useQuotaUnit()
+
+/**
+ * 令牌额度输入的说明文案。
+ *
+ * 输入框保留整数「额度」：额度是整数单位，用户要精确控制上限时直接填整数最直观；
+ * 但填完必须立刻告诉他这等于多少钱 —— 否则"填 100 却看到余额显示 ¥1.00"
+ * 又会变成一次"是不是算错了"的困惑。
+ */
+const quotaHint = computed(() => {
+  const value = Number(props.modelValue.remain_quota)
+  const tail = '用尽后该令牌的调用会被拒绝（HTTP 429）。'
+  if (!Number.isFinite(value) || value <= 0) {
+    return `额度为平台内部计量单位，${tail}`
+  }
+  const rate = rateText.value ? `，${rateText.value}` : ''
+  return `约合 ${yuanText(value)}${rate}；${tail}`
+})
 
 /** 统一的状态更新入口：始终保持「不可变」写法，便于父组件追踪变化 */
 function patch<K extends keyof TokenFormState>(key: K, value: TokenFormState[K]): void {
@@ -163,7 +183,7 @@ function onUnlimitedChange(event: Event): void {
           :value="modelValue.remain_quota"
           @input="onQuotaInput"
         />
-        <p class="hint">额度为平台内部计量单位，用尽后该令牌的调用会被拒绝（HTTP 429）。</p>
+        <p class="hint">{{ quotaHint }}</p>
       </div>
     </div>
 

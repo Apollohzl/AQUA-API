@@ -27,7 +27,7 @@ import AppIcon from './AppIcon.vue'
 import CopyButton from './CopyButton.vue'
 import Modal from './Modal.vue'
 import type { PlazaModel, PlazaPrice } from '@/api/types'
-import { formatNumber } from '@/utils/format'
+import { useQuotaUnit } from '@/composables/useQuotaUnit'
 import { vendorInitial, vendorOf, vendorLabel, vendorTone } from '@/utils/vendor'
 
 const props = withDefaults(
@@ -45,6 +45,9 @@ const props = withDefaults(
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const { t } = useI18n()
+
+/** 单价折算成人民币展示（比例来自后端设置，见 useQuotaUnit） */
+const { yuanTextPrecise } = useQuotaUnit()
 
 const vendor = computed(() => (props.model ? vendorOf(props.model.model) : ''))
 
@@ -86,8 +89,9 @@ function showTokenPrice(price: PlazaPrice): boolean {
   return !isPerCall(price) && !price.is_free
 }
 
+/** 单价折算成人民币：价格表存的是"每 100 万 token 多少额度"，用户只认钱 */
 function priceText(value: number): string {
-  return value > 0 ? formatNumber(value) : t('components.modelDetail.unpriced')
+  return value > 0 ? yuanTextPrecise(value) : t('components.modelDetail.unpriced')
 }
 
 function ratioText(ratio: number): string {
@@ -167,7 +171,7 @@ function groupLabel(name: string): string {
               </td>
               <td class="cell-num">{{ showTokenPrice(price) ? priceText(price.prompt_price) : '—' }}</td>
               <td class="cell-num">{{ showTokenPrice(price) ? priceText(price.completion_price) : '—' }}</td>
-              <td class="cell-num">{{ isPerCall(price) ? formatNumber(price.per_call_price) : '—' }}</td>
+              <td class="cell-num">{{ isPerCall(price) ? yuanTextPrecise(price.per_call_price) : '—' }}</td>
             </tr>
             <tr v-if="!model.prices.length">
               <td colspan="5" class="cell-muted text-center">{{ t('components.modelDetail.noPrice') }}</td>

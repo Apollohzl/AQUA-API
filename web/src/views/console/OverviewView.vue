@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /**
- * 用户门户 · 概览：额度、用量趋势、模型分布、最近调用。
+ * 用户门户 · 概览：余额、用量趋势、模型分布、最近调用。
  *
  * 意图（Why）：
- *   用户进入控制台最先关心两件事——「我还有多少额度」和「我的调用是否正常」；
- *   因此页面顺序固定为：额度概览卡 → 用量趋势 → 模型分布 → 最近调用。
+ *   用户进入控制台最先关心两件事——「我还有多少钱」和「我的调用是否正常」；
+ *   因此页面顺序固定为：余额概览卡 → 用量趋势 → 模型分布 → 最近调用。
+ *   余额与消费按后端配置的兑换比例折算成人民币展示（用户只认钱，不认额度）。
  *
  *   为什么「创建令牌」用例内弹窗而不是跳去「访问令牌」页：
  *   概览是新用户的第一步，此时他还没令牌、只想赶紧拿一把跑起来。
@@ -45,6 +46,7 @@ import {
   type TokenFormState,
 } from '@/composables/tokenForm'
 import { toastSuccess } from '@/composables/useToast'
+import { useQuotaUnit } from '@/composables/useQuotaUnit'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import {
@@ -164,9 +166,23 @@ function closeKeyDialog(): void {
 
 /* ── 统计卡数值 ───────────────────────────────────────── */
 
-/** 剩余额度：契约未定义 quota 的单位与语义，这里按「账户额度」如实展示数值 */
-const quotaText = computed(() => formatNumber(auth.user?.quota ?? 0))
-const usedQuotaText = computed(() => formatNumber(auth.user?.used_quota ?? 0))
+/**
+ * 余额与消费一律折算成人民币展示。
+ *
+ * 为什么不在页面上直接显示额度数值：额度是站内计费单位（1 元 = 100 额度），
+ * 用户充了 1 元却看到「100」，会以为系统算错。折算比例取自后端设置，
+ * 前端的职责只是"把同一个数换成用户看得懂的单位"。
+ * 详见 composables/useQuotaUnit.ts。
+ */
+const { yuanText, quotaText: rawQuotaText, rateText } = useQuotaUnit()
+
+const quotaText = computed(() => yuanText(auth.user?.quota ?? 0))
+const usedQuotaText = computed(() => yuanText(auth.user?.used_quota ?? 0))
+/** 余额卡的补充说明：把折算比例与原始额度都摆出来，避免"钱从哪来的"疑问 */
+const balanceHint = computed(() => {
+  if (!rateText.value) return '额度单位由后端定义，用于计量模型调用消耗。'
+  return `${rawQuotaText(auth.user?.quota ?? 0)}（按 ${rateText.value} 折算）`
+})
 const requestsText = computed(() => formatNumber(usage.value?.total_requests ?? 0))
 const tokensText = computed(() => formatCompact(usage.value?.total_tokens ?? 0))
 
@@ -276,7 +292,7 @@ const hasModelData = computed(() => (usage.value?.by_model ?? []).length > 0)
     <div class="page-head">
       <div>
         <h2 class="page-title">概览</h2>
-        <p class="page-desc">这里是你的账户额度与调用概况。</p>
+        <p class="page-desc">这里是你的账户余额与调用概况。</p>
       </div>
       <div class="toolbar">
         <button type="button" class="btn btn-primary btn-sm" @click="openCreateToken">
@@ -290,12 +306,12 @@ const hasModelData = computed(() => (usage.value?.by_model ?? []).length > 0)
       </div>
     </div>
 
-    <!-- 额度与用量汇总 -->
+    <!-- 余额与用量汇总 -->
     <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <StatCard label="账户额度" :value="quotaText" icon="quota" tone="brand">
-        <p class="text-xs text-ink-400">额度单位由后端定义，用于计量模型调用消耗。</p>
+      <StatCard label="账户余额" :value="quotaText" icon="quota" tone="brand">
+        <p class="text-xs text-ink-400">{{ balanceHint }}</p>
       </StatCard>
-      <StatCard label="已用额度" :value="usedQuotaText" icon="trend" tone="warn">
+      <StatCard label="已用金额" :value="usedQuotaText" icon="trend" tone="warn">
         <p class="text-xs text-ink-400">累计消耗，随调用实时增长。</p>
       </StatCard>
       <StatCard

@@ -29,7 +29,7 @@ import { useI18n } from 'vue-i18n'
 
 import AppIcon from './AppIcon.vue'
 import type { PlazaModel, PlazaPrice } from '@/api/types'
-import { formatNumber } from '@/utils/format'
+import { useQuotaUnit } from '@/composables/useQuotaUnit'
 import { vendorInitial, vendorOf, vendorTone } from '@/utils/vendor'
 
 const props = withDefaults(
@@ -49,6 +49,9 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+/** 模型单价折算成人民币展示（比例来自后端设置，见 useQuotaUnit） */
+const { yuanTextPrecise } = useQuotaUnit()
 
 /** 所属分组的展示名列表 */
 const groupLabelsOfModel = computed(() =>
@@ -76,9 +79,14 @@ function billingCaption(prices: PlazaPrice[]): string {
   return t('components.modelCard.billingPerMillion')
 }
 
-/** 格式化成 "每 1M" 的读数：价格为 0 表示未定价 */
+/**
+ * 格式化成 "每 1M" 的读数：价格为 0 表示未定价。
+ *
+ * 价格表里存的是"每 100 万 token 多少额度"，这里折算成人民币展示——
+ * 用户在选模型时想比的是"贵不贵"，额度对他没有意义。折算比例来自后端设置。
+ */
 function tokenPriceText(value: number): string {
-  return value > 0 ? formatNumber(value) : t('components.modelCard.unpriced')
+  return value > 0 ? yuanTextPrecise(value) : t('components.modelCard.unpriced')
 }
 
 /** 倍率展示：100 显示为 1.0x */
@@ -165,7 +173,7 @@ function onCopy(): void {
           </span>
           <!-- 按次计费与按 token 计费是两种口径，展示上必须区分 -->
           <span v-else-if="isPerCall(price)" class="whitespace-nowrap font-mono text-ink-200">
-            {{ formatNumber(price.per_call_price) }} <span class="text-ink-500">{{ t('components.modelCard.perCall') }}</span>
+            {{ yuanTextPrecise(price.per_call_price) }} <span class="text-ink-500">{{ t('components.modelCard.perCall') }}</span>
           </span>
           <span v-else class="whitespace-nowrap font-mono text-ink-200" :title="t('components.modelCard.perMillionTitle')">
             {{ tokenPriceText(price.prompt_price) }} / {{ tokenPriceText(price.completion_price) }}

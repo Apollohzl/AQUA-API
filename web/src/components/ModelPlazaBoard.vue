@@ -37,8 +37,8 @@ import { ApiError } from '@/api/client'
 import { fetchModelPlaza } from '@/api/site'
 import type { PlazaModel } from '@/api/types'
 import { toastSuccess } from '@/composables/useToast'
+import { useQuotaUnit } from '@/composables/useQuotaUnit'
 import { copyText } from '@/utils/clipboard'
-import { formatNumber } from '@/utils/format'
 import { vendorInitial, vendorLabel, vendorOf, vendorTone } from '@/utils/vendor'
 
 /** 状态筛选维度 */
@@ -51,6 +51,9 @@ type ViewMode = 'grid' | 'list'
 type SkipFacet = 'none' | 'group' | 'vendor' | 'status'
 
 const { t } = useI18n()
+
+/** 模型单价折算成人民币展示（比例来自后端设置，见 useQuotaUnit） */
+const { yuanTextPrecise } = useQuotaUnit()
 
 /** 排序选项（computed：文案随语言切换重算） */
 const SORT_OPTIONS = computed<{ key: SortKey; label: string }[]>(() => [
@@ -221,9 +224,9 @@ function priceSummary(model: PlazaModel): string {
   if (!model.prices.length) return t('components.plaza.unpriced')
   if (model.prices.every((price) => price.is_free)) return t('components.modelCard.free')
   const perCall = model.prices.find((price) => price.per_call_price > 0)
-  if (perCall) return `${formatNumber(perCall.per_call_price)} ${t('components.modelCard.perCall')}`
+  if (perCall) return `${yuanTextPrecise(perCall.per_call_price)} ${t('components.modelCard.perCall')}`
   const first = model.prices[0]
-  return `${formatNumber(first.prompt_price)} / ${formatNumber(first.completion_price)}`
+  return `${yuanTextPrecise(first.prompt_price)} / ${yuanTextPrecise(first.completion_price)}`
 }
 
 /** 列表视图的价格口径说明（列头用，避免用户误读单位） */

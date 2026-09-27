@@ -56,6 +56,14 @@ export interface SiteStatus {
   email_code_required: boolean
   /** 邮件发送通道是否已就绪；false 时即使开启校验也收不到验证码 */
   email_service_ready: boolean
+  /**
+   * 1 元可兑换的额度数（充值兑换比例，默认 100）。
+   *
+   * 额度是站内计费单位（1 元 = 100 额度，即 1 额度 ≈ 1 分），用户只认人民币。
+   * 用户门户据此把余额、消费、模型单价折算成 ¥ 展示；
+   * 为 0 表示后端未提供，此时退回显示原始额度。
+   */
+  quota_per_yuan: number
 }
 
 /** 登录 / 注册返回的用户摘要（契约二、三节） */

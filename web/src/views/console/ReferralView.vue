@@ -26,7 +26,11 @@ import DataState from '@/components/DataState.vue'
 import { ApiError } from '@/api/client'
 import { checkin, fetchReferral, type ReferralInfo } from '@/api/referral'
 import { toastError, toastSuccess } from '@/composables/useToast'
+import { useQuotaUnit } from '@/composables/useQuotaUnit'
 import { formatNumber } from '@/utils/format'
+
+/** 奖励与返利一律按人民币展示（比例来自后端设置，见 useQuotaUnit） */
+const { yuanText } = useQuotaUnit()
 
 const info = ref<ReferralInfo | null>(null)
 const loading = ref(true)
@@ -60,7 +64,7 @@ async function handleCheckin(): Promise<void> {
     const status = await checkin()
     info.value = { ...info.value, checkin: status }
     if (status.daily_quota > 0) {
-      toastSuccess(`签到成功，获得 ${formatNumber(status.daily_quota)} 额度`)
+      toastSuccess(`签到成功，获得 ${yuanText(status.daily_quota)}`)
     } else {
       toastSuccess('签到成功')
     }
@@ -129,14 +133,14 @@ onMounted(load)
           </div>
           <div class="rounded-lg border border-ink-800 px-3 py-3">
             <p class="text-xs text-ink-500">累计返利</p>
-            <p class="mt-1 font-mono text-xl font-semibold text-brand-700">{{ formatNumber(info.total_reward_quota) }}</p>
+            <p class="mt-1 font-mono text-xl font-semibold text-brand-700">{{ yuanText(info.total_reward_quota) }}</p>
           </div>
         </div>
 
         <ul class="mt-4 space-y-1.5 text-xs leading-relaxed text-ink-400">
           <li>
             · 好友注册成功，你可获得
-            <strong class="text-ink-200">{{ formatNumber(info.register_bonus_quota) }}</strong> 额度。
+            <strong class="text-ink-200">{{ yuanText(info.register_bonus_quota) }}</strong> 余额。
           </li>
           <li>· 好友每笔充值入账后，你会按后台设置的比例获得返利（同一笔只返一次）。</li>
           <li>· 邀请关系在好友注册时确定，之后不可更改，请分享给真实用户。</li>
@@ -154,7 +158,7 @@ onMounted(load)
           <p class="mt-3 text-sm text-ink-300">
             每天签到
             <template v-if="info.checkin.daily_quota > 0">
-              可获得 <strong class="text-brand-700">{{ formatNumber(info.checkin.daily_quota) }}</strong> 额度
+              可获得 <strong class="text-brand-700">{{ yuanText(info.checkin.daily_quota) }}</strong> 余额
             </template>
             <template v-else>可累计连续天数</template>
             ，按北京时间计算，每天仅一次。
@@ -171,7 +175,7 @@ onMounted(load)
             </div>
             <div class="rounded-lg border border-ink-800 px-2 py-3">
               <p class="text-xs text-ink-500">累计获得</p>
-              <p class="mt-1 font-mono text-lg font-semibold text-brand-700">{{ formatNumber(info.checkin.total_quota) }}</p>
+              <p class="mt-1 font-mono text-lg font-semibold text-brand-700">{{ yuanText(info.checkin.total_quota) }}</p>
             </div>
           </div>
 

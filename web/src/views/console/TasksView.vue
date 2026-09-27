@@ -94,7 +94,7 @@ const emptyHint = computed(() =>
         <h2 class="page-title">生成任务</h2>
         <p class="page-desc">
           通过 <code class="chip">POST /v1/tasks</code> 提交的图像、视频等异步任务。
-          任务在提交时扣减额度，失败或取消会自动退还。
+          任务在提交时即扣费，失败或取消会自动退还。
         </p>
       </div>
       <div class="toolbar">
@@ -146,7 +146,7 @@ const emptyHint = computed(() =>
 curl {{ baseUrl }}/tasks/&lt;任务号&gt; -H "Authorization: Bearer &lt;你的访问令牌&gt;"</pre>
       </div>
       <p class="hint">
-        提示：模型名可在「模型广场」查看；任务在提交时即扣费，失败会自动退还，不会白花额度。
+        提示：模型名可在「模型广场」查看；任务在提交时即扣费，失败会自动退还，不会白花钱。
       </p>
     </section>
   </div>

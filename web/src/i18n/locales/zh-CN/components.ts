@@ -66,7 +66,7 @@ export default {
       cached: '缓存',
       reasoning: '推理',
       total: '合计',
-      quota: '配额',
+      quota: '费用',
       latency: '延迟',
       firstToken: '首包',
       tps: '速率',
@@ -146,7 +146,7 @@ export default {
     perCall: '/ 次',
     /** 显式免费（站长明确设置为不收费，区别于"未配置价格"） */
     free: '免费',
-    perMillionTitle: '每 100 万 token 的额度',
+    perMillionTitle: '每 100 万 token 的费用（人民币）',
     billingPerCall: '按次计费',
     billingPerMillion: '输入 / 输出（每 100 万 token）',
     billingFree: '该模型免费开放，调用不计费',

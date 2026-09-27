@@ -24,6 +24,7 @@ import { useI18n } from 'vue-i18n'
 import AppIcon from './AppIcon.vue'
 import DataState from './DataState.vue'
 import type { UsageLog } from '@/api/types'
+import { useQuotaUnit } from '@/composables/useQuotaUnit'
 import { EMPTY, formatDateTime, formatLatency, formatNumber, formatPercent, formatRate, formatRelative } from '@/utils/format'
 import { httpStatusBadgeClass } from '@/utils/display'
 
@@ -53,12 +54,21 @@ const emit = defineEmits<{ (e: 'retry'): void }>()
 
 const { t } = useI18n()
 
+/**
+ * 费用列按人民币展示。
+ *
+ * 为什么日志表不显示原始额度：日志里这一列回答的是"这次调用花了多少钱"，
+ * 而额度是站内计费单位（1 元 = 100 额度），站长与用户都要在脑子里做一次除法。
+ * 折算比例来自后端设置，原始额度保留在单元格的悬浮提示里，便于精确对账。
+ */
+const { yuanTextPrecise, quotaText: rawQuotaText } = useQuotaUnit()
+
 const emptyMessage = computed(() => props.emptyText ?? t('components.logTable.empty'))
 const emptyDescription = computed(() => props.emptyHint ?? t('components.logTable.emptyHint'))
 
 /**
  * 总列数：用于空态/加载态行的 colSpan。
- * 基数 13 对应「时间/模型/令牌/输入/输出/缓存/合计/配额/延迟/首包/速率/类型/状态」，两列可选列在此叠加。
+ * 基数 13 对应「时间/模型/令牌/输入/输出/缓存/合计/费用/延迟/首包/速率/类型/状态」，两列可选列在此叠加。
  */
 const columnCount = computed(() => 13 + (props.showUser ? 1 : 0) + (props.showChannel ? 1 : 0))
 
@@ -178,7 +188,9 @@ function cachePercent(log: UsageLog): number {
             </td>
 
             <td class="cell-num" :data-label="$t('components.logTable.col.total')">{{ formatNumber(log.total_tokens) }}</td>
-            <td class="cell-num" :data-label="$t('components.logTable.col.quota')">{{ formatNumber(log.quota) }}</td>
+            <td class="cell-num" :data-label="$t('components.logTable.col.quota')">
+              <span :title="rawQuotaText(log.quota)">{{ yuanTextPrecise(log.quota) }}</span>
+            </td>
             <td class="cell-num text-ink-300" :data-label="$t('components.logTable.col.latency')">{{ formatLatency(log.latency_ms) }}</td>
 
             <td class="cell-num text-ink-300" :data-label="$t('components.logTable.col.firstToken')">
