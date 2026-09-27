@@ -19,7 +19,7 @@ func TestChannelRepository_多分组_创建读回与匹配(t *testing.T) {
 
 	ch := newValidChannel()
 	ch.Name = "多分组渠道"
-	ch.Group = "free"                     // 主分组 = 清单首项
+	ch.Group = "free"                    // 主分组 = 清单首项
 	ch.Groups = []string{"free", "aqua"} // 同时服务免费组与自营组
 	if err := repo.Create(ctx, ch); err != nil {
 		t.Fatalf("Create 失败: %v", err)
