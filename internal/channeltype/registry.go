@@ -204,6 +204,13 @@ const (
 	ProtocolAzure Protocol = "azure"
 	// ProtocolAnthropic Anthropic Messages。
 	ProtocolAnthropic Protocol = "anthropic"
+	// ProtocolCodex 是 ChatGPT 订阅账号（Codex）的内部端点协议。
+	//
+	// 它与 OpenAI 兼容协议的关系是"同源但不同代"：请求体是 Responses API
+	// （input/instructions 而非 messages），鉴权用订阅账号的 OAuth access_token
+	// 并额外要求 chatgpt-account-id 等头。因此必须有专用适配器，
+	// 不能当成普通 OpenAI 兼容上游。
+	ProtocolCodex Protocol = "codex"
 	// ProtocolGemini Gemini 原生（模型名与动作在路径里）。
 	ProtocolGemini Protocol = "gemini"
 	// ProtocolVertex Vertex AI（服务账号 + 项目/区域）。

@@ -146,6 +146,18 @@ func prepareChannelUpstream(
 	ch *model.Channel, apiKey, modelName, path string,
 	body []byte, headers http.Header, stream bool,
 ) (channeltype.Type, []byte, *UpstreamRequest, error) {
+	return prepareChannelUpstreamFor(ch, apiKey, modelName, path, body, headers, stream, CredentialMeta{})
+}
+
+// prepareChannelUpstreamFor 在 prepareChannelUpstream 之上额外接受「凭据级元数据」。
+//
+// 为什么用第二个函数而不是直接改签名：账号级元数据只有订阅类协议（Codex）需要，
+// 其余调用方（探活、测试）传空即可。多一个薄包装比让所有调用点都多传一个参数更省事，
+// 也让"哪些调用方真的关心账号元数据"一眼可见。
+func prepareChannelUpstreamFor(
+	ch *model.Channel, apiKey, modelName, path string,
+	body []byte, headers http.Header, stream bool, meta CredentialMeta,
+) (channeltype.Type, []byte, *UpstreamRequest, error) {
 	spec := upstreamSpecForChannel(ch)
 
 	outBody, err := encodeUpstreamRequestBody(spec, body)
@@ -154,15 +166,16 @@ func prepareChannelUpstream(
 	}
 
 	built, err := buildUpstreamRequest(upstreamRequestInput{
-		Type:    spec,
-		BaseURL: ch.BaseURL,
-		APIKey:  apiKey,
-		Model:   modelName,
-		Path:    path,
-		Headers: headers,
-		Extra:   ch.ExtraConfig,
-		Stream:  stream,
-		Body:    outBody,
+		Type:       spec,
+		BaseURL:    ch.BaseURL,
+		APIKey:     apiKey,
+		Model:      modelName,
+		Path:       path,
+		Headers:    headers,
+		Extra:      ch.ExtraConfig,
+		Credential: meta,
+		Stream:     stream,
+		Body:       outBody,
 	})
 	if err != nil {
 		return spec, nil, nil, err
@@ -187,6 +200,11 @@ type upstreamRequestInput struct {
 	// Extra 是渠道的类型专属参数（如 Azure 的 deployment / api_version、
 	// Bedrock 的 region、Vertex 的 project_id / region / publisher）。
 	Extra map[string]string
+	// Credential 是"随凭据而来的账号级元数据"（如 Codex 的 chatgpt_account_id）。
+	//
+	// 与 Extra 的分工：Extra 来自【渠道配置】（一个渠道一份），
+	// Credential 来自【本次选中的凭据】（同渠道不同账号各不相同）。
+	Credential CredentialMeta
 	// Stream 表示本次请求是否要求流式返回。
 	//
 	// 仅少数协议需要它：Gemini 把"是否流式"写进路径与查询参数，而 OpenAI /
@@ -291,6 +309,13 @@ func buildUpstreamRequest(in upstreamRequestInput) (*UpstreamRequest, error) {
 		req.authInjected = injected
 	}
 
+	// 凭据附带的身份头（目前仅 Codex 的账号标识与客户端身份）。
+	// 放在鉴权之后：它依赖同一份凭据，且缺失时必须以可读原因拒绝，
+	// 而不是发起一次注定失败的上游请求。
+	if err := applyCredentialHeaders(in.Type, in.Credential, in.APIKey, req.Header); err != nil {
+		return nil, err
+	}
+
 	rawQuery := query.Encode()
 	req.URL = base + path
 	if rawQuery != "" {
@@ -347,6 +372,12 @@ func upstreamPath(in upstreamRequestInput) string {
 		}
 	case channeltype.ProtocolAnthropic:
 		path = anthropicMessagesPath
+	case channeltype.ProtocolCodex:
+		// 订阅账号只有 /responses 一个对话端点。
+		//
+		// 刻意不看 in.Stream 分叉：上游无论下游要不要流式，都必须以 SSE 返回
+		// （请求体里 stream 被强制为 true），非流式需求由响应侧聚合完成。
+		path = codexResponsesPath
 	case channeltype.ProtocolGemini:
 		// Gemini 的模型名直接进路径（模板里已含 /models/ 前缀），
 		// 因此去掉调用方可能多带的前缀，避免拼出 /models/models/...。
@@ -475,6 +506,11 @@ func applyUpstreamAuth(spec channeltype.Type, apiKey string, header http.Header,
 		return true, nil
 	case channeltype.AuthNone:
 		return false, nil
+	case channeltype.AuthOAuth:
+		// 订阅账号：进来的是"已刷新过的 access_token"（续期见 relay/oauth.go），
+		// 因此出站形态与 Bearer 完全一致，差别只在令牌会过期、需要提前续期。
+		header.Set("Authorization", "Bearer "+apiKey)
+		return true, nil
 	default:
 		return false, fmt.Errorf(
 			"relay: 渠道类型 %s 的鉴权方式 %q 尚未实现，无法组装上游请求",

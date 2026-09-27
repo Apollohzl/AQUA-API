@@ -235,11 +235,12 @@ func TestBuildUpstreamRequest_地址全空报错(t *testing.T) {
 
 // TestBuildUpstreamRequest_未实现鉴权报错 验证未实现的鉴权方式被明确拒绝。
 //
-// 现在仍属未实现的是订阅型鉴权（OAuth / Cookie）：用于订阅账号池，需要令牌续期能力。
-// Bedrock 的 SigV4 与 Vertex 的服务账号已实现，改由专门用例覆盖（见 signature_test.go
-// 与 upstream_signature_test.go），此处不应再拿它们当"未实现"样例。
+// 现在仍属未实现的是浏览器 Cookie 会话（AuthCookie）：它需要模拟网页端登录态，
+// 与"用凭据换令牌"的 OAuth 完全不同。
+// 注意不要再拿 AuthOAuth 当"未实现"样例——订阅账号的刷新链路已实现
+// （见 relay/oauth.go 与 Codex 协议适配），它现在是被支持的方式。
 func TestBuildUpstreamRequest_未实现鉴权报错(t *testing.T) {
-	spec := mustType(t, "claude_subscription") // AuthOAuth 尚未实现
+	spec := mustType(t, "grok_subscription") // AuthCookie 尚未实现
 
 	_, err := buildUpstreamRequest(upstreamRequestInput{
 		Type:    spec,

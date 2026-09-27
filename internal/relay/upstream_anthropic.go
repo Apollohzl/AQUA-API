@@ -125,6 +125,14 @@ func encodeUpstreamRequestBody(spec channeltype.Type, body []byte) ([]byte, erro
 			return nil, fmt.Errorf("%w: %v", errRequestBodyConversion, err)
 		}
 		return converted, nil
+	case channeltype.ProtocolCodex:
+		// 订阅账号：chat.completions → Responses（store/stream/instructions 三条硬约束
+		// 也在这个函数里被强制满足）。
+		converted, err := encodeCodexRequest(body)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", errRequestBodyConversion, err)
+		}
+		return converted, nil
 	default:
 		return body, nil
 	}
@@ -769,6 +777,10 @@ func normalizeUpstreamResponse(spec channeltype.Type, resp *http.Response, wantS
 	case channeltype.ProtocolVertex:
 		// 与请求方向同理：Vertex 的响应体与 Gemini 同构，复用同一套改写逻辑。
 		return adjustGeminiUpstreamResponse(resp, wantStream)
+	case channeltype.ProtocolCodex:
+		// 订阅账号：把 Responses 事件流改写成 chat.completions
+		// （非流式时聚合成一个完整响应）。
+		return adjustCodexUpstreamResponse(resp, wantStream)
 	default:
 		return nil
 	}

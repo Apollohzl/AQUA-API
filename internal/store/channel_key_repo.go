@@ -36,7 +36,8 @@ import (
 const channelKeyColumns = `id, channel_id, kind, key_enc, label, status, fail_count, last_used_at, last_error, created_at, ` +
 	`refresh_token_enc, access_token_enc, expires_at, account_hint, provider, ` +
 	`weight, priority, in_flight, cooldown_until, rpm_limit, window_start, window_count, ` +
-	`balance, balance_updated_at`
+	`balance, balance_updated_at, ` +
+	`account_id, plan_type, quota_used_percent, quota_reset_at, quota_checked_at`
 
 // channelKeyRepository 是 model.ChannelKeyRepository 的 SQL 实现，并发安全。
 type channelKeyRepository struct {
@@ -206,13 +207,17 @@ func (r *channelKeyRepository) ReplaceCredentials(ctx context.Context, channelID
 			INSERT INTO channel_keys
 				(channel_id, kind, key_enc, key_hash, label, status, fail_count, last_used_at, last_error,
 				 created_at, refresh_token_enc, access_token_enc, expires_at, account_hint, provider,
-				 balance, balance_updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, 0, 0, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
+				 balance, balance_updated_at, account_id, plan_type, quota_used_percent)
+			VALUES (?, ?, ?, ?, ?, ?, 0, 0, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			channelID, string(input.Kind), keyEnc, hash, strings.TrimSpace(input.Label),
 			int(model.ChannelKeyStatusEnabled), now,
 			refreshEnc, accessEnc, unixOrZero(input.ExpiresAt),
 			strings.TrimSpace(input.AccountHint), strings.TrimSpace(input.Provider),
-			balance, balanceUpdatedAt); err != nil {
+			balance, balanceUpdatedAt,
+			strings.TrimSpace(input.AccountID), strings.TrimSpace(input.PlanType),
+			// 新导入的凭据额度一律"未探测"：让探测任务去填，
+			// 而不是把 0（= 完全没用）当成事实写进去。
+			model.QuotaUsedPercentUnknown); err != nil {
 			return 0, 0, fmt.Errorf("store: 新增凭据失败: %w", err)
 		}
 		added++
@@ -709,6 +714,66 @@ func (r *channelKeyRepository) UpdateBalance(ctx context.Context, id uint64, bal
 	return nil
 }
 
+// UpdateAccountMeta 写入订阅账号的账号级元数据（account_id / plan_type）。
+//
+// 空值语义：空串表示"本次没有新信息"，对应的列保持原值不变。
+// 这与"显式清空"不同——刷新响应里常常不回传 plan_type，若无条件写入会把
+// 原本已知的套餐抹成空，反而丢信息。
+func (r *channelKeyRepository) UpdateAccountMeta(ctx context.Context, id uint64, accountID, planType string) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE channel_keys SET
+			account_id = CASE WHEN ? = '' THEN account_id ELSE ? END,
+			plan_type  = CASE WHEN ? = '' THEN plan_type  ELSE ? END
+		WHERE id = ?`,
+		strings.TrimSpace(accountID), strings.TrimSpace(accountID),
+		strings.TrimSpace(planType), strings.TrimSpace(planType), id)
+	if err != nil {
+		return fmt.Errorf("store: 更新凭据 %d 的账号元数据失败: %w", id, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: 读取影响行数失败: %w", err)
+	}
+	if affected == 0 {
+		return model.ErrChannelKeyNotFound
+	}
+	return nil
+}
+
+// UpdateQuota 写入额度探测结果。
+//
+// usedPercent 传 model.QuotaUsedPercentUnknown 表示"探测失败/上游不提供"，
+// 此时把快照置回未知（并刷新 checked_at），避免界面继续展示一个越来越过时的旧值。
+//
+// resetAt 为零值时保留原重置时间？——不保留：额度窗口是会变的，
+// 保留旧的"重置时间"会让 QuotaExhausted 依据过期数据做判断。因此一并写入本次探测值。
+func (r *channelKeyRepository) UpdateQuota(ctx context.Context, id uint64, usedPercent int, resetAt, checkedAt time.Time) error {
+	if usedPercent < model.QuotaUsedPercentUnknown {
+		usedPercent = model.QuotaUsedPercentUnknown
+	}
+	if checkedAt.IsZero() {
+		checkedAt = time.Now()
+	}
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE channel_keys SET
+			quota_used_percent = ?,
+			quota_reset_at = ?,
+			quota_checked_at = ?
+		WHERE id = ?`,
+		usedPercent, unixOrZero(resetAt), checkedAt.Unix(), id)
+	if err != nil {
+		return fmt.Errorf("store: 更新凭据 %d 的额度快照失败: %w", id, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: 读取影响行数失败: %w", err)
+	}
+	if affected == 0 {
+		return model.ErrChannelKeyNotFound
+	}
+	return nil
+}
+
 // scanChannelKey 把一行数据映射为凭据对象，并完成解密。
 func (r *channelKeyRepository) scanChannelKey(sc rowScanner) (*model.ChannelKey, error) {
 	var (
@@ -736,13 +801,19 @@ func (r *channelKeyRepository) scanChannelKey(sc rowScanner) (*model.ChannelKey,
 		windowCount  int
 		balance      int64
 		balanceAt    int64
+		accountID    string
+		planType     string
+		quotaUsed    int
+		quotaReset   int64
+		quotaChecked int64
 	)
 
 	if err := sc.Scan(&id, &channelID, &kind, &encryptedKey, &label, &status,
 		&failCount, &lastUsedAt, &lastError, &createdAt,
 		&refreshEnc, &accessEnc, &expiresAt, &accountHint, &provider,
 		&weight, &priority, &inFlight, &cooldownEnd, &rpmLimit, &windowStart, &windowCount,
-		&balance, &balanceAt); err != nil {
+		&balance, &balanceAt,
+		&accountID, &planType, &quotaUsed, &quotaReset, &quotaChecked); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
@@ -796,6 +867,12 @@ func (r *channelKeyRepository) scanChannelKey(sc rowScanner) (*model.ChannelKey,
 
 		Balance:          balance,
 		BalanceUpdatedAt: unixToExpiresAt(balanceAt),
+
+		AccountID:        accountID,
+		PlanType:         planType,
+		QuotaUsedPercent: quotaUsed,
+		QuotaResetAt:     unixToExpiresAt(quotaReset),
+		QuotaCheckedAt:   unixToExpiresAt(quotaChecked),
 	}, nil
 }
 

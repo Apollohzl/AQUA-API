@@ -353,6 +353,12 @@ func (k CredentialKind) IsValid() bool {
 // 提前 60 秒刷新可以把这类失败窗口完全消除，代价只是偶尔多刷一次。
 const refreshAheadSeconds = 60
 
+// QuotaUsedPercentUnknown 表示"该凭据的额度尚未探测过"。
+//
+// 为什么用 -1 而不是 0：0 是一个合法且常见的真实值（一次都没用过），
+// 若用 0 兼任"未知"，界面会把"没查过"显示成"额度充足"，站长据此判断会出错。
+const QuotaUsedPercentUnknown = -1
+
 // ChannelKey 表示渠道下的一条凭据（API Key 或 OAuth 账号）。
 type ChannelKey struct {
 	ID        uint64           // 主键
@@ -400,6 +406,29 @@ type ChannelKey struct {
 	// Provider 是关联的 OAuth 提供方名字（对应 oauth_providers.name）。
 	Provider string
 
+	// 以下为「订阅账号元数据」（迁移 0028 新增）。
+	//
+	// 这些字段只对订阅类账号（如 ChatGPT/Codex）有意义，对 API Key 型凭据一律为空/未知。
+	// 它们不是运营备注而是【转发所必需】：AccountID 缺了上游会直接拒绝请求，
+	// 而额度快照决定了调度该不该跳过它。
+	//
+	// AccountID 是上游账号标识（chatgpt_account_id），出站时写入 chatgpt-account-id 头。
+	//
+	// 为什么必须逐个账号存而不能用渠道级配置：同一渠道的池里是不同人的订阅账号，
+	// 用错账号 ID 的后果是上游 401/403（且报错不指向根因），极难排查。
+	AccountID string
+	// PlanType 是套餐标识（plus / pro / team…），仅用于展示与筛选。
+	PlanType string
+	// QuotaUsedPercent 是主额度窗口已用百分比；QuotaUsedPercentUnknown(-1) 表示未探测。
+	//
+	// 与 Balance 的分工：Balance 是站长人工维护的"钱"，QuotaUsedPercent 是
+	// 从上游自动探测来的"额度窗口用量"；前者能拦"余额为 0"，后者能拦"订阅额度已满"。
+	QuotaUsedPercent int
+	// QuotaResetAt 是额度窗口的重置时间；零值表示未知（或不存在窗口）。
+	QuotaResetAt time.Time
+	// QuotaCheckedAt 是上次探测额度的时刻；零值表示从未探测。
+	QuotaCheckedAt time.Time
+
 	// LastUsedAt 为最近被选中使用的时间；零值表示从未使用。
 	LastUsedAt time.Time
 	// LastError 为最近一次失败原因（已脱敏，只记状态码与简短描述）。
@@ -434,6 +463,44 @@ func (k *ChannelKey) CoolingDown(now time.Time) bool {
 //	因此这里只作为调度过滤条件——补录成正数后它自然重新参与。
 func (k *ChannelKey) BalanceExhausted() bool {
 	return k.Balance >= 0 && k.Balance <= 0
+}
+
+// QuotaKnown 判断该凭据的额度是否已被探测过。
+//
+// 未探测（QuotaUsedPercent < 0）时不做任何额度约束——
+// 宁可让它试一次再由上游拒绝，也不要因为"没查过"就把好账号判定为不可用。
+func (k *ChannelKey) QuotaKnown() bool {
+	return k.QuotaUsedPercent >= 0
+}
+
+// QuotaExhausted 判断该凭据的订阅额度是否已用满。
+//
+// 判定规则（两条同时成立才算用满）：
+//  1. 已探测且已用百分比 >= 100；
+//  2. 重置时间未知，或重置时间还没到。
+//
+// 第 2 条是必要的：额度是"窗口用量"，快照会过时。若重置时刻已过而我们还按旧的
+// 100% 过滤，账号会在新窗口里被白白闲置——直到下一次探测才恢复。
+// 把"重置时间已过"视为"额度已刷新"，可以让恢复时间不依赖探测任务的及时性。
+func (k *ChannelKey) QuotaExhausted(now time.Time) bool {
+	if !k.QuotaKnown() || k.QuotaUsedPercent < 100 {
+		return false
+	}
+	if !k.QuotaResetAt.IsZero() && !k.QuotaResetAt.After(now) {
+		// 重置时刻已过：快照过时，视为额度已恢复
+		return false
+	}
+	return true
+}
+
+// QuotaResetPending 返回额度窗口的剩余时间；零值表示未知或无需等待。
+//
+// 用途：界面展示"约 2 小时后恢复"，让站长能预判账号何时回到池子里。
+func (k *ChannelKey) QuotaResetPending(now time.Time) time.Duration {
+	if k.QuotaResetAt.IsZero() {
+		return 0
+	}
+	return k.QuotaResetAt.Sub(now)
 }
 
 // IsOAuth 判断是否为 OAuth 凭据。
@@ -559,6 +626,8 @@ type CredentialInput struct {
 	ExpiresAt    time.Time      // 可选：access_token 的过期时间
 	AccountHint  string         // 可选：账号标识（邮箱等）
 	Provider     string         // kind=oauth 时建议填写：关联的 OAuth 提供方
+	AccountID    string         // 可选：上游账号 ID（订阅类账号必需，如 chatgpt_account_id）
+	PlanType     string         // 可选：套餐标识（plus / pro / team…），仅用于展示
 	Label        string         // 可选：备注
 	// Balance 是人工录入的余额（迁移 0022）；BalanceUnknown(-1) 表示未知。
 	//
@@ -741,6 +810,20 @@ type ChannelKeyRepository interface {
 	// balance 取值：BalanceUnknown(-1) 表示置为"未知"；>=0 设为该值（0 即视为已用尽）。
 	// 余额是运营数据、不参与计费，只影响"是否还把这把凭据纳入调度"。
 	UpdateBalance(ctx context.Context, id uint64, balance int64) error
+
+	// ---- 以下为订阅账号元数据（迁移 0028）的方法 ----
+
+	// UpdateAccountMeta 写入账号级元数据（account_id / plan_type）。
+	//
+	// 空串表示"本次没有新信息"，对应列保持原值——刷新响应常常不回传 plan_type，
+	// 无条件写入会把已知套餐抹空。
+	UpdateAccountMeta(ctx context.Context, id uint64, accountID, planType string) error
+
+	// UpdateQuota 写入额度探测结果；usedPercent 传 QuotaUsedPercentUnknown 表示置回未知。
+	//
+	// resetAt 与 checkedAt 一并写入（不做"空值保留"）：额度窗口本身会滚动，
+	// 保留旧的重置时间会让"额度是否已恢复"的判断依据过期数据。
+	UpdateQuota(ctx context.Context, id uint64, usedPercent int, resetAt, checkedAt time.Time) error
 }
 
 // ErrChannelKeyNotFound 表示密钥不存在。

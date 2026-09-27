@@ -134,6 +134,8 @@ type forwardTarget struct {
 	keyID uint64
 	// keyFailCount 是该凭据此前的连续失败次数，用于计算冷却的指数退避。
 	keyFailCount int
+	// keyMeta 是该凭据的账号级元数据（订阅类协议出站时需要，如 Codex 的账号标识）。
+	keyMeta CredentialMeta
 	// hasSpareKey 表示同渠道池内还有本次未用过的备用密钥，可用于密钥级重试。
 	hasSpareKey bool
 	// hasSpareChannel 表示除本渠道外还有其他候选渠道，可用于渠道级重试。
@@ -233,22 +235,23 @@ retryLoop:
 			break
 		}
 
-		apiKey, keyID, keyFailCount, ok, hasSpareKey := r.resolveChatKey(keyCtx, ch, usedKeys)
+		cred, ok, hasSpareKey := r.resolveChatCredential(keyCtx, ch, usedKeys)
 		if !ok {
-			// 该渠道当前没有可用密钥（池内全部被禁用、冷却中或限速用满）：
+			// 该渠道当前没有可用凭据（池内全部被禁用、冷却中、限速用满或额度用尽）：
 			// 直接放弃这个渠道，避免白白消耗一次尝试预算。
 			excludedChannels[ch.ID] = struct{}{}
 			continue
 		}
-		if keyID != 0 {
-			usedKeys[keyID] = struct{}{}
+		if cred.KeyID != 0 {
+			usedKeys[cred.KeyID] = struct{}{}
 		}
 
 		target := forwardTarget{
 			channel:         ch,
-			apiKey:          apiKey,
-			keyID:           keyID,
-			keyFailCount:    keyFailCount,
+			apiKey:          cred.Value,
+			keyID:           cred.KeyID,
+			keyFailCount:    cred.FailCount,
+			keyMeta:         cred.Meta,
 			hasSpareKey:     hasSpareKey,
 			hasSpareChannel: r.hasOtherChannel(candidates, excludedChannels, ch.ID),
 		}
@@ -342,6 +345,27 @@ retryLoop:
 // 容错：凭据池查询失败时不阻断转发，而是退回单密钥——
 // 统计能力不应该成为转发链路上的单点故障。
 func (r *Relay) resolveChatKey(ctx context.Context, ch *model.Channel, used map[uint64]struct{}) (string, uint64, int, bool, bool) {
+	cred, ok, hasSpare := r.resolveChatCredential(ctx, ch, used)
+	return cred.Value, cred.KeyID, cred.FailCount, ok, hasSpare
+}
+
+// resolvedCredential 是一次转发中被选中的凭据，附带它的账号级元数据。
+//
+// 为什么要把元数据一起带出来：订阅类协议（Codex）出站时必须带 chatgpt-account-id，
+// 而该值属于"这一条凭据"而不是渠道。若不带出来，上层只能重新查一次库。
+type resolvedCredential struct {
+	// Value 是可直接提交给上游的凭据值（API Key 或已刷新的 access_token）。
+	Value string
+	// KeyID 是池内记录 ID；0 表示单密钥模式。
+	KeyID uint64
+	// FailCount 是该凭据当前的连续失败次数（供冷却退避使用）。
+	FailCount int
+	// Meta 是账号级元数据（非订阅类凭据为零值）。
+	Meta CredentialMeta
+}
+
+// resolveChatCredential 与 resolveChatKey 同源，额外回传账号级元数据。
+func (r *Relay) resolveChatCredential(ctx context.Context, ch *model.Channel, used map[uint64]struct{}) (resolvedCredential, bool, bool) {
 	if r.keys != nil {
 		if pool, err := r.keys.ListUsable(ctx, ch.ID); err == nil && len(pool) > 0 {
 			sessionHash := credentialSessionFrom(ctx)
@@ -356,24 +380,24 @@ func (r *Relay) resolveChatKey(ctx context.Context, ch *model.Channel, used map[
 					available = append(available, k)
 				}
 				if len(available) == 0 {
-					return "", 0, 0, false, false
+					return resolvedCredential{}, false, false
 				}
 
-				// 先按"当前是否可用"过滤（状态/冷却/限速/余额耗尽），再交给策略挑选。
+				// 先按"当前是否可用"过滤（状态/冷却/限速/余额/额度窗口），再交给策略挑选。
 				//
 				// 为什么要在这里提前过滤而不是只靠 SelectKey：下面的 hasSpareKey
 				// 直接由本切片的长度推断，若不过滤，一批"余额已耗尽"的凭据会
 				// 让 hasSpareKey 误判为 true，进而触发无意义的密钥级重试。
 				usable := filterUsableKeys(available, time.Now())
 				if len(usable) == 0 {
-					// 过滤后无可用凭据（全部冷却/限速/禁用/余额耗尽）：让上层换渠道
-					return "", 0, 0, false, false
+					// 过滤后无可用凭据（全部冷却/限速/禁用/余额耗尽/额度用满）：让上层换渠道
+					return resolvedCredential{}, false, false
 				}
 
 				// 策略选择：五策略择优 + 会话粘性（内部会再做一次幂等的可用性过滤）。
 				picked, err := r.SelectKey(ctx, ch, usable, sessionHash)
 				if err != nil {
-					return "", 0, 0, false, false
+					return resolvedCredential{}, false, false
 				}
 
 				now := time.Now()
@@ -406,16 +430,26 @@ func (r *Relay) resolveChatKey(ctx context.Context, ch *model.Channel, used map[
 				if picked.RPMLimit > 0 {
 					_ = r.keys.RecordRequest(ctx, picked.ID, now, rpmWindow)
 				}
-				return value, picked.ID, picked.FailCount, true, len(usable) > 1
+				return resolvedCredential{
+					Value:     value,
+					KeyID:     picked.ID,
+					FailCount: picked.FailCount,
+					Meta: CredentialMeta{
+						AccountID: picked.AccountID,
+						PlanType:  picked.PlanType,
+					},
+				}, true, len(usable) > 1
 			}
-			return "", 0, 0, false, false
+			return resolvedCredential{}, false, false
 		}
 	}
 
 	if ch.APIKey == "" {
-		return "", 0, 0, false, false
+		return resolvedCredential{}, false, false
 	}
-	return ch.APIKey, 0, 0, true, false
+	// 单密钥模式：没有池内记录，也就没有账号级元数据；
+	// 订阅类协议会退化为"从 access_token 的 JWT 里现取账号标识"（见 applyCredentialHeaders）。
+	return resolvedCredential{Value: ch.APIKey}, true, false
 }
 
 // maxCredentialAttempts 是单次请求内最多尝试的凭据条数。
@@ -706,9 +740,9 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 	// （Anthropic / Gemini 会改写请求体）→ 组装 URL / 请求头（含类型专属路径、
 	// 查询参数与鉴权）。type_key 为空的渠道回退为 OpenAI 兼容，行为与旧实现一致。
 	wantStream := oai.PeekStream(body)
-	spec, outBody, built, prepareErr := prepareChannelUpstream(
+	spec, outBody, built, prepareErr := prepareChannelUpstreamFor(
 		ch, target.apiKey, upstreamModel, upstreamPath, outboundBody,
-		upstreamForwardHeaders(req.Header), wantStream)
+		upstreamForwardHeaders(req.Header), wantStream, target.keyMeta)
 	if prepareErr != nil {
 		if errors.Is(prepareErr, errRequestBodyConversion) {
 			// 请求体无法转换为上游协议（如工具类型映射不了）：属调用方请求问题，

@@ -413,12 +413,17 @@ func Types() []Type {
 			Notes:           "以 Claude 订阅（Pro/Max）的会话凭据驱动，按窗口配额调度，需 OAuth 自动续期与账号池。",
 		},
 		{
-			Key: "openai_codex_subscription", Label: "Codex 订阅账号", Category: CategorySubscription,
-			Protocol: ProtocolOpenAI, AuthMode: AuthOAuth,
-			BaseURLEditable: true,
-			Caps:            CapChat | CapStream | CapTools,
-			Available:       false,
-			Notes:           "以 ChatGPT/Codex 订阅凭据驱动，需 OAuth 自动续期与按窗口配额调度。",
+			Key: "openai_codex_subscription", Label: "Codex 订阅账号（ChatGPT）", Category: CategorySubscription,
+			Protocol: ProtocolCodex, AuthMode: AuthOAuth,
+			// 地址固定为 Codex 内部端点根，转发时在它后面拼 /responses。
+			//
+			// 不允许改写：该端点只在 chatgpt.com 下存在，允许改成别的值
+			// 只会制造"地址填错却看不出哪里错"的排查成本。
+			DefaultBaseURL:    "https://chatgpt.com/backend-api/codex",
+			Caps:              CapChat | CapStream | CapTools | CapReasoning,
+			SupportsModelList: true, Available: true,
+			Notes: "用 ChatGPT 订阅账号的 OAuth 凭据（refresh_token）直连，按订阅窗口配额调度而非按量计费；" +
+				"请求会被转换为 Responses 协议，并强制携带账号标识头。",
 		},
 		{
 			Key: "gemini_code_assist", Label: "Gemini Code Assist", Category: CategorySubscription,

@@ -228,6 +228,11 @@ func filterUsableKeys(keys []*model.ChannelKey, now time.Time) []*model.ChannelK
 		if k.BalanceExhausted() {
 			continue
 		}
+		// 订阅账号的额度窗口用满：与"余额耗尽"同理，只是不选它，不改状态。
+		// 窗口重置时间一到（或下一次探测刷新快照）它就自动回到候选里。
+		if k.QuotaExhausted(now) {
+			continue
+		}
 		usable = append(usable, k)
 	}
 	return usable

@@ -30,7 +30,9 @@ import (
 // 已实现：转发链路会拼 Authorization: Bearer、把密钥放进查询参数、
 // 用自定义头（如 Azure 的 api-key）或 x-api-key（Anthropic 系）承载密钥、
 // 对本地服务不带凭据，以及对 AWS 做 SigV4 签名（Bedrock）、用服务账号换取令牌（Vertex）。
-// 尚未实现：OAuth 订阅账号续期与浏览器 Cookie 会话。
+// OAuth 订阅账号（AuthOAuth）也已实现：刷新链路见 relay/oauth.go，
+// 凭据落库见 channel_keys 的 oauth 类型。
+// 尚未实现：浏览器 Cookie 会话。
 var supportedAuthModes = map[AuthMode]bool{
 	AuthBearer:         true,
 	AuthQueryKey:       true,
@@ -39,6 +41,7 @@ var supportedAuthModes = map[AuthMode]bool{
 	AuthXAPIKey:        true,
 	AuthSigV4:          true,
 	AuthServiceAccount: true,
+	AuthOAuth:          true,
 }
 
 // implementedProtocols 是「当前已实现的协议适配器」白名单。
@@ -51,6 +54,7 @@ var implementedProtocols = map[Protocol]bool{
 	ProtocolOpenAI:    true,
 	ProtocolAzure:     true,
 	ProtocolAnthropic: true,
+	ProtocolCodex:     true,
 	ProtocolGemini:    true,
 	ProtocolVertex:    true,
 	ProtocolBedrock:   true,
@@ -125,19 +129,32 @@ func TestAvailable_鉴权必须是已实现方式(t *testing.T) {
 	}
 }
 
-// TestUnavailable_未实现鉴权方式一律不可用 是上一条的反向约束。
+// TestUnavailable_未接入的订阅账号一律不可用 钉住订阅类渠道的开放边界。
 //
-// 用 AuthOAuth / AuthCookie 的类型一定是未完成的接入（需要订阅账号续期能力），
-// 必须显式标为不可用，避免被误开。SigV4 / 服务账号已实现，不再列入约束。
-func TestUnavailable_未实现鉴权方式一律不可用(t *testing.T) {
-	unimplemented := map[AuthMode]bool{
-		AuthOAuth:  true,
-		AuthCookie: true,
+// 为什么不能按鉴权方式一刀切：订阅账号的刷新链路骨架已实现（AuthOAuth 已在
+// supportedAuthModes 里），但"能刷新令牌"不等于"能转发请求"——每个平台的端点、
+// 必需请求头与请求协议都不同（ChatGPT 要转 Responses 协议，Claude / Gemini
+// 各有自己的格式）。因此边界必须逐个类型显式声明。
+//
+// 本测试用白名单把"已接入"钉死；其余订阅类型一旦被标为可用就报错，
+// 避免出现"后台里配得好好的、一调就 4xx"的假象。
+func TestUnavailable_未接入的订阅账号一律不可用(t *testing.T) {
+	// wiredSubscriptionTypes 是"适配器与凭据链路都已打通"的订阅类型白名单。
+	//
+	// 新增订阅类型时：先把出站适配器（含请求/响应转换）与测试补完，
+	// 再把类型 key 加到这里——顺序反了就等于把未完成的功能暴露给站长。
+	wiredSubscriptionTypes := map[string]bool{
+		"openai_codex_subscription": true,
 	}
+
 	for _, item := range Types() {
-		if unimplemented[item.AuthMode] && item.Available {
-			t.Errorf("类型 %q（%s）使用未实现的鉴权方式 %q，却被标为可用",
-				item.Key, item.Label, item.AuthMode)
+		if item.Category != CategorySubscription {
+			continue
+		}
+		if item.Available && !wiredSubscriptionTypes[item.Key] {
+			t.Errorf("订阅类型 %q（%s）被标为可用，但它尚未接入："+
+				"请先补齐出站适配器并加入 wiredSubscriptionTypes 白名单",
+				item.Key, item.Label)
 		}
 	}
 }
