@@ -1,24 +1,35 @@
 <script setup lang="ts">
 /**
- * 登录页。
+ * 登录页（三种方式：账号密码 / 邮箱验证码 / 邮箱验证码重置密码）。
  *
  * 意图（Why）：
  *   登录是进入门户/后台的唯一入口，页面必须「干净聚焦」：
- *   只有必要信息（品牌、站点名、两个输入框、一个协议勾选、一个按钮），不放置营销内容分散注意力。
+ *   只有必要信息（品牌、站点名、少量输入框、一个协议勾选、一个按钮），
+ *   不放置营销内容分散注意力。
+ *
+ *   为什么要做「邮箱验证码登录 / 重置密码」：
+ *   本站用户的登录名是注册时自己填的，隔一段时间极易忘记；
+ *   而邮箱是唯一被验证过的身份凭据。把「找回用户名 + 找回密码」合并成
+ *   一条自助通道，是流失用户能不能回来的关键。
  *
  * 流转（Flow）：
- *   表单提交 → stores/auth.signIn() → POST /api/auth/login → 保存会话令牌
+ *   密码登录   → stores/auth.signIn()        → POST /api/auth/login
+ *   验证码登录 → stores/auth.signInWithEmail() → POST /api/auth/email-login
+ *   重置密码   → api/auth.resetPassword()    → POST /api/auth/password-reset
+ *              （成功后同账号全部会话被吊销，因此本页会引导重新登录）
+ *   发验证码   → api/auth.sendEmailCode(email, purpose)，purpose 随模式切换
  *   → 跳转：优先 query.redirect（来源页），否则按角色 admin→/admin、普通→/console
  *
  * 扩展（Extend）：
- *   新增登录方式（如 OAuth）时，在表单下方追加区分隔线与对应按钮，
+ *   新增登录方式（如 OAuth）时，在 modes 里加一项 + 在下方加一个表单块，
  *   并复用 auth store 的会话落盘逻辑（applySession）。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import AppIcon from '@/components/AppIcon.vue'
 import { ApiError } from '@/api/client'
+import { resetPassword, sendEmailCode, type EmailCodePurpose } from '@/api/auth'
 import { toastError, toastSuccess } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
@@ -28,11 +39,65 @@ const site = useSiteStore()
 const router = useRouter()
 const route = useRoute()
 
+/** 三种模式。reset 是"用邮箱验证码重置密码"，不是已登录状态下的改密。 */
+type Mode = 'password' | 'email' | 'reset'
+const mode = ref<Mode>('password')
+
+const MODES: { key: Mode; label: string }[] = [
+  { key: 'password', label: '账号密码' },
+  { key: 'email', label: '邮箱验证码' },
+  { key: 'reset', label: '忘记密码' },
+]
+
 const username = ref('')
 const password = ref('')
 const showPassword = ref(false)
+
+const email = ref('')
+const code = ref('')
+const newPassword = ref('')
+const newPassword2 = ref('')
+
 const submitting = ref(false)
+const sendingCode = ref(false)
 const errorMessage = ref('')
+const successMessage = ref('')
+
+/** 重发倒计时（秒）；由后端返回的 cooldown 驱动，不在前端硬编码 */
+const countdown = ref(0)
+let countdownTimer: number | undefined
+
+function stopCountdown(): void {
+  if (countdownTimer !== undefined) {
+    window.clearInterval(countdownTimer)
+    countdownTimer = undefined
+  }
+}
+
+function startCountdown(seconds: number): void {
+  countdown.value = seconds > 0 ? seconds : 60
+  stopCountdown()
+  countdownTimer = window.setInterval(() => {
+    countdown.value -= 1
+    if (countdown.value <= 0) stopCountdown()
+  }, 1000)
+}
+
+onBeforeUnmount(stopCountdown)
+
+/**
+ * 切换模式时清掉上一次的提示：
+ * 留着"密码错误"的红字出现在验证码登录面板上，只会让人以为新面板也坏了。
+ */
+watch(mode, () => {
+  errorMessage.value = ''
+  successMessage.value = ''
+})
+
+/** 当前模式对应的验证码用途（决定后端用哪套邮件模板与哪张码表） */
+const codePurpose = computed<EmailCodePurpose>(() =>
+  mode.value === 'reset' ? 'reset' : 'login',
+)
 
 /**
  * 是否已勾选同意《用户协议》与《隐私政策》。
@@ -70,7 +135,20 @@ function resolveRedirect(fallback: string): string {
   return fallback
 }
 
-async function handleSubmit(): Promise<void> {
+/** 登录成功后的统一跳转 */
+async function afterSignIn(name: string): Promise<void> {
+  toastSuccess(`欢迎回来，${name}`)
+  const fallback = auth.isAdmin ? '/admin' : '/console'
+  await router.replace(resolveRedirect(fallback))
+}
+
+/** 把异常转成给用户看的一句话 */
+function describe(error: unknown, fallback: string): string {
+  return error instanceof ApiError ? error.message : fallback
+}
+
+/** 账号密码登录 */
+async function handlePasswordLogin(): Promise<void> {
   errorMessage.value = ''
   if (!username.value.trim() || !password.value) {
     errorMessage.value = '请输入用户名与密码'
@@ -86,13 +164,101 @@ async function handleSubmit(): Promise<void> {
   submitting.value = true
   try {
     const user = await auth.signIn({ username: username.value.trim(), password: password.value })
-    toastSuccess(`欢迎回来，${user.username}`)
-    const fallback = user.role === 10 ? '/admin' : '/console'
-    await router.replace(resolveRedirect(fallback))
+    await afterSignIn(user.username)
   } catch (error) {
-    errorMessage.value = error instanceof ApiError ? error.message : '登录失败，请稍后重试'
+    errorMessage.value = describe(error, '登录失败，请稍后重试')
   } finally {
     submitting.value = false
+  }
+}
+
+/** 邮箱验证码登录 */
+async function handleEmailLogin(): Promise<void> {
+  errorMessage.value = ''
+  if (!email.value.trim()) {
+    errorMessage.value = '请输入邮箱'
+    return
+  }
+  if (!code.value.trim()) {
+    errorMessage.value = '请输入邮件中的验证码'
+    return
+  }
+  if (!agreedTerms.value) {
+    termsError.value = '请先阅读并同意《用户协议》与《隐私政策》'
+    return
+  }
+  termsError.value = ''
+
+  submitting.value = true
+  try {
+    const user = await auth.signInWithEmail(email.value.trim(), code.value.trim())
+    await afterSignIn(user.username)
+  } catch (error) {
+    errorMessage.value = describe(error, '登录失败，请稍后重试')
+  } finally {
+    submitting.value = false
+  }
+}
+
+/** 邮箱验证码重置密码 */
+async function handleResetPassword(): Promise<void> {
+  errorMessage.value = ''
+  successMessage.value = ''
+  if (!email.value.trim()) {
+    errorMessage.value = '请输入邮箱'
+    return
+  }
+  if (!code.value.trim()) {
+    errorMessage.value = '请输入邮件中的验证码'
+    return
+  }
+  if (!newPassword.value) {
+    errorMessage.value = '请输入新密码'
+    return
+  }
+  if (newPassword.value !== newPassword2.value) {
+    errorMessage.value = '两次输入的新密码不一致'
+    return
+  }
+
+  submitting.value = true
+  try {
+    await resetPassword(email.value.trim(), code.value.trim(), newPassword.value)
+    // 后端已吊销该账号全部会话，这里清掉本地残留并回到密码登录
+    auth.clearLocal()
+    newPassword.value = ''
+    newPassword2.value = ''
+    code.value = ''
+    mode.value = 'password'
+    successMessage.value = '密码已重置，请用新密码登录'
+    toastSuccess('密码已重置，请用新密码登录')
+  } catch (error) {
+    errorMessage.value = describe(error, '重置失败，请稍后重试')
+  } finally {
+    submitting.value = false
+  }
+}
+
+/** 发送验证码（用途随当前模式切换） */
+async function handleSendCode(): Promise<void> {
+  errorMessage.value = ''
+  const value = email.value.trim()
+  if (!value) {
+    errorMessage.value = '请先填写邮箱'
+    return
+  }
+  if (countdown.value > 0 || sendingCode.value) return
+
+  sendingCode.value = true
+  try {
+    const result = await sendEmailCode(value, codePurpose.value)
+    startCountdown(result.cooldown || 60)
+    toastSuccess('验证码已发送，请查收邮件（含垃圾箱）')
+  } catch (error) {
+    // 后端对未注册邮箱也回成功（防邮箱枚举），因此这里只会是限流或发信失败
+    toastError(describe(error, '验证码发送失败，请稍后重试'))
+  } finally {
+    sendingCode.value = false
   }
 }
 
@@ -138,10 +304,72 @@ function reloadSite(): void {
         <div class="card card-pad shadow-pop">
           <div>
             <h1 class="font-display text-xl font-semibold tracking-tight text-ink-50">登录 {{ site.siteName }}</h1>
-            <p class="mt-1.5 text-sm text-ink-400">使用账号密码登录，管理你的访问令牌与调用记录。</p>
+            <p class="mt-1.5 text-sm text-ink-400">
+              {{ mode === 'reset' ? '用邮箱验证码设置新密码。' : '登录后即可管理访问令牌与调用记录。' }}
+            </p>
           </div>
 
-          <form class="mt-6 space-y-4" @submit.prevent="handleSubmit">
+          <!-- 三种方式切换：忘记用户名也能进来（邮箱验证码），忘记密码也能自助重置 -->
+          <div class="seg mt-5" role="tablist" aria-label="登录方式">
+            <button
+              v-for="item in MODES"
+              :key="item.key"
+              type="button"
+              role="tab"
+              class="seg-item"
+              :class="mode === item.key ? 'seg-item-active' : ''"
+              :aria-selected="mode === item.key"
+              :disabled="submitting"
+              @click="mode = item.key"
+            >
+              {{ item.label }}
+            </button>
+          </div>
+
+          <!-- 邮箱验证码（登录与重置共用一段邮箱 + 验证码输入） -->
+          <div v-if="mode !== 'password'" class="mt-5">
+            <label class="label" for="login-email">邮箱</label>
+            <input
+              id="login-email"
+              v-model="email"
+              class="input"
+              type="email"
+              autocomplete="email"
+              placeholder="请输入注册时填写的邮箱"
+              :disabled="submitting"
+            />
+            <p class="mt-1 text-xs text-ink-500">验证码会发送到这个邮箱，5 分钟内有效。</p>
+          </div>
+
+          <div v-if="mode !== 'password'" class="mt-4">
+            <label class="label" for="login-code">邮箱验证码</label>
+            <div class="flex gap-2">
+              <input
+                id="login-code"
+                v-model="code"
+                class="input flex-1"
+                type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                placeholder="6 位数字"
+                :disabled="submitting"
+              />
+              <button
+                type="button"
+                class="btn btn-secondary shrink-0"
+                :disabled="submitting || sendingCode || countdown > 0"
+                @click="handleSendCode"
+              >
+                {{ countdown > 0 ? `${countdown} 秒后重发` : sendingCode ? '发送中…' : '获取验证码' }}
+              </button>
+            </div>
+          </div>
+
+          <form
+            v-if="mode === 'password'"
+            class="mt-5 space-y-4"
+            @submit.prevent="handlePasswordLogin"
+          >
             <div>
               <label class="label" for="login-username">用户名</label>
               <input
@@ -178,41 +406,6 @@ function reloadSite(): void {
               </div>
             </div>
 
-            <!-- 协议同意：登录入口同样要求明示同意《用户协议》与《隐私政策》。
-                 未勾选时不置灰按钮，而是点击后就地给出提示（见 agreedTerms 的说明）；
-                 协议入口指向公开文件页，可先阅读再决定。 -->
-            <div>
-              <label class="flex items-start gap-2 text-xs leading-relaxed text-ink-400">
-                <input
-                  v-model="agreedTerms"
-                  type="checkbox"
-                  class="mt-0.5 h-4 w-4 shrink-0 rounded"
-                  :class="termsError ? 'border-red-500/60' : 'border-ink-600'"
-                  :disabled="submitting"
-                />
-                <span>
-                  我已阅读并同意
-                  <RouterLink to="/terms" target="_blank" class="font-medium text-brand-700 hover:underline">
-                    《用户协议》
-                  </RouterLink>
-                  与
-                  <RouterLink to="/privacy" target="_blank" class="font-medium text-brand-700 hover:underline">
-                    《隐私政策》
-                  </RouterLink>
-                </span>
-              </label>
-              <p v-if="termsError" class="field-error">{{ termsError }}</p>
-            </div>
-
-            <!-- 错误态：贴在按钮上方，视线自然落点 -->
-            <p
-              v-if="errorMessage"
-              class="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-800"
-            >
-              <AppIcon name="alert" :size="14" class="mt-0.5 shrink-0" />
-              {{ errorMessage }}
-            </p>
-
             <button type="submit" class="btn btn-primary w-full" :disabled="submitting">
               <span
                 v-if="submitting"
@@ -223,6 +416,105 @@ function reloadSite(): void {
               {{ submitting ? '登录中…' : '登录' }}
             </button>
           </form>
+
+          <form
+            v-else-if="mode === 'email'"
+            class="mt-5 space-y-4"
+            @submit.prevent="handleEmailLogin"
+          >
+            <button type="submit" class="btn btn-primary w-full" :disabled="submitting">
+              <span
+                v-if="submitting"
+                class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                aria-hidden="true"
+              />
+              <AppIcon v-else name="mail" :size="16" />
+              {{ submitting ? '登录中…' : '验证码登录' }}
+            </button>
+          </form>
+
+          <form v-else class="mt-5 space-y-4" @submit.prevent="handleResetPassword">
+            <div>
+              <label class="label" for="reset-password">新密码</label>
+              <input
+                id="reset-password"
+                v-model="newPassword"
+                class="input"
+                type="password"
+                autocomplete="new-password"
+                placeholder="请设置新密码"
+                :disabled="submitting"
+              />
+            </div>
+            <div>
+              <label class="label" for="reset-password2">确认新密码</label>
+              <input
+                id="reset-password2"
+                v-model="newPassword2"
+                class="input"
+                type="password"
+                autocomplete="new-password"
+                placeholder="请再次输入新密码"
+                :disabled="submitting"
+              />
+            </div>
+            <p class="text-xs text-ink-500">
+              重置成功后，该账号此前所有登录状态都会失效，需要用新密码重新登录。
+            </p>
+
+            <button type="submit" class="btn btn-primary w-full" :disabled="submitting">
+              <span
+                v-if="submitting"
+                class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                aria-hidden="true"
+              />
+              <AppIcon v-else name="lock" :size="16" />
+              {{ submitting ? '处理中…' : '重置密码' }}
+            </button>
+          </form>
+
+          <!-- 协议同意：登录入口同样要求明示同意《用户协议》与《隐私政策》。
+               重置密码不需要（那只是找回自己的账号），因此只在两种登录模式下显示。 -->
+          <div v-if="mode !== 'reset'" class="mt-4">
+            <label class="flex items-start gap-2 text-xs leading-relaxed text-ink-400">
+              <input
+                v-model="agreedTerms"
+                type="checkbox"
+                class="mt-0.5 h-4 w-4 shrink-0 rounded"
+                :class="termsError ? 'border-red-500/60' : 'border-ink-600'"
+                :disabled="submitting"
+              />
+              <span>
+                我已阅读并同意
+                <RouterLink to="/terms" target="_blank" class="font-medium text-brand-700 hover:underline">
+                  《用户协议》
+                </RouterLink>
+                与
+                <RouterLink to="/privacy" target="_blank" class="font-medium text-brand-700 hover:underline">
+                  《隐私政策》
+                </RouterLink>
+              </span>
+            </label>
+            <p v-if="termsError" class="field-error">{{ termsError }}</p>
+          </div>
+
+          <!-- 成功态：重置密码后回到密码登录，用绿字确认"确实改成功了" -->
+          <p
+            v-if="successMessage"
+            class="mt-4 flex items-start gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs leading-relaxed text-emerald-800"
+          >
+            <AppIcon name="check" :size="14" class="mt-0.5 shrink-0" />
+            {{ successMessage }}
+          </p>
+
+          <!-- 错误态：贴在协议区下方、按钮之外，视线自然落点 -->
+          <p
+            v-if="errorMessage"
+            class="mt-4 flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-800"
+          >
+            <AppIcon name="alert" :size="14" class="mt-0.5 shrink-0" />
+            {{ errorMessage }}
+          </p>
 
           <div class="mt-5 border-t border-ink-800 pt-4 text-center text-xs text-ink-400">
             <template v-if="!registrationReady">

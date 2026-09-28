@@ -20,7 +20,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
-import { adminLogin, fetchMe, login, logout, register } from '@/api/auth'
+import { adminLogin, emailLogin, fetchMe, login, logout, register } from '@/api/auth'
 import {
   ApiError,
   clearSession,
@@ -73,6 +73,18 @@ export const useAuthStore = defineStore('auth', () => {
    */
   async function signInAsAdmin(password: string): Promise<AuthUser> {
     const result = await adminLogin(password)
+    applySession(result)
+    return result.user
+  }
+
+  /**
+   * 邮箱验证码登录：忘记用户名或忘记密码时的自助入口。
+   *
+   * 与 signIn 的差别只在凭据形态（邮箱 + 验证码），
+   * 会话落盘与后续跳转逻辑完全一致，因此共用 applySession。
+   */
+  async function signInWithEmail(email: string, code: string): Promise<AuthUser> {
+    const result = await emailLogin(email, code)
     applySession(result)
     return result.user
   }
@@ -142,6 +154,7 @@ export const useAuthStore = defineStore('auth', () => {
     displayName,
     signIn,
     signInAsAdmin,
+    signInWithEmail,
     signUp,
     signOut,
     clearLocal,

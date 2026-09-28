@@ -55,13 +55,53 @@ export function register(payload: RegisterPayload & { invite_code?: string }): P
 }
 
 /**
- * POST /api/auth/email-code：申请注册邮箱验证码。
+ * 验证码用途。
+ *
+ * 三种用途在后端是**严格区分**的：验证码按用途哈希与查找，
+ * 一条注册码无法拿去登录，一条登录码也无法改密。
+ */
+export type EmailCodePurpose = 'register' | 'login' | 'reset'
+
+/**
+ * POST /api/auth/email-code：申请邮箱验证码。
  *
  * 后端返回 cooldown（冷却秒数）与 expires_in（有效期秒数），
  * 前端据此驱动倒计时，避免把这两个数值硬编码在页面里。
+ *
+ * 对 login / reset 用途，后端**不会**因为"该邮箱未注册"而报错
+ * （否则接口会变成邮箱枚举器），因此前端不要依据此接口判断账号是否存在。
  */
-export function sendEmailCode(email: string): Promise<EmailCodeResult> {
-  return api.post<EmailCodeResult>('/auth/email-code', { email })
+export function sendEmailCode(
+  email: string,
+  purpose: EmailCodePurpose = 'register',
+): Promise<EmailCodeResult> {
+  return api.post<EmailCodeResult>('/auth/email-code', { email, purpose })
+}
+
+/**
+ * POST /api/auth/email-login：邮箱验证码登录。
+ *
+ * 用户不必记得当初注册的用户名，用邮箱收码即可进入控制台。
+ */
+export function emailLogin(email: string, code: string): Promise<AuthResult> {
+  return api.post<AuthResult>('/auth/email-login', { email, code })
+}
+
+/**
+ * POST /api/auth/password-reset：邮箱验证码重置密码。
+ *
+ * 成功后后端会吊销该账号的全部会话，因此调用方应清除本地登录态并引导重新登录。
+ */
+export function resetPassword(
+  email: string,
+  code: string,
+  password: string,
+): Promise<{ ok: boolean; message: string }> {
+  return api.post<{ ok: boolean; message: string }>('/auth/password-reset', {
+    email,
+    code,
+    password,
+  })
 }
 
 /**
