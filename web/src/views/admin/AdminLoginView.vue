@@ -15,7 +15,7 @@
  *   将来支持多管理员时，后端会在管理员数量过多时返回明确错误并提示改用
  *   "用户名 + 密码"（见 /login），本页无需改动即可把该提示展示出来。
  */
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import AppIcon from '@/components/AppIcon.vue'
@@ -39,9 +39,20 @@ const errorMessage = ref('')
  *
  * 为什么后台入口也要同意：进入后台后可执行渠道管理、额度发放、定价调整等
  * 运维操作，同样受《用户协议》约束；把同意动作放在入口，避免"未明确同意即使用"的争议。
- * 仅前端强制（未勾选时按钮置灰），不改动 admin-login 接口契约。
+ * 仅前端强制（提交时校验），不改动 admin-login 接口契约。
+ *
+ * 为什么不用「未勾选就置灰按钮」：置灰只说明"不能点"，不说明"为什么不能点"。
+ * 与 /login 保持同一处理方式：按钮始终可点，点击后在勾选框下方就近提示。
  */
 const agreedTerms = ref(false)
+
+/** 未勾选协议的提示：就近显示在勾选框下方 */
+const termsError = ref('')
+
+/** 补勾选后立刻撤掉提示 */
+watch(agreedTerms, (value) => {
+  if (value) termsError.value = ''
+})
 
 /**
  * 只接受站内相对路径作为回跳目标，避免开放重定向。
@@ -62,9 +73,10 @@ async function handleSubmit(): Promise<void> {
   }
   // 协议同意：仅前端强制；后端 admin-login 接口不做此校验（见 agreedTerms 的说明）
   if (!agreedTerms.value) {
-    errorMessage.value = '请先阅读并同意《用户协议》与《隐私政策》'
+    termsError.value = '请先阅读并同意《用户协议》与《隐私政策》'
     return
   }
+  termsError.value = ''
 
   submitting.value = true
   try {
@@ -118,7 +130,7 @@ async function handleSubmit(): Promise<void> {
                 <input
                   id="admin-password"
                   v-model="password"
-                  class="input pr-10"
+                  class="input pe-10"
                   :type="showPassword ? 'text' : 'password'"
                   autocomplete="current-password"
                   placeholder="管理员密码"
@@ -127,7 +139,7 @@ async function handleSubmit(): Promise<void> {
                 />
                 <button
                   type="button"
-                  class="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-400 transition-colors hover:text-ink-200"
+                  class="absolute end-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-400 transition-colors hover:text-ink-200"
                   :aria-label="showPassword ? '隐藏密码' : '显示密码'"
                   @click="showPassword = !showPassword"
                 >
@@ -136,26 +148,30 @@ async function handleSubmit(): Promise<void> {
               </div>
             </div>
 
-            <!-- 协议同意：后台入口同样要求明示同意《用户协议》与《隐私政策》，
-                 未勾选时按钮置灰；协议入口指向公开文件页，可先阅读再决定。 -->
-            <label class="flex items-start gap-2 text-xs leading-relaxed text-ink-400">
-              <input
-                v-model="agreedTerms"
-                type="checkbox"
-                class="mt-0.5 h-4 w-4 shrink-0 rounded border-ink-600"
-                :disabled="submitting"
-              />
-              <span>
-                我已阅读并同意
-                <RouterLink to="/terms" target="_blank" class="font-medium text-brand-700 hover:underline">
-                  《用户协议》
-                </RouterLink>
-                与
-                <RouterLink to="/privacy" target="_blank" class="font-medium text-brand-700 hover:underline">
-                  《隐私政策》
-                </RouterLink>
-              </span>
-            </label>
+            <!-- 协议同意：后台入口同样要求明示同意《用户协议》与《隐私政策》。
+                 未勾选时不置灰按钮，而是点击后就地提示（与 /login 一致）。 -->
+            <div>
+              <label class="flex items-start gap-2 text-xs leading-relaxed text-ink-400">
+                <input
+                  v-model="agreedTerms"
+                  type="checkbox"
+                  class="mt-0.5 h-4 w-4 shrink-0 rounded"
+                  :class="termsError ? 'border-red-500/60' : 'border-ink-600'"
+                  :disabled="submitting"
+                />
+                <span>
+                  我已阅读并同意
+                  <RouterLink to="/terms" target="_blank" class="font-medium text-brand-700 hover:underline">
+                    《用户协议》
+                  </RouterLink>
+                  与
+                  <RouterLink to="/privacy" target="_blank" class="font-medium text-brand-700 hover:underline">
+                    《隐私政策》
+                  </RouterLink>
+                </span>
+              </label>
+              <p v-if="termsError" class="field-error">{{ termsError }}</p>
+            </div>
 
             <p
               v-if="errorMessage"
@@ -165,7 +181,7 @@ async function handleSubmit(): Promise<void> {
               {{ errorMessage }}
             </p>
 
-            <button type="submit" class="btn btn-primary w-full" :disabled="submitting || !agreedTerms">
+            <button type="submit" class="btn btn-primary w-full" :disabled="submitting">
               <span
                 v-if="submitting"
                 class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"

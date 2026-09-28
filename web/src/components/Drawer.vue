@@ -6,15 +6,20 @@
  *   渠道表单有 9 个字段，用居中弹窗会把背景页完全遮住，用户在填表时看不到列表上下文；
  *   抽屉从右侧滑出、保留左侧列表可见，适合「边看列表边改配置」的场景。
  *
+ *   ESC 关闭、Tab 焦点陷阱、body 滚动锁与「关闭后焦点归还」交给
+ *   composables/useDialogA11y.ts（与 Modal 共用），
+ *   这样「抽屉里再开一个抽屉」时不会出现"关掉上层、下层还在但背景已能滚动"。
+ *
  * 流转（Flow）：
  *   ChannelsView（open 状态）→ Teleport 到 body → 右侧面板 → footer 插槽放「保存/取消」
  *
  * 扩展（Extend）：
  *   需要更宽的表单请传 width="max-w-2xl"。
  */
-import { onBeforeUnmount, watch } from 'vue'
+import { ref } from 'vue'
 
 import AppIcon from './AppIcon.vue'
+import { useDialogA11y } from '@/composables/useDialogA11y'
 
 const props = withDefaults(
   defineProps<{
@@ -31,26 +36,13 @@ const props = withDefaults(
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 
-function onKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') emit('close')
-}
+/** 面板元素：焦点陷阱与初始焦点的落点 */
+const panelRef = ref<HTMLElement | null>(null)
 
-watch(
-  () => props.open,
-  (open) => {
-    if (open) {
-      document.addEventListener('keydown', onKeydown)
-      document.body.style.overflow = 'hidden'
-    } else {
-      document.removeEventListener('keydown', onKeydown)
-      document.body.style.overflow = ''
-    }
-  },
-)
-
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', onKeydown)
-  document.body.style.overflow = ''
+useDialogA11y({
+  open: () => props.open,
+  panel: panelRef,
+  onEscape: () => emit('close'),
 })
 </script>
 
@@ -63,7 +55,9 @@ onBeforeUnmount(() => {
       />
 
       <aside
-        class="drawer-panel absolute end-0 top-0 flex h-full w-full flex-col border-s border-ink-700 bg-ink-900 shadow-pop animate-slide-in-right"
+        ref="panelRef"
+        tabindex="-1"
+        class="drawer-panel absolute end-0 top-0 flex h-full w-full flex-col border-s border-ink-700 bg-ink-900 shadow-pop outline-none animate-slide-in-right"
         :class="width"
       >
         <header class="flex items-start justify-between gap-4 border-b border-ink-800 px-5 py-4">

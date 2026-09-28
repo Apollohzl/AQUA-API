@@ -31,6 +31,7 @@ import LocaleSwitcher from './LocaleSwitcher.vue'
 import SiteFooter from './SiteFooter.vue'
 import type { NavGroup } from './nav'
 import { confirmDialog } from '@/composables/useConfirm'
+import { acquireScrollLock, releaseScrollLock } from '@/composables/useDialogA11y'
 import { toastInfo } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
@@ -65,15 +66,30 @@ watch(
 /*
  * 抽屉打开时锁定 body 滚动。
  * 为什么需要：抽屉在窄屏几乎铺满整屏，若背后页面仍可滚动，手指在抽屉上
- * 上下滑动会带着页面一起动，观感上像"抽屉在漏"。打开即锁、关闭即解锁，
- * 组件卸载时兜底恢复，避免把整个页面永久锁死。
+ * 上下滑动会带着页面一起动，观感上像"抽屉在漏"。
+ *
+ * 用共享的引用计数锁（而不是直接 body.style.overflow = 'hidden'）：
+ * 抽屉可能与弹窗同时存在（例如在抽屉里点开另一个浮层），
+ * 直接赋值会出现"后关的那个把锁清空、先关的还开着"的错配。
+ * 计数锁由最后一个释放者恢复进入前的原值。
  */
+let sidebarLocked = false
+
 watch(sidebarOpen, (open) => {
-  document.body.style.overflow = open ? 'hidden' : ''
+  if (open && !sidebarLocked) {
+    acquireScrollLock()
+    sidebarLocked = true
+  } else if (!open && sidebarLocked) {
+    releaseScrollLock()
+    sidebarLocked = false
+  }
 })
 
 onBeforeUnmount(() => {
-  document.body.style.overflow = ''
+  if (sidebarLocked) {
+    releaseScrollLock()
+    sidebarLocked = false
+  }
 })
 
 /** 底部导航最多展示的主导航项数（再加一个「更多」，共 5 格，375px 下每格约 75px 不拥挤） */
@@ -122,17 +138,28 @@ function isSectionRoot(to: string): boolean {
   return to.split('/').filter(Boolean).length <= 1
 }
 
+/** 退出登录进行中（含确认框打开期间）：用于禁用按钮，防止叠开多个确认框 */
+const signingOut = ref(false)
+
 async function handleSignOut(): Promise<void> {
-  const ok = await confirmDialog({
-    title: t('components.shell.signOut'),
-    message: t('components.shell.signOutConfirm'),
-    confirmText: t('components.shell.signOut'),
-    danger: true,
-  })
-  if (!ok) return
-  await auth.signOut()
-  toastInfo(t('components.shell.signOutDone'))
-  await router.replace({ name: 'login' })
+  // 确认框本身是异步的：期间按钮若不置灰，连点会叠开多个确认框，
+  // 而确认框实现会把前一个静默当作"取消"，用户会以为点了没反应。
+  if (signingOut.value) return
+  signingOut.value = true
+  try {
+    const ok = await confirmDialog({
+      title: t('components.shell.signOut'),
+      message: t('components.shell.signOutConfirm'),
+      confirmText: t('components.shell.signOut'),
+      danger: true,
+    })
+    if (!ok) return
+    await auth.signOut()
+    toastInfo(t('components.shell.signOutDone'))
+    await router.replace({ name: 'login' })
+  } finally {
+    signingOut.value = false
+  }
 }
 </script>
 
@@ -201,6 +228,7 @@ async function handleSignOut(): Promise<void> {
             type="button"
             class="btn btn-ghost btn-icon"
             :title="t('components.shell.signOut')"
+            :disabled="signingOut"
             @click="handleSignOut"
           >
             <AppIcon name="logout" :size="16" />

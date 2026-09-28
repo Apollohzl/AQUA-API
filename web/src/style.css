@@ -792,6 +792,18 @@
   [dir='rtl'] .rtl-flip {
     transform: scaleX(-1);
   }
+
+  /* 提示条（Toast）的滑出方向。
+     为什么不用 translate-x-2 工具类：它写死物理方向"向右"，
+     RTL 下提示条本身贴在左下角，再向右滑就变成朝内容一侧退场，方向反了。
+     这里用逻辑语义的类，按书写方向镜像。 */
+  .toast-leave {
+    transform: translateX(0.5rem);
+  }
+
+  [dir='rtl'] .toast-leave {
+    transform: translateX(-0.5rem);
+  }
 }
 
 /* RTL 抽屉滑入动画：从左侧进入（与 LTR 的 slide-in-right 互为镜像） */

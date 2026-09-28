@@ -282,7 +282,7 @@ async function handleSubmit(): Promise<void> {
                 <input
                   id="register-password"
                   v-model="password"
-                  class="input pr-10"
+                  class="input pe-10"
                   :type="showPassword ? 'text' : 'password'"
                   autocomplete="new-password"
                   placeholder="任意长度与字符，中文、符号均可"
@@ -290,7 +290,7 @@ async function handleSubmit(): Promise<void> {
                 />
                 <button
                   type="button"
-                  class="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-400 transition-colors hover:text-ink-200"
+                  class="absolute end-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-400 transition-colors hover:text-ink-200"
                   :aria-label="showPassword ? '隐藏密码' : '显示密码'"
                   @click="showPassword = !showPassword"
                 >

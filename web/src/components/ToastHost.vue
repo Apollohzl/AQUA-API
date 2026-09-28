@@ -3,8 +3,9 @@
  * 全局提示宿主：渲染 useToast 队列。
  *
  * 意图（Why）：
- *   提示条必须浮在页面之上且不被 overflow/transform 裁剪，故挂 body 并固定右下角；
- *   右下角靠近表格操作列，用户点击后的反馈视线移动距离最短。
+ *   提示条必须浮在页面之上且不被 overflow/transform 裁剪，故挂 body 并固定在
+ *   书写方向的"结束侧"下角（LTR 是右下、RTL 是左下）；
+ *   该位置靠近表格操作列，用户点击后的反馈视线移动距离最短。
  *
  * 流转（Flow）：
  *   useToast.push() → items → 本组件渲染 → 点击 × 或超时移除
@@ -28,7 +29,7 @@ const KIND_STYLE: Record<ToastKind, { icon: 'check' | 'alert' | 'info'; class: s
 <template>
   <Teleport to="body">
     <div
-      class="pointer-events-none fixed bottom-5 right-5 z-[60] flex w-[min(92vw,380px)] flex-col gap-2"
+      class="pointer-events-none fixed bottom-5 end-5 z-[60] flex w-[min(92vw,380px)] flex-col gap-2"
       role="status"
       aria-live="polite"
     >
@@ -36,7 +37,7 @@ const KIND_STYLE: Record<ToastKind, { icon: 'check' | 'alert' | 'info'; class: s
         enter-active-class="transition duration-200 ease-out"
         enter-from-class="translate-y-2 opacity-0"
         leave-active-class="transition duration-150 ease-in"
-        leave-to-class="translate-x-2 opacity-0"
+        leave-to-class="toast-leave opacity-0"
       >
         <div
           v-for="item in items"

@@ -6,6 +6,10 @@
  *   新建/编辑/一次性密钥展示等场景都需要「聚焦的浮层」；
  *   统一实现遮罩、ESC 关闭、滚动锁定与动画，避免各页面重复处理这些细节。
  *
+ *   ESC 关闭、Tab 焦点陷阱、body 滚动锁与「关闭后焦点归还触发按钮」
+ *   统一由 composables/useDialogA11y.ts 提供 —— 与 Drawer 共用一套实现，
+ *   这样浮层叠浮层时滚动锁不会互相打断（详见该文件的意图说明）。
+ *
  * 流转（Flow）：
  *   页面 v-model:open → Teleport 到 body → 内部插槽渲染内容 / footer 插槽渲染按钮
  *
@@ -13,9 +17,10 @@
  *   需要更宽的表单请传 width="max-w-2xl"；
  *   表单类弹窗建议 closeOnBackdrop=false，避免误点遮罩丢失输入。
  */
-import { onBeforeUnmount, watch } from 'vue'
+import { ref } from 'vue'
 
 import AppIcon from './AppIcon.vue'
+import { useDialogA11y } from '@/composables/useDialogA11y'
 
 const props = withDefaults(
   defineProps<{
@@ -35,31 +40,13 @@ const props = withDefaults(
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 
-/** ESC 关闭：键盘用户的操作预期 */
-function onKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') emit('close')
-}
+/** 面板元素：焦点陷阱与初始焦点的落点 */
+const panelRef = ref<HTMLElement | null>(null)
 
-/**
- * 打开时锁定 body 滚动：否则长表单滚动会「带着」背后的页面一起滚。
- * 关闭时恢复为空串（而不是恢复原值），因为本应用默认不需要 body 滚动锁的组合场景。
- */
-watch(
-  () => props.open,
-  (open) => {
-    if (open) {
-      document.addEventListener('keydown', onKeydown)
-      document.body.style.overflow = 'hidden'
-    } else {
-      document.removeEventListener('keydown', onKeydown)
-      document.body.style.overflow = ''
-    }
-  },
-)
-
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', onKeydown)
-  document.body.style.overflow = ''
+useDialogA11y({
+  open: () => props.open,
+  panel: panelRef,
+  onEscape: () => emit('close'),
 })
 </script>
 
@@ -93,8 +80,10 @@ onBeforeUnmount(() => {
           env(safe-area-inset-bottom) 让底部按钮避开 iPhone 的 Home 指示条（桌面为 0）。
         -->
         <div
+          ref="panelRef"
+          tabindex="-1"
           class="relative z-10 flex max-h-[85vh] w-full flex-col overflow-y-auto rounded-t-2xl border border-ink-700
-            bg-ink-900 shadow-pop sm:my-6 sm:max-h-[calc(100vh-3rem)] sm:rounded-2xl"
+            bg-ink-900 shadow-pop outline-none sm:my-6 sm:max-h-[calc(100vh-3rem)] sm:rounded-2xl"
           :class="width"
           style="padding-bottom: env(safe-area-inset-bottom)"
         >
