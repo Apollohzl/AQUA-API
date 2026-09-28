@@ -145,6 +145,13 @@ function clearConversation(): void {
 }
 
 async function send(): Promise<void> {
+  // 并发守卫（必须放在最前面）：
+  // 发送按钮靠 :disabled 挡住了重复点击，但 Ctrl/⌘+Enter 直接调用本函数、
+  // 不经过按钮的 disabled。流式生成期间再触发一次，就会并发发起第二个请求：
+  // 两段流写进同一个助手气泡（assistantIndex 会指向错乱），
+  // 且对上游重复计费——是用户真金白银的损失。
+  if (sending.value) return
+
   const text = prompt.value.trim()
   if (!text) return
   if (!tokenInput.value.trim()) {

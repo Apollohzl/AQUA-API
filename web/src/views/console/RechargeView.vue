@@ -22,7 +22,7 @@
  *   需要"自定义金额输入键盘"等交互优化时，改 amount 相关一段即可。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import AppIcon from '@/components/AppIcon.vue'
 import DataState from '@/components/DataState.vue'
@@ -32,11 +32,12 @@ import { createOrder, fetchFinanceSummary, getMyOrder, listMyOrders } from '@/ap
 import { fetchPaymentInfo } from '@/api/site'
 import type { PaymentOrder, PublicPaymentInfo } from '@/api/types'
 import { ORDER_STATUS_PAID, ORDER_STATUS_PENDING } from '@/api/types'
-import { toastError, toastSuccess } from '@/composables/useToast'
+import { toastError, toastInfo, toastSuccess } from '@/composables/useToast'
 import { useQuotaUnit } from '@/composables/useQuotaUnit'
 import { formatDateTime } from '@/utils/format'
 
 const route = useRoute()
+const router = useRouter()
 
 /** 余额 / 到账 / 消费一律折算成人民币展示（比例来自后端设置，见 useQuotaUnit） */
 const { yuanText, quotaText: rawQuotaText, rateText, quotaPerYuan } = useQuotaUnit()
@@ -254,6 +255,32 @@ function stopPolling(): void {
     window.clearInterval(pollTimer)
     pollTimer = 0
   }
+}
+
+/**
+ * 停止等待当前订单的支付结果（"停止等待"按钮）。
+ *
+ * 为什么按钮不叫"取消订单"：订单在支付通道那边依然有效，稍后付款成功额度照样到账，
+ * 本站无法单方面作废它。这里能做的只有"本页不再盯着它"。
+ *
+ * 为什么必须写成一个真实动作而不是跳本页的链接：
+ *   此前这个按钮是一个指向 /console/recharge 的 RouterLink——点击后只是把地址栏里的
+ *   ?trade_no= 去掉，轮询定时器与"当前订单"卡片都还在。用户以为已经取消，
+ *   回去重新下单，可能对同一笔充值付两次钱。
+ *   现在真正做三件事：停轮询、清等待卡片、清地址栏参数，并明确告知订单仍然有效。
+ */
+function dismissPending(): void {
+  stopPolling()
+  const tradeNo = pendingOrder.value?.trade_no
+  pendingOrder.value = null
+  if (typeof route.query.trade_no === 'string' && route.query.trade_no) {
+    void router.replace({ name: 'console-recharge' })
+  }
+  toastInfo(
+    tradeNo
+      ? `已停止等待订单 ${tradeNo}。订单仍然有效，稍后支付成功额度仍会自动到账。`
+      : '已停止等待支付结果。',
+  )
 }
 
 async function submit(): Promise<void> {
@@ -519,7 +546,10 @@ onBeforeUnmount(stopPolling)
                 <AppIcon name="external" :size="14" />
                 前往支付
               </a>
-              <RouterLink to="/console/recharge" class="btn btn-secondary btn-sm">取消等待</RouterLink>
+              <button type="button" class="btn btn-secondary btn-sm" @click="dismissPending">
+                <AppIcon name="close" :size="14" />
+                停止等待
+              </button>
             </div>
           </div>
         </div>
