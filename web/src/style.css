@@ -330,6 +330,26 @@
     @apply relative overflow-hidden rounded-xl border border-[#1c3050] bg-[#0d1b32];
   }
 
+  /* ── 深色影像上的按钮 ───────────────────────────────────
+     落地页 hero 与结尾行动区是深色照片/深色底，常规的
+     btn-primary（湖蓝实底）压在深色上对比度不足，
+     btn-secondary（白底浅边）又会显得"像卡片"。
+     因此单独给一组"深色底专用"按钮：
+       btn-invert         主操作：白底深字，是全站对比度最高的组合
+       btn-outline-invert 次操作：透明白描边，弱于主操作但仍可点
+       btn-ghost-invert   三级文字链：只在悬停时出现底色 */
+  .btn-invert {
+    @apply bg-white text-ink-50 shadow-sm hover:bg-brand-50 active:bg-brand-100;
+  }
+
+  .btn-outline-invert {
+    @apply border border-white/30 text-white hover:border-white/60 hover:bg-white/10;
+  }
+
+  .btn-ghost-invert {
+    @apply text-white/70 hover:bg-white/10 hover:text-white;
+  }
+
   .code-block pre {
     @apply overflow-x-auto px-4 py-3.5 font-mono text-[13px] leading-relaxed text-[#d5e2f2];
   }
@@ -621,16 +641,71 @@
     }
   }
 
-  /* 落地页大标题：衬线字体 + 收紧字距，是全站最大的文字。
-     用 text-balance 保证两行标题的断行位置自然。 */
-  .hero-title {
-    @apply font-display text-balance text-4xl font-bold leading-[1.15] tracking-tight text-ink-50 sm:text-5xl lg:text-6xl;
+  /* 品牌名：全站最大的一行字，压在 hero 影像的平静水域上。
+     "品牌先于口号"——访客第一眼应该看到"这是谁"，
+     而不是一句放到任何站点都成立的价值主张。 */
+  .hero-brand {
+    @apply font-display text-5xl font-bold leading-[1.02] tracking-tight text-white sm:text-6xl lg:text-7xl;
+  }
+
+  /* hero 影像层：真实照片 + 固定深色遮罩。
+     为什么用"固定遮罩"而不是"挑一张亮度合适的图"：
+     照片内容不可控（生成/更换后可能整体偏亮），
+     只有把遮罩写死在 CSS 里，才能保证任何一种图下面
+     左上角的品牌字都有足够对比度。 */
+  .hero-scrim {
+    background:
+      linear-gradient(
+        100deg,
+        rgba(4, 11, 20, 0.96) 0%,
+        rgba(5, 14, 25, 0.9) 36%,
+        rgba(6, 18, 31, 0.6) 66%,
+        rgba(6, 18, 31, 0.34) 100%
+      ),
+      linear-gradient(to top, rgba(4, 11, 20, 0.9) 0%, rgba(4, 11, 20, 0) 46%);
+  }
+
+  /* hero 视口高度。
+     100vh 在移动端会把地址栏遮住的那部分也算进去，导致 hero 底部
+     （通常是次要操作与事实清单）被顶出可视区；100svh 跟随最小可视区。
+     两行写法让旧浏览器退回 100vh，与 .app-shell 的处理一致。 */
+  .hero-viewport {
+    min-height: 100vh;
+    min-height: 100svh;
+  }
+
+  /* 滚动进场（配合 LandingView 内的 v-reveal 指令）。
+     关键取舍：初始的"隐藏 + 下移"由指令在挂载时才挂上，
+     因此 JS 未执行时内容默认可见 —— 不会出现"脚本挂了整页空白"。
+     transform/opacity 都是合成层属性，不触发重排。 */
+  .reveal {
+    opacity: 0;
+    transform: translateY(20px);
+    transition:
+      opacity 620ms cubic-bezier(0.22, 1, 0.36, 1) var(--rd, 0ms),
+      transform 620ms cubic-bezier(0.22, 1, 0.36, 1) var(--rd, 0ms);
+  }
+
+  .reveal-in {
+    opacity: 1;
+    transform: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reveal {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
   }
 
   /* 落地页 kicker（大标题上方的小标签）：全大写 + 宽字距，
-     编辑风排版的经典元素，用来"报幕"而不是承载信息。 */
+     编辑风排版的经典元素，用来"报幕"而不是承载信息。
+     注意：这里【不】设颜色——亮色区块用 text-brand-700、
+     深色影像上用 text-brand-300，由调用点决定，
+     避免两个同层工具类互相覆盖时依赖不确定的产出顺序。 */
   .hero-kicker {
-    @apply inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-brand-700;
+    @apply inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em];
   }
 
   /* 落地页进场动画：给 hero 内的元素依次错开延迟（配合 style 上的 --d 变量），
