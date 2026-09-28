@@ -588,6 +588,14 @@ func TestModelPlaza_隐藏仅后台分组(t *testing.T) {
 				t.Fatalf("模型 %v 的归属分组里不应出现仅后台分组", item["model"])
 			}
 		}
+		// 逐模型的价格数组同样必须干净：只把分组从列表里藏起来是不够的，
+		// 价格数组里若还留着批发档，等于把"存在一个更便宜的档位"明示给所有人。
+		for _, rawPrice := range item["prices"].([]any) {
+			price, _ := rawPrice.(map[string]any)
+			if name, _ := price["group"].(string); name == "call_agent" {
+				t.Fatalf("模型 %v 的价格里不应出现仅后台分组的报价（会泄露批发价）", item["model"])
+			}
+		}
 	}
 
 	// 显式按该分组查询也必须返回空：价格表里存在该分组的规则，

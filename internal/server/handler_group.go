@@ -755,7 +755,7 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 			Model:        modelName,
 			Groups:       groupsOfModel,
 			Available:    modelChannelCount[modelName] > 0,
-			Prices:       plazaPricesFor(prices, modelName, groupRatios),
+			Prices:       plazaPricesFor(prices, modelName, groupRatios, hiddenGroups),
 			ChannelCount: modelChannelCount[modelName],
 		})
 	}
@@ -837,9 +837,18 @@ func (s *Server) plazaGroups(ctx context.Context) ([]string, map[string]string, 
 // 匹配规则复用计费链路的 MatchModelPrice（精确 → 前缀 → 通配），
 // 保证"广场上看到的价格"与"实际扣费的价格"永远一致——
 // 两处各写一套匹配逻辑必然有一天会漂移，那是用户投诉的源头。
-func plazaPricesFor(prices []*model.ModelPrice, modelName string, groupRatios map[string]int64) []plazaPriceDTO {
+//
+// hiddenGroups 里的分组（仅后台分发的批发价档次）会被整体跳过：
+// 只把它们从分组列表里藏起来是不够的——逐模型的价格数组同样会暴露
+// "存在一个 7 折的档位"，等于把批发价明示给所有人。
+func plazaPricesFor(prices []*model.ModelPrice, modelName string,
+	groupRatios map[string]int64, hiddenGroups map[string]bool) []plazaPriceDTO {
+
 	byGroup := make(map[string][]*model.ModelPrice)
 	for _, price := range prices {
+		if hiddenGroups[price.Group] {
+			continue
+		}
 		byGroup[price.Group] = append(byGroup[price.Group], price)
 	}
 
