@@ -42,6 +42,8 @@ const site = useSiteStore()
 const links = [
   { to: '/terms', label: '用户协议' },
   { to: '/privacy', label: '隐私政策' },
+  // 语料共建说明与用户协议第六条配套：告知"哪些调用会被留存用于训练"。
+  { to: '/corpus', label: '语料共建说明' },
   { to: '/contact', label: '联系方式' },
   { to: '/report', label: '投诉举报' },
   { to: '/security', label: '安全致谢' },
