@@ -330,7 +330,10 @@ func buildChannelKeyUsage(keys map[uint64]*model.ChannelKey,
 
 		if matched := model.MatchChannelModelCost(costs, row.CostModelName()); matched != nil {
 			detail.Priced = true
-			detail.Cost = matched.ComputeTokenCost(row.PromptTokens, row.CompletionTokens, row.CachedTokens)
+			// 用 ComputeCost 而不是 ComputeTokenCost：按次计费的进价规则
+			// （只填了 PerCallPrice）必须按"次数 × 每次单价"算，否则这里恒为 0，
+			// 表现为"密钥余额不减、毛利虚高"（详见 model.ChannelModelCost.ComputeCost）。
+			detail.Cost = matched.ComputeCost(row.PromptTokens, row.CompletionTokens, row.CachedTokens, row.Requests)
 			item.PricedRequests += row.Requests
 			item.EstimatedCost += detail.Cost
 		} else {

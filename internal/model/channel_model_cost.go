@@ -116,6 +116,39 @@ func (c *ChannelModelCost) ComputeCallCost(calls int64) int64 {
 	return ComputePerCallAmount(c.PerCallPrice, calls)
 }
 
+// IsPerCall 判断这条进价规则是否按次计费。
+//
+// 判定口径与售价侧 ModelPrice.EffectiveBillingMode 的自动判定**完全一致**：
+// 只有按次价、三个 token 价全为 0 → 按次。
+// 必须同口径的原因：售价按次而进价按量（或反过来）会让"毛利"变成两个不同口径
+// 相减，这种误差不会报错，只会长期悄悄偏离。
+func (c *ChannelModelCost) IsPerCall() bool {
+	return c != nil && c.PerCallPrice > 0 &&
+		c.PromptPrice == 0 && c.CachePrice == 0 && c.CompletionPrice == 0
+}
+
+// ComputeCost 按本条规则的口径计算成本：按次规则用"次数 × 每次单价"，其余用 token 公式。
+//
+// 为什么需要这个统一入口（2026-09-28 补的一处缺口）：
+//
+//	核算路径此前只调用 ComputeTokenCost。对"只填了 PerCallPrice"的进价规则，
+//	token 公式的结果恒为 0 —— 不报错，但会同时造成三件坏事：
+//	  1) 后台「密钥消耗 / 剩余」永远不减少，站长看不出预付费密钥还能用多久；
+//	  2) 毛利报表把该渠道成本算成 0，面板上"全是利润"，与真实账目背离；
+//	  3) 没有它就算不出"每个计费请求实际打了多少次上游"（即重试率 r），
+//	     而按次线路的定价正是围着 r 设计的。
+//
+// requests <= 0 时由 ComputePerCallAmount 按 1 次处理（缺省即"一次调用"）。
+func (c *ChannelModelCost) ComputeCost(promptTokens, completionTokens, cachedTokens, requests int64) int64 {
+	if c == nil {
+		return 0
+	}
+	if c.IsPerCall() {
+		return c.ComputeCallCost(requests)
+	}
+	return c.ComputeTokenCost(promptTokens, completionTokens, cachedTokens)
+}
+
 // MatchChannelModelCost 从一组成本规则中挑出最适用的那一条。
 //
 // 优先级与售价完全一致：精确匹配 → 前缀最长 → 全局通配；

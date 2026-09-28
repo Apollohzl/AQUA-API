@@ -132,6 +132,57 @@ func TestChannelModelCost_按次成本(t *testing.T) {
 	}
 }
 
+// TestChannelModelCost_ComputeCost_按次与按token分流 锁住"进价按次核算"的口径。
+//
+// 背景（2026-09-28 补的缺口）：核算路径原先只调 ComputeTokenCost，
+// 对"只填了 PerCallPrice"的进价规则结果恒为 0——不报错，但会让密钥余额永不减少、
+// 毛利虚高、重试率也算不出来。这条测试把口径钉死：
+//   - 只有按次价 → 按次算；
+//   - 只要有任一 token 价 → 仍按 token 算（即使同时填了按次价）。
+func TestChannelModelCost_ComputeCost_按次与按token分流(t *testing.T) {
+	// 纯按次规则：只填 PerCallPrice
+	perCall := &ChannelModelCost{ChannelID: 1, Model: "img", PerCallPrice: 10000}
+	if !perCall.IsPerCall() {
+		t.Fatal("只有按次价的规则应判定为按次")
+	}
+	if got := perCall.ComputeCost(999999, 999999, 999999, 3); got != 30000 {
+		t.Fatalf("按次规则应忽略 token 数、按 3 次得 30000，实际 %d", got)
+	}
+
+	// 纯按 token 规则：按次价为空 → 必须与 ComputeTokenCost 逐值一致。
+	// 价格取"每百万 token 的价格"，因此用 1,000,000 量级保证结果非零——
+	// 若期望值是 0，就分不清"走了 token 公式"和"函数根本没算"。
+	perToken := &ChannelModelCost{ChannelID: 1, Model: "chat", PromptPrice: 1_000_000, CompletionPrice: 2_000_000}
+	if perToken.IsPerCall() {
+		t.Fatal("未填按次价的规则不应判定为按次")
+	}
+	wantToken := perToken.ComputeTokenCost(10, 20, 0)
+	if wantToken == 0 {
+		t.Fatal("测试数据应产生非零 token 成本，否则无法区分两条分支")
+	}
+	if got := perToken.ComputeCost(10, 20, 0, 5); got != wantToken {
+		t.Fatalf("按 token 规则应走 token 公式得 %d，实际 %d", wantToken, got)
+	}
+
+	// 两者都填：仍以 token 为准，避免口径模糊导致毛利被算成两个口径相减
+	mixed := &ChannelModelCost{ChannelID: 1, Model: "mix", PromptPrice: 1_000_000, PerCallPrice: 10000}
+	if mixed.IsPerCall() {
+		t.Fatal("同时填了 token 价时不应判定为按次")
+	}
+	if got := mixed.ComputeCost(10, 0, 0, 1); got != mixed.ComputeTokenCost(10, 0, 0) {
+		t.Fatalf("混合规则应按 token 算，实际 %d", got)
+	}
+
+	// 空指针：不应 panic（核算路径会在规则缺失时传 nil）
+	var nilCost *ChannelModelCost
+	if nilCost.IsPerCall() {
+		t.Fatal("nil 规则不应判定为按次")
+	}
+	if got := nilCost.ComputeCost(1, 1, 1, 1); got != 0 {
+		t.Fatalf("nil 规则成本应为 0，实际 %d", got)
+	}
+}
+
 func TestChannelModelCost_Validate(t *testing.T) {
 	if err := (&ChannelModelCost{ChannelID: 1, Model: "m", PromptPrice: 1}).Validate(); err != nil {
 		t.Fatalf("合法规则不应报错: %v", err)
