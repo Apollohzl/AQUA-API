@@ -139,6 +139,12 @@ type Deps struct {
 	// 用 fs.FS 而非 *embed.FS：便于测试注入内存文件系统，
 	// 也让 server 包不必依赖承载嵌入声明的根包。
 	WebFS fs.FS
+
+	// TrialGrants 是限时试用额发放台账（后台发放、到期回收、门户展示）。
+	//
+	// 为 nil 时相关接口降级为"没有试用额"（门户横幅不展示）或 503（后台发放），
+	// 而不是 panic——它是可选运营能力，缺失不应拖垮整个服务。
+	TrialGrants model.TrialGrantRepository
 }
 
 // Server 是 HTTP 服务的运行时载体。

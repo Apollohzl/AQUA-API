@@ -33,6 +33,7 @@ package model
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -42,6 +43,12 @@ import (
 // 为什么要有这个闸门：发放是一次性的批量写操作，误点两次就等于给全站用户
 // 发了两倍额度（且要等到期才能收回）。用批次标识做唯一闸门，比"人工检查"可靠。
 var ErrTrialBatchExists = errors.New("model: 该批次已发放过")
+
+// ErrTrialGrantInvalid 表示发放参数不合法（批次为空、金额非正、时长非正等）。
+//
+// 单独定义是为了让接口层能把"参数问题"与"数据库故障"区分开：
+// 前者回 400，后者回 500；把参数错误报成 500 会让调用方以为重试有用。
+var ErrTrialGrantInvalid = errors.New("model: 试用额发放参数非法")
 
 // TrialGrantStatus 表示一条发放记录的生命周期状态。
 //
@@ -96,18 +103,20 @@ func (r *TrialGrantRequest) Normalize() {
 }
 
 // Validate 校验发放请求的合法性。
+//
+// 返回的错误一律包裹 ErrTrialGrantInvalid，便于接口层统一映射为 400。
 func (r TrialGrantRequest) Validate() error {
 	if strings.TrimSpace(r.Batch) == "" {
-		return errors.New("model: 发放批次标识不能为空")
+		return fmt.Errorf("%w: 批次标识不能为空", ErrTrialGrantInvalid)
 	}
 	if len(r.Batch) > 64 {
-		return errors.New("model: 发放批次标识过长（上限 64 字符）")
+		return fmt.Errorf("%w: 批次标识过长（上限 64 字符）", ErrTrialGrantInvalid)
 	}
 	if r.Amount <= 0 {
-		return errors.New("model: 发放额度必须为正")
+		return fmt.Errorf("%w: 发放额度必须为正", ErrTrialGrantInvalid)
 	}
 	if r.TTL <= 0 {
-		return errors.New("model: 有效时长必须为正")
+		return fmt.Errorf("%w: 有效时长必须为正", ErrTrialGrantInvalid)
 	}
 	return nil
 }

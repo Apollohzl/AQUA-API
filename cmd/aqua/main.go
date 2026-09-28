@@ -81,6 +81,15 @@ const quotaCleanupInterval = 5 * time.Minute
 // 让服务先进入稳定状态再开始周期性维护。
 const quotaCleanupInitialDelay = time.Minute
 
+// trialReclaimInterval 是后台周期回收"到期试用额"的间隔。
+//
+// 取值 2 分钟（比在途预留回收更密），原因：
+//  1. 在途回收是"兜底"，晚几分钟不影响正确性；试用额到期是**精确时刻**，
+//     回收前这笔钱仍躺在用户余额里可以被花掉，窗口越长越不划算；
+//  2. 但也不必秒级——一轮就是一条走索引的 SELECT，命中通常为 0 行，
+//     2 分钟足以把"过期后还能用"的窗口压到可忽略。
+const trialReclaimInterval = 2 * time.Minute
+
 func main() {
 	// 用 run() 承载全部逻辑并统一处理退出码：
 	// 既便于集中做 defer 收尾，也便于将来对 run 做集成测试。
@@ -216,6 +225,8 @@ func run() error {
 	sensitiveWords := store.NewSensitiveWordRepository(st.DB())
 	// 上游进价（渠道 × 模型）：密钥余额核算与毛利的基础数据。
 	channelModelCosts := store.NewChannelModelCostRepository(st.DB())
+	// 限时试用额度：发放台账（后台发放、到期回收、门户展示）。
+	trialGrants := store.NewTrialGrantRepository(st.DB())
 
 	// 启动时清理过期会话：会话表随登录次数持续增长，不清理会无限膨胀。
 	// 清理失败不阻断启动（这只是维护动作，不影响核心功能）。
@@ -246,6 +257,20 @@ func run() error {
 	// 运行期仍可能因请求处理中途崩溃而留下新的在途记录（可用额度 = 额度 − 已用 − 在途，
 	// 在途不释放则额度被永久占用），因此必须持续兜底。随 ctx 退出，失败不阻断。
 	go runQuotaReservationCleaner(ctx, quotaReservations, logger)
+
+	// 启动时回收"已到期但未收回"的试用额。
+	//
+	// 为什么必须做：试用额是先加到用户余额、到期再收回的，进程停机期间没人回收，
+	// 不补一次的话这些额度会一直留在用户余额里，等于把限时活动变成了永久赠送。
+	if cleaned, err := trialGrants.ReclaimExpired(ctx, time.Now()); err != nil {
+		logger.Warn("回收到期试用额失败", "error", err)
+	} else if cleaned > 0 {
+		logger.Info("已回收到期试用额", "count", cleaned)
+	}
+
+	// 后台周期回收到期试用额：试用额的到期时刻是精确的（如"24 小时后"），
+	// 间隔取 2 分钟是为了让"过期后仍能用"的窗口足够小，同时不至于频繁抢写锁。
+	go runTrialGrantReclaimer(ctx, trialGrants, logger)
 
 	// ── 支付 / 充值 ─────────────────────────────────────────────
 	// 支付通道注册表：各通道的运营参数（网关地址、商户号、启用列表）从设置表实时读取，
@@ -450,6 +475,8 @@ func run() error {
 		// 邮件通道（SMTP）：后台可视化配置；SMTPBase 是环境变量/默认值兜底项
 		SMTP:     smtpSettings,
 		SMTPBase: smtpBase,
+		// 限时试用额：后台发放、到期回收、门户展示
+		TrialGrants: trialGrants,
 		// 前端构建产物（web/dist）已通过根包的 go:embed 嵌入二进制
 		WebFS: aqua.WebDist,
 	})
@@ -511,6 +538,37 @@ func runQuotaReservationCleaner(ctx context.Context, repo model.QuotaRepository,
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		}
+	}
+}
+
+// runTrialGrantReclaimer 周期回收到期试用额（把未用完的部分从用户余额扣回）。
+//
+// 行为约定（与其它后台协程一致）：
+//   - 随 ctx 取消立即返回，不阻塞关闭；
+//   - 每轮仅在实际回收发生时打 info，正常情况下不产生日志噪音；
+//   - 单轮失败只打 warn 并继续下一轮，绝不 panic、不退出进程。
+//
+// 幂等性由仓储保证（以台账状态为闸门），因此这里不做多实例互斥：
+// 两个实例同时跑也只会有一次真正扣款。
+func runTrialGrantReclaimer(ctx context.Context, repo model.TrialGrantRepository, logger *slog.Logger) {
+	// 首轮不再额外延迟：启动时已经同步回收过一次，这里直接进入周期即可。
+	ticker := time.NewTicker(trialReclaimInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		cleaned, err := repo.ReclaimExpired(ctx, time.Now())
+		switch {
+		case err != nil:
+			logger.Warn("回收到期试用额失败，将在下一轮重试", "error", err)
+		case cleaned > 0:
+			logger.Info("已回收到期试用额", "count", cleaned)
 		}
 	}
 }

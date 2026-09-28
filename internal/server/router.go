@@ -158,6 +158,9 @@ func (s *Server) registerRoutes() {
 	// 明细列表复用上面的订单 / 返利明细 / 调用日志接口。
 	portal.GET("/finance", s.handleFinanceSummary)
 
+	// 限时试用额：当前用户"还剩多少、几时过期"，供概览页横幅展示。
+	portal.GET("/trial", s.handleMyTrialGrant)
+
 	// ── 管理后台（需管理员）──────────────────────────────────────
 	admin := authed.Group("/admin")
 	admin.Use(middleware.RequireAdmin())
@@ -242,6 +245,10 @@ func (s *Server) registerRoutes() {
 	admin.POST("/broadcasts", s.handleCreateBroadcast)
 	admin.GET("/broadcasts/:id/recipients", s.handleListBroadcastRecipients)
 	admin.POST("/broadcasts/:id/cancel", s.handleCancelBroadcast)
+
+	// 限时试用额：给全站用户发一笔会过期的额度（需显式 confirm + 唯一批次）。
+	// 到期回收由后台协程负责，不占用接口（见 cmd/aqua 的 runTrialGrantReclaimer）。
+	admin.POST("/trial-grants", s.handleGrantTrial)
 
 	// 模型计价规则（用量 → 费用的换算依据）
 	admin.GET("/prices", s.handleListPrices)
