@@ -122,6 +122,14 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/legal/ReportView.vue'),
     meta: { title: '投诉举报' },
   },
+  {
+    // 安全致谢：公开感谢负责任披露漏洞的研究者，并公示报告渠道。
+    // 独立成页便于对外给出稳定链接（报告者通常会在意"我的名字有没有被挂出来"）。
+    path: '/security',
+    name: 'security-credits',
+    component: () => import('@/views/legal/SecurityCreditsView.vue'),
+    meta: { title: '安全致谢' },
+  },
 
   /* ── 用户门户 ─────────────────────────────────────────── */
   {

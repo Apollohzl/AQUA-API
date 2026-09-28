@@ -45,6 +45,7 @@ const links = [
   { to: '/refund', label: '充值退款' },
   { to: '/contact', label: '联系方式' },
   { to: '/report', label: '投诉举报' },
+  { to: '/security', label: '安全致谢' },
 ]
 
 /** 备案信息：两项分别判断，避免未填时出现"ICP 备案号："这样的空标签 */
