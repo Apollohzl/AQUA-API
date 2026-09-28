@@ -37,11 +37,18 @@ import (
 	"crypto/hmac"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"gitee.com/xiaosu4610/aqua-api/internal/model"
 )
@@ -63,10 +70,14 @@ const (
 
 // epayProvider 实现易支付协议。
 //
-// 说明：本通道的下单是"拼 URL 让浏览器跳转"，不需要发起任何 HTTP 请求，
-// 因此刻意不持有 http.Client —— 这也让它在离线环境下更可靠。
+// 说明：下单是"拼 URL 让浏览器跳转"，本身不需要发起 HTTP 请求；
+// 但回调阶段会向网关核实订单真实性（见 verifyWithGateway），
+// 因此持有一个懒加载的 HTTP 客户端（并发安全，进程内复用连接）。
 type epayProvider struct {
 	opts Options
+
+	once       sync.Once
+	httpClient *http.Client
 }
 
 // newEPayProvider 构造易支付通道。
@@ -150,7 +161,24 @@ func defaultSubMethod(types []string) string {
 }
 
 // ParseNotify 验签并解析回调。
-func (p *epayProvider) ParseNotify(_ context.Context, notify *Notify) (*NotifyResult, error) {
+//
+// 安全模型（本函数是全站唯一的"零鉴权 + 资损副作用"入口，务必逐条落实）：
+//
+//	易支付的签名算法是对「回调携带的全部参数」做 MD5，而本站下发收银台时
+//	用【同一把商户密钥、同一套算法】给请求参数签了名。这两件事叠加会产生一个
+//	危险后果：攻击者把自己订单 pay_url 里的参数原样 POST 回回调地址，
+//	签名天然成立——这是一次典型的签名重放（CWE-294）。
+//
+//	因此本函数不再"验签通过即认账"，而是要求回调必须满足【通知独有的特征】：
+//	  1) 必须显式携带 trade_status（收银台请求里没有这个字段），
+//	     且取值属于"支付成功"集合——绝不把"缺失"默认成成功；
+//	  2) 必须携带第三方单号 trade_no（收银台请求里也没有）；
+//	  3) 商户号 pid 必须与本站配置一致（防止拿别家的签名来打）；
+//	  4) 金额 money 必须存在且为正（防 0 元单与金额缺失）；
+//	  5) 验签通过后再交由上层比对订单金额。
+//
+//	这样即便攻击者原样重放自己订单的全部请求参数，也会在第 1) 步被拒。
+func (p *epayProvider) ParseNotify(ctx context.Context, notify *Notify) (*NotifyResult, error) {
 	if notify == nil {
 		return nil, ErrSignatureInvalid
 	}
@@ -160,11 +188,41 @@ func (p *epayProvider) ParseNotify(_ context.Context, notify *Notify) (*NotifyRe
 		return nil, fmt.Errorf("%w：未配置商户密钥（环境变量 AQUA_EPAY_KEY）", ErrNotConfigured)
 	}
 
+	settings, err := p.settings(ctx)
+	if err != nil {
+		// 读不到运营参数就无法核对商户号，按"配置不可用"拒绝处理：
+		// 回调路径宁可拒绝，也不要在配置未知时凭签名放款。
+		return nil, fmt.Errorf("%w：读取支付配置失败: %w", ErrNotConfigured, err)
+	}
+	configuredPID := strings.TrimSpace(settings.Param(model.PaymentMethodEPay, "pid"))
+
 	params := collectEPayParams(notify)
-	provided := params["sign"]
+	provided := strings.TrimSpace(params["sign"])
 	if provided == "" {
 		return nil, fmt.Errorf("%w：回调缺少 sign 参数", ErrSignatureInvalid)
 	}
+
+	// ── 1) 先做"这是不是一条通知"的结构校验，再验签 ──────────────
+	// 顺序很重要：先用协议字段把请求参数与通知区分开，避免在"明显是重放"的
+	// 输入上白做一次 MD5，更避免日后有人误把验签放宽成"通过即入账"。
+	status := strings.ToUpper(strings.TrimSpace(params["trade_status"]))
+	if status == "" {
+		// 收银台请求参数里没有 trade_status。缺失即拒绝——这正是本次漏洞的根因。
+		return nil, fmt.Errorf("%w：回调缺少 trade_status（可能是请求参数被重放）", ErrSignatureInvalid)
+	}
+	providerTradeNo := strings.TrimSpace(params["trade_no"])
+	if providerTradeNo == "" {
+		return nil, fmt.Errorf("%w：回调缺少第三方单号 trade_no", ErrSignatureInvalid)
+	}
+	if configuredPID == "" {
+		return nil, fmt.Errorf("%w：后台未配置易支付商户号", ErrNotConfigured)
+	}
+	if pid := strings.TrimSpace(params["pid"]); pid != configuredPID {
+		// 不回显两个值：避免把本站商户号泄露给探测者
+		return nil, fmt.Errorf("%w：回调商户号与本站配置不一致", ErrSignatureInvalid)
+	}
+
+	// ── 2) 验签 ─────────────────────────────────────────────
 	// 用 hmac.Equal 常量时间比较，而不是 strings.EqualFold：
 	// 逐字节提前返回的比较会让攻击者通过响应时间差逐位试探签名。
 	// 大小写仍然不敏感（部分实现回传大写十六进制），但先把两侧统一小写，
@@ -174,25 +232,169 @@ func (p *epayProvider) ParseNotify(_ context.Context, notify *Notify) (*NotifyRe
 		return nil, ErrSignatureInvalid
 	}
 
-	status := strings.ToUpper(strings.TrimSpace(params["trade_status"]))
-	if status == "" {
-		// 部分实现不返回 trade_status：此时以"能验签通过 + 有第三方单号"为支付成功依据
-		status = epayTradeSuccess
+	tradeNo := strings.TrimSpace(params["out_trade_no"])
+	if tradeNo == "" {
+		return nil, fmt.Errorf("%w：回调缺少 out_trade_no", ErrSignatureInvalid)
 	}
-	paid := status == epayTradeSuccess || status == "SUCCESS"
 
-	result := &NotifyResult{
-		TradeNo:         strings.TrimSpace(params["out_trade_no"]),
-		ProviderTradeNo: strings.TrimSpace(params["trade_no"]),
-		AmountCents:     yuanToCents(params["money"]),
+	// ── 3) 金额必须存在且为正 ─────────────────────────────────
+	// 旧实现允许 money 缺失（解析为 0），而上层"金额>0 才比对"的写法
+	// 会让缺失金额的回调绕过金额校验。这里从源头堵住。
+	amountCents := yuanToCents(params["money"])
+	if amountCents <= 0 {
+		return nil, fmt.Errorf("%w：回调金额缺失或非正数", ErrAmountMismatch)
+	}
+
+	paid := status == epayTradeSuccess || status == "SUCCESS"
+	if paid {
+		// ── 4) 向上游核实订单真实性（纵深防御）────────────────
+		// 到这里签名与语义都已成立，理论上已无伪造空间。但"拿一条真实通知
+		// 去重放"仍可能发生在服务商侧数据被篡改的场景，因此再向支付网关
+		// 查一次这笔订单的实际状态与金额。
+		//
+		// 失败策略（重要）：只有网关【明确回答"未支付/金额不符"】时才拒绝；
+		// 查询本身因网络/接口不可用而失败时只记日志、放行——因为此时签名与语义
+		// 校验已经通过（攻击者拿不到商户密钥），而误拒会让"真付了钱的用户"
+		// 拿不到额度。两害相权，取其轻。
+		if err := p.verifyWithGateway(ctx, settings, tradeNo, amountCents); err != nil {
+			if errors.Is(err, errGatewaySaysUnpaid) {
+				return nil, fmt.Errorf("%w：上游网关确认该订单未支付", ErrSignatureInvalid)
+			}
+			slog.Warn("易支付回调：向上游核实订单失败，按已验证的签名继续处理",
+				"trade_no", tradeNo, "err", err)
+		}
+	}
+
+	return &NotifyResult{
+		TradeNo:         tradeNo,
+		ProviderTradeNo: providerTradeNo,
+		AmountCents:     amountCents,
 		Paid:            paid,
 		AckBody:         epayAckBody,
 		AckContentType:  "text/plain; charset=utf-8",
+	}, nil
+}
+
+// errGatewaySaysUnpaid 表示"上游网关明确回答该订单没有支付成功"。
+//
+// 与"查询失败"严格区分：前者必须拒绝入账，后者只记日志放行（见 ParseNotify 的说明）。
+var errGatewaySaysUnpaid = errors.New("payment: 上游网关确认订单未支付")
+
+// verifyWithGateway 向易支付网关查询订单的真实状态与金额。
+//
+// 接口形态（易支付公开约定）：
+//
+//	GET {gateway}/api.php?act=order&pid={pid}&key={key}&out_trade_no={订单号}
+//	返回 JSON：{"code":1,"data":{"trade_no":"...","money":"10.00","status":1}}
+//	其中 status=1 表示已支付。
+//
+// 兼容性处理：不同服务商的字段名与嵌套层级略有差异（有的平铺在顶层、
+// 有的用 data 包裹、有的用 trade_status 而非 status），解析时几种都认；
+// 完全无法识别响应结构时按"查询失败"返回（放行），而不是武断判定为未支付——
+// 否则换一家服务商就会导致"付了钱不到账"。
+func (p *epayProvider) verifyWithGateway(ctx context.Context, settings model.PaymentSettings, tradeNo string, expectCents int64) error {
+	gateway := strings.TrimSpace(settings.Param(model.PaymentMethodEPay, "gateway"))
+	if gateway == "" {
+		return errors.New("payment: 未配置网关地址，跳过上游核实")
 	}
-	if result.TradeNo == "" {
-		return nil, fmt.Errorf("%w：回调缺少 out_trade_no", ErrSignatureInvalid)
+
+	query := url.Values{}
+	query.Set("act", "order")
+	query.Set("pid", strings.TrimSpace(settings.Param(model.PaymentMethodEPay, "pid")))
+	query.Set("key", strings.TrimSpace(p.opts.Secrets.EPayKey))
+	query.Set("out_trade_no", tradeNo)
+
+	// 固定 5 秒超时：核实是加分项，不能因为它让回调处理长时间挂起——
+	// 支付平台对回调响应时间有要求（过长会重复投递）。
+	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	endpoint := strings.TrimRight(gateway, "/") + "/api.php?" + query.Encode()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("payment: 构造上游核实请求失败: %w", err)
 	}
-	return result, nil
+	resp, err := p.client().Do(req)
+	if err != nil {
+		return fmt.Errorf("payment: 请求上游失败: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// 只读 64KiB：这是公开可达路径发起的对外请求，不能让异常大响应拖垮内存
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return fmt.Errorf("payment: 读取上游响应失败: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("payment: 上游返回 HTTP %d", resp.StatusCode)
+	}
+
+	order, ok := parseEPayOrderQuery(raw)
+	if !ok {
+		// 无法识别的响应结构：不武断判定，交给上层的"放行"分支
+		return errors.New("payment: 上游响应无法识别，跳过核实")
+	}
+	if !order.Paid {
+		return errGatewaySaysUnpaid
+	}
+	if order.AmountCents > 0 && order.AmountCents != expectCents {
+		return errGatewaySaysUnpaid
+	}
+	return nil
+}
+
+// epayOrderQuery 是从上游查询接口里提取出的关键信息。
+type epayOrderQuery struct {
+	Paid        bool
+	AmountCents int64
+}
+
+// parseEPayOrderQuery 解析上游订单查询响应。
+//
+// 返回 ok=false 表示"结构无法识别"（调用方据此走放行分支）。
+func parseEPayOrderQuery(raw []byte) (epayOrderQuery, bool) {
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return epayOrderQuery{}, false
+	}
+	// 结果可能被 data 包裹，也可能平铺在顶层
+	target := payload
+	if nested, ok := payload["data"].(map[string]any); ok {
+		target = nested
+	}
+
+	recognized := false
+	result := epayOrderQuery{}
+
+	// 状态：status 或 trade_status 两种写法
+	switch value := target["status"].(type) {
+	case float64:
+		recognized = true
+		result.Paid = int(value) == 1
+	case string:
+		recognized = true
+		trimmed := strings.ToUpper(strings.TrimSpace(value))
+		result.Paid = trimmed == "1" || trimmed == epayTradeSuccess || trimmed == "SUCCESS"
+	}
+	if rawStatus, hasTradeStatus := target["trade_status"]; hasTradeStatus {
+		recognized = true
+		trimmed := strings.ToUpper(strings.TrimSpace(fmt.Sprint(rawStatus)))
+		result.Paid = trimmed == epayTradeSuccess || trimmed == "SUCCESS"
+	}
+
+	// 金额：money 可能是字符串 "10.00" 或数字 10
+	if rawMoney, ok := target["money"]; ok {
+		recognized = true
+		result.AmountCents = yuanToCents(fmt.Sprint(rawMoney))
+	}
+
+	return result, recognized
+}
+
+// client 返回支付通道专用的 HTTP 客户端（懒加载，进程内复用连接）。
+func (p *epayProvider) client() *http.Client {
+	p.once.Do(func() { p.httpClient = newHTTPClient() })
+	return p.httpClient
 }
 
 // collectEPayParams 合并 GET 查询与 POST 表单中的回调参数。

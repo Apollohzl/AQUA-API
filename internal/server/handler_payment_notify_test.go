@@ -72,6 +72,11 @@ func newNotifyTestServer(t *testing.T) (*Server, *store.Store) {
 	// 密钥只走环境变量注入的路径（与生产一致），这里用测试值代替
 	cfg.Payment.EPayKey = notifyTestEPayKey
 
+	// 写入易支付的运营参数（回调验签要核对商户号）。
+	// gateway 故意指向不可达地址：让"向网关核实订单"这一步走"查询失败→放行"
+	// 分支（签名与语义校验已在单测里独立覆盖），避免测试对真实网络产生依赖。
+	notifyTestEPaySetup(t, settings)
+
 	srv := New(Deps{
 		Config:    cfg,
 		Store:     st,
@@ -95,6 +100,22 @@ func newNotifyTestServer(t *testing.T) (*Server, *store.Store) {
 		}),
 	})
 	return srv, st
+}
+
+// notifyTestEPayPID 是测试环境的易支付商户号（回调里必须携带且与本配置一致）。
+const notifyTestEPayPID = "1001"
+
+// notifyTestEPaySetup 写入易支付通道的运营参数。
+func notifyTestEPaySetup(t *testing.T, settings model.SettingRepository) {
+	t.Helper()
+	// Params 走单个 JSON 键 payment_params（见 model.SettingKeyPaymentParams 的说明）。
+	// gateway 故意指向不可达地址：让"向网关核实订单"这一步走"查询失败→放行"
+	// 分支（签名与语义校验由各用例独立覆盖），避免测试对真实网络产生依赖。
+	if err := settings.SetMany(context.Background(), map[string]string{
+		model.SettingKeyPaymentParams: `{"epay.pid":"` + notifyTestEPayPID + `","epay.gateway":"http://127.0.0.1:1","epay.types":"alipay"}`,
+	}); err != nil {
+		t.Fatalf("写入支付测试设置失败: %v", err)
+	}
 }
 
 // epayTestSign 复算易支付签名，用于在测试里构造"合法回调"。
@@ -287,5 +308,168 @@ func TestPaymentNotify_签名错误_拒绝且不入账(t *testing.T) {
 	}
 	if after.Quota != 0 {
 		t.Errorf("错误签名回调后额度 = %d，期望 0", after.Quota)
+	}
+}
+
+// TestPaymentNotify_重放下单签名_拒绝且不入账 锁死 AQUA-SEC-2026-0928-01 的根因。
+//
+// 攻击链：下单响应的 pay_url 携带服务端用【同一把商户密钥】签名的请求参数，
+// 把这套参数（不含 trade_status / trade_no）原样 POST 到回调地址。
+// 旧实现"验签通过即认账 + trade_status 缺失默认成功"，导致零付款任意入账。
+//
+// 修复后该请求必须在验签之前就被"通知结构校验"拦下：
+//   - 缺 trade_status → 拒绝（本用例的场景）；
+//   - 即使补了字段，参数集变了签名也会随之失配（攻击者无密钥，无法重签）。
+func TestPaymentNotify_重放下单签名_拒绝且不入账(t *testing.T) {
+	srv, _ := newNotifyTestServer(t)
+	ctx := context.Background()
+
+	buyer := &model.User{
+		Username:     "notify-replay-attacker",
+		PasswordHash: "test-hash",
+		Email:        "replay@example.com",
+		Role:         model.UserRoleUser,
+		Status:       model.UserStatusEnabled,
+		Quota:        0,
+	}
+	if err := srv.deps.Users.Create(ctx, buyer); err != nil {
+		t.Fatalf("创建测试用户失败: %v", err)
+	}
+
+	order := &model.PaymentOrder{
+		TradeNo:  "pay20260928145812b35a8a",
+		UserID:   buyer.ID,
+		Amount:   50000, // 500.00 元（复现报告里的实测金额）
+		Currency: "CNY",
+		Quota:    500000000,
+		Method:   "epay",
+		Status:   model.PaymentStatusPending,
+	}
+	if err := srv.deps.Orders.Create(ctx, order); err != nil {
+		t.Fatalf("创建测试订单失败: %v", err)
+	}
+
+	// 完整复刻「下单响应 pay_url 里的参数」：服务端签过名、但属于请求而非通知。
+	// 签名用【真实密钥】计算——这正是漏洞报告里"签名天然成立"的原因。
+	replay := map[string]string{
+		"pid":          notifyTestEPayPID,
+		"type":         "alipay",
+		"out_trade_no": order.TradeNo,
+		"notify_url":   "https://example.com/api/payments/epay/notify",
+		"return_url":   "https://example.com/console/recharge?trade_no=" + order.TradeNo,
+		"name":         "充值 500.00 CNY（测试）",
+		"money":        "500.00",
+		"sign_type":    "MD5",
+	}
+	replay["sign"] = epayTestSign(replay, notifyTestEPayKey)
+
+	form := url.Values{}
+	for name, value := range replay {
+		form.Set(name, value)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/payments/epay/notify",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("重放下单签名状态码 = %d，期望 400（漏洞回归！）响应体: %s", rec.Code, rec.Body.String())
+	}
+
+	stored, err := srv.deps.Orders.GetByTradeNo(ctx, order.TradeNo)
+	if err != nil {
+		t.Fatalf("读取订单失败: %v", err)
+	}
+	if stored.Status != model.PaymentStatusPending {
+		t.Errorf("订单状态被重放攻击改变为 %v（漏洞回归！）", stored.Status)
+	}
+	if stored.IsCredited() {
+		t.Error("重放攻击居然入账了（漏洞回归！）")
+	}
+	after, err := srv.deps.Users.GetByID(ctx, buyer.ID)
+	if err != nil {
+		t.Fatalf("读取用户失败: %v", err)
+	}
+	if after.Quota != 0 {
+		t.Errorf("重放攻击后额度 = %d，期望 0（漏洞回归！）", after.Quota)
+	}
+}
+
+// TestPaymentNotify_伪造通知结构仍需有效签名 验证"补全字段"绕不过验签。
+//
+// 攻击者若给重放参数补上 trade_status / trade_no，参数集改变会使原签名失配；
+// 没有商户密钥就无法重新签名。本用例锁死这一点。
+func TestPaymentNotify_伪造通知结构仍需有效签名(t *testing.T) {
+	srv, _ := newNotifyTestServer(t)
+	ctx := context.Background()
+
+	buyer := &model.User{
+		Username:     "notify-replay-forged",
+		PasswordHash: "test-hash",
+		Email:        "forged@example.com",
+		Role:         model.UserRoleUser,
+		Status:       model.UserStatusEnabled,
+		Quota:        0,
+	}
+	if err := srv.deps.Users.Create(ctx, buyer); err != nil {
+		t.Fatalf("创建测试用户失败: %v", err)
+	}
+
+	order := &model.PaymentOrder{
+		TradeNo:  "pay20260928150000forged01",
+		UserID:   buyer.ID,
+		Amount:   100,
+		Currency: "CNY",
+		Quota:    10000,
+		Method:   "epay",
+		Status:   model.PaymentStatusPending,
+	}
+	if err := srv.deps.Orders.Create(ctx, order); err != nil {
+		t.Fatalf("创建测试订单失败: %v", err)
+	}
+
+	// 在重放参数基础上补上通知独有字段——签名（用旧参数集算的）必然失配
+	forged := map[string]string{
+		"pid":          notifyTestEPayPID,
+		"type":         "alipay",
+		"out_trade_no": order.TradeNo,
+		"notify_url":   "https://example.com/api/payments/epay/notify",
+		"return_url":   "https://example.com/console/recharge",
+		"name":         "充值",
+		"money":        "1.00",
+		"trade_status": "TRADE_SUCCESS",
+		"trade_no":     "T-FORGED-1",
+		"sign_type":    "MD5",
+	}
+	forged["sign"] = epayTestSign(map[string]string{
+		"pid":          notifyTestEPayPID,
+		"type":         "alipay",
+		"out_trade_no": order.TradeNo,
+		"notify_url":   "https://example.com/api/payments/epay/notify",
+		"return_url":   "https://example.com/console/recharge",
+		"name":         "充值",
+		"money":        "1.00",
+	}, notifyTestEPayKey) // 用"少了两个字段"的参数集签名：模拟补字段后的旧签名
+
+	form := url.Values{}
+	for name, value := range forged {
+		form.Set(name, value)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/payments/epay/notify",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("补字段的伪造回调状态码 = %d，期望 400（签名失配）", rec.Code)
+	}
+	after, err := srv.deps.Users.GetByID(ctx, buyer.ID)
+	if err != nil {
+		t.Fatalf("读取用户失败: %v", err)
+	}
+	if after.Quota != 0 {
+		t.Errorf("伪造回调后额度 = %d，期望 0", after.Quota)
 	}
 }
