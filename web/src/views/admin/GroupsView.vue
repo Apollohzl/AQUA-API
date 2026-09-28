@@ -54,6 +54,22 @@ const form = ref({
    * （令牌分组是用户自选的，不设门槛等于对所有人开放最低折扣）。
    */
   unlockYuanText: '0',
+  /**
+   * 仅后台可分发的分组（批发价）。
+   *
+   * 与解锁门槛解决的是两件不同的事：
+   *   解锁门槛 = "谁够格买"（客户资格，看累计充值）；
+   *   本开关   = "谁来发"（分发授权，只有管理员能建这种令牌）。
+   * 批发价分组（如代理拿货）靠本开关落地：门户不下发该分组，
+   * 普通用户即使直接调接口指定也会被 403，只有管理员在后台代建才放行。
+   */
+  adminOnly: false,
+})
+
+/** 仅后台开关的提示语：把"会发生什么"讲清楚，避免误开导致代理拿不到货 */
+const adminOnlyPreview = computed(() => {
+  if (!form.value.adminOnly) return '所有符合条件的用户都可以自助选择该分组'
+  return '门户不显示该分组，只有管理员在后台代客户建令牌时才可用'
 })
 
 /** 倍率预览：把百分比换算成人话，避免管理员填错单位 */
@@ -91,7 +107,17 @@ onMounted(load)
 function openCreate(): void {
   editing.value = null
   formError.value = ''
-  form.value = { name: '', display_name: '', ratioText: '100', description: '', enabled: true, unlockYuanText: '0' }
+  form.value = {
+    name: '',
+    display_name: '',
+    ratioText: '100',
+    description: '',
+    enabled: true,
+    unlockYuanText: '0',
+    // 新建时默认"可自助选择"：只有明确要开批发价分组才勾上，
+    // 避免因为漏看这个开关而意外做出一批"用户看不见的分组"。
+    adminOnly: false,
+  }
   formOpen.value = true
 }
 
@@ -106,6 +132,7 @@ function openEdit(group: ModelGroup): void {
     description: group.description,
     enabled: group.enabled,
     unlockYuanText: String(centsToYuan(group.unlock_min_recharge_cents)),
+    adminOnly: group.admin_only,
   }
   formOpen.value = true
 }
@@ -138,6 +165,7 @@ async function submit(): Promise<void> {
         description: form.value.description.trim(),
         enabled: form.value.enabled,
         unlock_min_recharge_cents: unlockCents,
+        admin_only: form.value.adminOnly,
       })
       toastSuccess(`分组「${editing.value.label}」已更新，新倍率立即生效`)
     } else {
@@ -148,6 +176,7 @@ async function submit(): Promise<void> {
         description: form.value.description.trim(),
         enabled: form.value.enabled,
         unlock_min_recharge_cents: unlockCents,
+        admin_only: form.value.adminOnly,
       })
       toastSuccess(`分组「${created.label}」已创建`)
     }
@@ -206,6 +235,9 @@ function ratioText(ratio: number): string {
 
 /** 解锁门槛展示：0 显示为「无门槛」，否则显示金额，让管理员一眼看出哪个分组在挡人 */
 function unlockText(group: ModelGroup): string {
+  // 仅后台分发的分组：门槛对它已无意义（根本不给用户自助选），
+  // 必须单独标出来——否则管理员看到"无门槛"会误以为所有人都能选到它。
+  if (group.admin_only) return '仅后台分发'
   if (group.unlock_min_recharge_cents <= 0) return '无门槛'
   return `充值满 ${formatCurrency(centsToYuan(group.unlock_min_recharge_cents))}`
 }
@@ -369,6 +401,14 @@ function unlockText(group: ModelGroup): string {
             rows="2"
             placeholder="这个分组面向谁？为什么这么定价？"
           />
+        </div>
+
+        <div>
+          <label class="flex items-center gap-2 text-sm text-ink-200">
+            <input v-model="form.adminOnly" class="checkbox" type="checkbox" />
+            仅后台分发（批发价分组）
+          </label>
+          <p class="hint">{{ adminOnlyPreview }}</p>
         </div>
 
         <label class="flex items-center gap-2 text-sm text-ink-200">

@@ -1236,6 +1236,14 @@ export interface ModelGroup {
    * 展示与输入由前端换算成元（见 formatCents / yuanToCents）。
    */
   unlock_min_recharge_cents: number
+  /**
+   * 是否只能由管理员分发（批发价分组）。
+   *
+   * 与 unlock_min_recharge_cents 是两件不同的事：前者管"谁来发"（分发授权），
+   * 后者管"谁够格买"（客户资格）。开启后门户不下发该分组，
+   * 普通用户直接调接口指定也会被 403，只有后台代建令牌才放行。
+   */
+  admin_only: boolean
   /** 引用统计：界面上据此提示「该分组正在被使用，删除会影响 N 个渠道」 */
   channel_count: number
   price_count: number
@@ -1251,6 +1259,8 @@ export interface ModelGroupPayload {
   enabled?: boolean
   /** 解锁门槛（分）。不传 = 保持原值，传 0 = 清除门槛。 */
   unlock_min_recharge_cents?: number
+  /** 仅后台分发。不传 = 保持原值（避免改名类的一次 PUT 意外放开批发价分组）。 */
+  admin_only?: boolean
 }
 
 /* ────────────────────────── 模型广场（公开） ────────────────────────── */
