@@ -31,6 +31,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -38,6 +39,7 @@ import (
 
 	"gitee.com/xiaosu4610/aqua-api/internal/config"
 	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"gitee.com/xiaosu4610/aqua-api/internal/netguard"
 )
 
 // 本包对外暴露的哨兵错误，供上层用 errors.Is 精确判断并映射 HTTP 状态码。
@@ -191,8 +193,24 @@ func (r *Registry) Names() []string {
 }
 
 // newHTTPClient 构造支付接口专用的 HTTP 客户端。
+//
+// 挂 netguard 拨号护栏（安全审计 P2-3）：出站目标（epay gateway）由管理员配置，
+// 属于半可信输入；与 relay/oauth 客户端同标准，拒绝链路本地与云元数据地址。
 func newHTTPClient() *http.Client {
-	return &http.Client{Timeout: httpTimeout}
+	return &http.Client{
+		Timeout: httpTimeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        10,
+			IdleConnTimeout:     60 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
+			ForceAttemptHTTP2:   true,
+			DialContext: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 30 * time.Second,
+				Control:   netguard.DialControl,
+			}).DialContext,
+		},
+	}
 }
 
 // yuanFromCents 把"分"格式化为支付网关要求的"元"字符串（两位小数）。

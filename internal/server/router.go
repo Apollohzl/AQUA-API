@@ -23,10 +23,33 @@
 package server
 
 import (
+	"strings"
+
 	"github.com/gin-gonic/gin"
 
 	"gitee.com/xiaosu4610/aqua-api/internal/server/middleware"
 )
+
+// loginUsernameKey 是登录接口的账号维度限流键（安全审计 P2-4）。
+//
+// 为什么不用 IP：分布式多 IP 对同一账号爆破时，每个 IP 都在自己的配额内，
+// IP 维度限流完全无效。按用户名计数才能把攻击成本压在攻击者
+// 无法无限扩展的维度上（账号名）。
+//
+// 关于读请求体：gin 会把 body 缓存在内存，这里 ShouldBindJSON 一次之后
+// 处理器仍能再次绑定（gin 内部用可重复读的 Reader）。
+// 解析失败时返回空串，此时 Allow 会放行（见 RateLimiter.Allow 的说明）：
+// 畸形请求会在处理器内被 400 拒绝，不需要限流器参与。
+func loginUsernameKey(c *gin.Context) string {
+	var req struct {
+		Username string `json:"username"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return ""
+	}
+	// 统一小写：避免攻击者用 Admin / ADMIN / admin 绕过同一账号的计数
+	return strings.ToLower(strings.TrimSpace(req.Username))
+}
 
 // registerRoutes 注册全部路由。
 func (s *Server) registerRoutes() {
@@ -70,9 +93,17 @@ func (s *Server) registerRoutes() {
 	// 为什么单独给这两个接口限流：口令校验（bcrypt）是刻意昂贵的操作，
 	// 不限流时攻击者可用少量并发请求打满 CPU（生产实例仅 2 核且与转发共享 CPU）。
 	// 注意中间件顺序：限流在业务处理器之前，避免昂贵操作先被执行。
+	//
+	// 登录额外叠加【账号维度】节流（loginAccountLimiter）：
+	// IP 维度挡不住分布式多 IP 对同一账号的口令爆破（见 server.go 的说明）。
+	// keyFunc 取请求体里的 username——限流发生在 body 解析之前也能拿到，
+	// 因为这个 keyFunc 自己 ShouldBindJSON 一次（Body 由 gin 缓存，处理器仍可再读）。
+	//
+	// 注意中间件顺序：IP 限流 → 账号限流 → 业务处理器。
 	authLimit := s.loginLimiter.Middleware(middleware.ClientIP)
 	api.POST("/auth/register", authLimit, s.handleRegister)
-	api.POST("/auth/login", authLimit, s.handleLogin)
+	api.POST("/auth/login", authLimit,
+		s.loginAccountLimiter.Middleware(loginUsernameKey), s.handleLogin)
 	// 超管入口：只输密码（不输用户名）。必须与普通登录共用限流器——
 	// 它会枚举管理员逐个比对 bcrypt 哈希，不限流即等于开放一个 CPU 放大器。
 	api.POST("/auth/admin-login", authLimit, s.handleAdminLogin)

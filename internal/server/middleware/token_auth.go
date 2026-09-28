@@ -209,13 +209,27 @@ func TokenAuth(tokens model.TokenRepository, users model.UserRepository, reserve
 		//   - 白名单为空时，为判断计费而【尽力】读取模型名：
 		//     读不到（请求体非法/缺 model/超限）不报错，但也不豁免额度墙（保守），
 		//     畸形请求随后会在转发阶段被拒绝，不存在"靠畸形请求白嫖计费模型"的可能。
+		//
+		// 模型名来源优先级（安全审计 P1 修复，2026-09-28）：Gemini 协议的模型名
+		// 在 URL 路径里（/v1beta/models/{model}:generateContent），body 中没有
+		// model 字段；必须先看路径，未命中再回退到请求体。若只看 body，
+		// Gemini 请求会"拿不到模型名"→ 白名单失效 + 跳过额度预留（并发超支）。
 		var (
 			modelName   string
 			promptBytes int
 		)
+		pathModel, fromPath := peekModelFromGeminiPath(c.Request.URL.Path)
 		switch {
 		case bodyless:
 			// 无请求体的元数据请求：没有模型需要校验，也不产生费用
+		case fromPath && len(token.Models) > 0:
+			// Gemini 请求 + 白名单令牌：模型名来自路径，无需读请求体
+			modelName = pathModel
+			if !token.AllowsModel(modelName) {
+				abortWithErrorKey(c, http.StatusForbidden,
+					"model.not_allowed", oai.TypePermission, oai.CodeModelNotAllowed)
+				return
+			}
 		case len(token.Models) > 0:
 			name, size, err := peekModelFromBody(c)
 			if err != nil {
@@ -228,6 +242,9 @@ func TokenAuth(tokens model.TokenRepository, users model.UserRepository, reserve
 					"model.not_allowed", oai.TypePermission, oai.CodeModelNotAllowed)
 				return
 			}
+		case fromPath:
+			// Gemini 请求 + 无白名单：模型名来自路径（供计费判定与额度预留）
+			modelName = pathModel
 		case owner != nil && reserver != nil && owner.Quota != model.QuotaUnlimited:
 			// 只有"额度有限、可能被额度墙拦住"的账号才需要为判断计费而读请求体：
 			// 不限额度的账号无论如何都会放行，读它纯属浪费（保持"绝大多数请求零额外开销"）。
@@ -406,6 +423,36 @@ func peekModelFromBody(c *gin.Context) (string, int, error) {
 		return "", 0, err
 	}
 	return modelName, len(body), nil
+}
+
+// peekModelFromGeminiPath 从 Gemini 协议的请求路径解析模型名。
+//
+// 为什么需要它（安全审计 P1，2026-09-28）：Gemini 的模型名在 URL 路径里
+// （/v1beta/models/{model}:generateContent），请求体中没有 model 字段。
+// 此前本中间件只从 body 取模型名，导致两条真实缺陷：
+//
+//  1. 带模型白名单的令牌调 Gemini → 报 ErrMissingModel → 400（白名单失效）；
+//  2. 有限额度的用户调 Gemini → modelName 为空 → 跳过额度预留（见步骤 6/8），
+//     只剩一次"可用额度>0"的粗校验——并发请求全部在校验后、扣费前通过，
+//     最终把额度刷成负数（并发超支）。
+//
+// 因此模型名的取值优先级为：Gemini 路径 → 请求体 body。路径未命中（非 Gemini
+// 请求）时返回 ok=false，调用方回退到 peekModelFromBody，行为与旧版一致。
+func peekModelFromGeminiPath(path string) (string, bool) {
+	const marker = "/models/"
+	idx := strings.Index(path, marker)
+	if idx < 0 {
+		return "", false
+	}
+	rest := path[idx+len(marker):]
+	if colon := strings.Index(rest, ":"); colon >= 0 {
+		rest = rest[:colon]
+	}
+	model := strings.TrimSpace(rest)
+	if model == "" {
+		return "", false
+	}
+	return model, true
 }
 
 // writeModelBodyError 把"读取 / 解析请求体"的错误映射为 HTTP 响应。

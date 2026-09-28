@@ -213,6 +213,10 @@ func newAuthEngine(t *testing.T, repo model.TokenRepository) *gin.Engine {
 			"tokenInjected": injected,
 		})
 	})
+	// Gemini 路由：模型名在路径里（P1 修复的验证入口）。
+	engine.POST("/v1beta/models/*modelAction", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
 	return engine
 }
 
@@ -471,6 +475,74 @@ func TestTokenAuth_MissingModelWithWhitelist(t *testing.T) {
 	}
 	if body := decodeError(t, rec); body.Error.Code != oai.CodeMissingModel {
 		t.Errorf("错误码 = %q，期望 %q", body.Error.Code, oai.CodeMissingModel)
+	}
+}
+
+// TestTokenAuth_GeminiPathModel 验证 Gemini 协议的模型名从 URL 路径解析（安全审计 P1）。
+//
+// Gemini 的模型名在路径里（/v1beta/models/{model}:generateContent），
+// 请求体没有 model 字段。修复前本中间件只看 body：
+//   - 白名单令牌调 Gemini → 400 missing_model（白名单失效，功能缺陷）；
+//   - 无白名单令牌调 Gemini → modelName 为空 → 跳过额度预留（并发超支，资金缺陷）。
+func TestTokenAuth_GeminiPathModel(t *testing.T) {
+	repo := newTestTokenRepo(t)
+	key := createToken(t, repo, func(tk *model.Token) { tk.Models = []string{"gemini-pro"} })
+	engine := newAuthEngine(t, repo)
+
+	doGemini := func(modelInPath string) *httptest.ResponseRecorder {
+		// Gemini 请求体没有 model 字段——这正是它需要从路径取模型名的原因
+		req := httptest.NewRequest(http.MethodPost,
+			"/v1beta/models/"+modelInPath+":generateContent",
+			strings.NewReader(`{"contents":[{"parts":[{"text":"hi"}]}]}`))
+		req.Header.Set("Authorization", "Bearer "+key)
+		rec := httptest.NewRecorder()
+		engine.ServeHTTP(rec, req)
+		return rec
+	}
+
+	t.Run("路径模型在白名单内放行", func(t *testing.T) {
+		rec := doGemini("gemini-pro")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("状态码 = %d，期望 200（响应体 %s）", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("路径模型不在白名单内拒绝403", func(t *testing.T) {
+		rec := doGemini("gemini-flash")
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("状态码 = %d，期望 403（修复前为 400 missing_model）", rec.Code)
+		}
+		if body := decodeError(t, rec); body.Error.Code != oai.CodeModelNotAllowed {
+			t.Errorf("错误码 = %q，期望 %q", body.Error.Code, oai.CodeModelNotAllowed)
+		}
+	})
+}
+
+// TestPeekModelFromGeminiPath 覆盖路径解析的边界形态。
+func TestPeekModelFromGeminiPath(t *testing.T) {
+	cases := []struct {
+		name   string
+		path   string
+		want   string
+		wantOK bool
+	}{
+		{"标准 generateContent", "/v1beta/models/gemini-pro:generateContent", "gemini-pro", true},
+		{"流式动作", "/v1beta/models/gemini-pro:streamGenerateContent", "gemini-pro", true},
+		// 官方 SDK 的模型名形态为 "models/gemini-pro"（模型名本身含斜杠），
+		// 与 relay 侧 parseGeminiAction 的取法保持一致：整段截取，不做二次拆分。
+		{"官方 SDK 形态", "/v1beta/models/models/gemini-pro:generateContent", "models/gemini-pro", true},
+		{"非 Gemini 路径", "/v1/chat/completions", "", false},
+		{"缺动作", "/v1beta/models/gemini-pro", "gemini-pro", true},
+		{"缺模型名", "/v1beta/models/:generateContent", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := peekModelFromGeminiPath(tc.path)
+			if got != tc.want || ok != tc.wantOK {
+				t.Fatalf("peekModelFromGeminiPath(%q) = (%q, %v)，期望 (%q, %v)",
+					tc.path, got, ok, tc.want, tc.wantOK)
+			}
+		})
 	}
 }
 

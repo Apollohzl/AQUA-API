@@ -637,8 +637,10 @@ func (s *Server) handlePaymentNotify(c *gin.Context) {
 		return
 	}
 
-	// 金额校验：验签只证明"请求来自支付平台"，不排除金额被篡改
-	if result.AmountCents > 0 && result.AmountCents != order.Amount {
+	// 金额校验：验签只证明"请求来自支付平台"，不排除金额被篡改。
+	// 与 epay 通道同一标准（安全审计 P2-1）：Paid 事件金额必须 > 0 且等于订单金额。
+	// 各通道适配器已在源头拒绝缺失/非法金额，这里兜住"未来新增通道忘记校验"的情况。
+	if result.AmountCents <= 0 || result.AmountCents != order.Amount {
 		// 不回显两个金额：这会帮助攻击者推断出订单金额
 		c.String(http.StatusBadRequest, "amount mismatch")
 		return

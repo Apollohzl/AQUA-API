@@ -154,6 +154,9 @@ type Server struct {
 	// 不限流时攻击者可用少量并发请求打满 CPU（生产实例仅 2 核且与转发共享）。
 	loginLimiter *middleware.RateLimiter
 
+	// loginAccountLimiter 是登录接口的账号维度节流（见 New 处的说明）。
+	loginAccountLimiter *middleware.RateLimiter
+
 	// sensitiveFilter 是 /v1 入口的内容合规过滤器（敏感词）。
 	//
 	// 与登录限流器一样属于"进程内状态"：它缓存编译好的词表匹配器；
@@ -189,6 +192,14 @@ func New(deps Deps) *Server {
 		// 每个来源 IP 每 5 分钟最多 20 次登录/注册尝试：
 		// 正常使用者远达不到该频率，而爆破攻击会被有效拖慢。
 		loginLimiter: middleware.NewRateLimiter(20, 5*time.Minute),
+		// loginAccountLimiter 是登录接口的【账号维度】节流（安全审计 P2-4）。
+		//
+		// IP 维度限流挡不住"分布式多 IP 对同一账号爆破"：每个 IP 20 次/5 分钟
+		// 看起来无关紧要，一百个 IP 就是对一个账号每小时 2400 次口令猜测。
+		// 按用户名再叠一层（对同一用户名 10 次/5 分钟），把"锁定单个账号"
+		// 的成本从攻击者的 IP 池转移到他无法无限扩展的账号名上。
+		// 正常用户几乎感知不到：连续输错 10 次的人本来就该歇 5 分钟。
+		loginAccountLimiter: middleware.NewRateLimiter(10, 5*time.Minute),
 		// 内容合规过滤器：词表编译结果在组件内缓存，改词后由后台主动失效。
 		sensitiveFilter: middleware.NewSensitiveFilter(deps.SensitiveWords, deps.Settings),
 	}
