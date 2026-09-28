@@ -530,6 +530,50 @@ func (s *Server) handleAdminCloseOrder(c *gin.Context) {
 	c.JSON(http.StatusOK, toOrderDTO(order))
 }
 
+// scrubNotifyPayload 去掉回调原文里的签名字段后再落库。
+//
+// 为什么这么做（安全加固 2026-09-28，见 docs/18 批次 1.5）：
+//
+//	sign 是由商户密钥派生的凭据。它不能直接当密钥使用，但"能把历史回调原文
+//	原样翻出来"本身就是不必要的留存——一旦备份或库被读到，攻击者可以拿旧的
+//	签名字段做重放实验，省掉自己构造合法签名的成本。
+//
+// 只删签名字段，其余全部保留（订单号、金额、支付状态、时间、pid）——
+// 出现"用户说付了但没到账"时，举证与对账需要的信息一样不少。
+//
+// 只处理表单形态（k=v&k=v）：JSON 回调（如 Stripe）的签名在请求头里，正文不含签名，
+// 原样返回，避免把 JSON 拆坏。
+func scrubNotifyPayload(raw []byte) string {
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return ""
+	}
+	if strings.HasPrefix(text, "{") || strings.HasPrefix(text, "[") {
+		return text
+	}
+	values, err := url.ParseQuery(text)
+	if err != nil {
+		// 解析不了就原样保留：宁可留下原文，也不要丢掉排查线索
+		return text
+	}
+	for key := range values {
+		if isSignatureParam(key) {
+			values.Del(key)
+		}
+	}
+	return values.Encode()
+}
+
+// isSignatureParam 判断表单参数名是否是签名字段（大小写不敏感）。
+func isSignatureParam(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "sign", "sign_type", "signature", "hmac", "checksum", "sig":
+		return true
+	default:
+		return false
+	}
+}
+
 // handlePaymentNotify 处理 POST /api/payments/{method}/notify（支付平台回调）。
 //
 // 这是全站唯一无需鉴权、且会产生资损副作用的公开接口，因此每一步都必须严格：
@@ -609,7 +653,9 @@ func (s *Server) handlePaymentNotify(c *gin.Context) {
 		return
 	}
 
-	if _, err := s.deps.Orders.MarkPaid(ctx, order.TradeNo, result.ProviderTradeNo, string(body), time.Now()); err != nil {
+	// 落库的回调原文先去掉 sign 等签名字段（见 scrubNotifyPayload 的说明）：
+	// 排查与对账需要的字段都保留，只不留存可被拿去重放实验的签名字符串。
+	if _, err := s.deps.Orders.MarkPaid(ctx, order.TradeNo, result.ProviderTradeNo, scrubNotifyPayload(body), time.Now()); err != nil {
 		s.respondInternalError(c, "更新订单状态失败")
 		return
 	}

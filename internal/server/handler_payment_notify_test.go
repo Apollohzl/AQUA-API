@@ -45,6 +45,44 @@ import (
 // notifyTestEPayKey 是测试用易支付商户密钥（非真实密钥）。
 const notifyTestEPayKey = "test-epay-key-0123456789"
 
+// TestScrubNotifyPayload 锁住"回调原文落库前去掉签名字段"的行为（安全加固 1.5）。
+//
+// 为什么必须有这条测试：脱敏写错有两种相反的坏结果——
+//   - 删多了（把订单号/金额也删掉）：出账纠纷时拿不出证据；
+//   - 删少了（sign 仍在库里）：等于把可做重放实验的材料长期留存。
+// 两种都不会报错，只能靠断言把口径钉住。
+func TestScrubNotifyPayload(t *testing.T) {
+	// 表单回调：只去掉签名字段，其余一字不动
+	form := "pid=1001&out_trade_no=pay20260928abc&trade_no=EP1&money=1.00&trade_status=TRADE_SUCCESS&sign=deadbeef&sign_type=MD5"
+	got := scrubNotifyPayload([]byte(form))
+	for _, keep := range []string{"pid=1001", "out_trade_no=pay20260928abc", "trade_no=EP1", "money=1.00", "trade_status=TRADE_SUCCESS"} {
+		if !strings.Contains(got, keep) {
+			t.Fatalf("对账所需的 %q 不应被删掉，实际：%s", keep, got)
+		}
+	}
+	for _, drop := range []string{"sign=", "sign_type="} {
+		if strings.Contains(got, drop) {
+			t.Fatalf("签名字段 %q 不应留在落库原文里，实际：%s", drop, got)
+		}
+	}
+
+	// 大小写不敏感：上游可能写成 Sign / SIGNATURE
+	if got := scrubNotifyPayload([]byte("a=1&Sign=x&SIGNATURE=y&b=2")); strings.Contains(strings.ToLower(got), "sign") {
+		t.Fatalf("签名字段匹配应大小写不敏感，实际：%s", got)
+	}
+
+	// JSON 回调（签名在请求头里）：必须原样保留，不能被表单解析拆坏
+	jsonBody := `{"id":"evt_1","amount":100,"status":"paid"}`
+	if got := scrubNotifyPayload([]byte(jsonBody)); got != jsonBody {
+		t.Fatalf("JSON 回调应原样保留，实际：%s", got)
+	}
+
+	// 空与空白：返回空串而不是拼接出垃圾
+	if got := scrubNotifyPayload(nil); got != "" {
+		t.Fatalf("空 body 应返回空串，实际：%q", got)
+	}
+}
+
 // newNotifyTestServer 装配一个含支付注册表与订单仓储的测试服务。
 func newNotifyTestServer(t *testing.T) (*Server, *store.Store) {
 	t.Helper()
