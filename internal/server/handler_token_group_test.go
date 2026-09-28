@@ -565,3 +565,35 @@ func TestMyGroups_不下发仅后台分组(t *testing.T) {
 		t.Fatalf("仅后台分发的分组不应下发给普通用户，实际下发：%v", item)
 	}
 }
+
+// TestModelPlaza_隐藏仅后台分组 锁住批发价分组对公开广场完全不可见。
+//
+// 为什么单独一条：广场会展示每个分组的倍率。一旦列出「代理拿货 70%」，
+// 等于向所有人公开批发折扣，代理价体系就失去意义了。
+// 除了分组卡片，**模型归属信息也不能带它**（否则从模型卡片照样能拼出来）。
+func TestModelPlaza_隐藏仅后台分组(t *testing.T) {
+	fx := newTokenGroupFixture(t)
+	fx.withAdminGrantOnlyGroup(t, "call_agent", 70)
+
+	_, body := doBearerJSON(t, fx.srv, http.MethodGet, "/api/models", "", "")
+	for _, raw := range body["groups"].([]any) {
+		if g, _ := raw.(map[string]any); g["name"] == "call_agent" {
+			t.Fatalf("广场不应列出仅后台分组，实际：%v", g)
+		}
+	}
+	for _, raw := range body["items"].([]any) {
+		item, _ := raw.(map[string]any)
+		for _, g := range item["groups"].([]any) {
+			if name, _ := g.(string); name == "call_agent" {
+				t.Fatalf("模型 %v 的归属分组里不应出现仅后台分组", item["model"])
+			}
+		}
+	}
+
+	// 显式按该分组查询也必须返回空：价格表里存在该分组的规则，
+	// 若走"按价格回退"的逻辑就会把模型放出来，等于绕过隐藏。
+	_, filtered := doBearerJSON(t, fx.srv, http.MethodGet, "/api/models?group=call_agent", "", "")
+	if total, _ := filtered["total"].(float64); total != 0 {
+		t.Fatalf("按批发价分组公开查询应返回空，实际 total=%v", filtered["total"])
+	}
+}

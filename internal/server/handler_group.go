@@ -575,6 +575,31 @@ func (s *Server) servedGroupNames(ctx context.Context) (map[string]bool, error) 
 	return served, nil
 }
 
+// adminOnlyGroupNames 返回"仅后台分发"的分组名集合（批发价分组）。
+//
+// 用途：公开的模型广场必须把这类分组**彻底隐藏**——不只是不显示卡片，
+// 连"某个模型归属了哪个分组"也不能带上它。理由与门户分组下拉一致：
+// 广场会展示每个分组的倍率，一旦列出「代理拿货 70%」，
+// 等于向所有人公开批发折扣，代理价体系就没有意义了。
+func (s *Server) adminOnlyGroupNames(ctx context.Context) map[string]bool {
+	hidden := make(map[string]bool)
+	if s.deps.Groups == nil {
+		return hidden
+	}
+	groups, err := s.deps.Groups.List(ctx, model.ModelGroupQuery{EnabledOnly: true, Limit: 200})
+	if err != nil {
+		// 查询失败时返回空集合（= 不隐藏）：宁可多显示一个分组，
+		// 也不要因为读分组表出错就把整个广场的分组信息抹掉。
+		return hidden
+	}
+	for _, group := range groups {
+		if group.RequiresAdminGrant() {
+			hidden[group.Name] = true
+		}
+	}
+	return hidden
+}
+
 // ---------------------------------------------------------------------------
 // 模型广场（公开）
 // ---------------------------------------------------------------------------
@@ -646,6 +671,18 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 	}
 
 	groups, groupLabels, groupRatios := s.plazaGroups(ctx)
+	// 批发价分组（仅后台分发）对公开广场完全不可见，包括模型归属信息
+	hiddenGroups := s.adminOnlyGroupNames(ctx)
+	if hiddenGroups[strings.TrimSpace(c.Query("group"))] {
+		// 显式按批发价分组查询时直接返回空，而不是"查不到但按价格回退放行"——
+		// 价格表里确实有该分组的规则，回退逻辑会把模型放出来，等于绕过了隐藏。
+		c.JSON(http.StatusOK, gin.H{
+			"items":  []plazaModelDTO{},
+			"groups": []plazaGroupDTO{},
+			"total":  0,
+		})
+		return
+	}
 
 	prices := []*model.ModelPrice{}
 	if s.deps.ModelPrices != nil {
@@ -673,6 +710,9 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 			// 多分组渠道必须逐个登记，否则模型广场会漏掉"这个模型在另一个分组也能用"，
 			// 使用者可能误以为在其它分组下不可用。
 			for _, groupName := range channel.GroupList() {
+				if hiddenGroups[groupName] {
+					continue // 批发价分组不对外暴露（连归属关系也不给）
+				}
 				modelGroups[name][groupName] = struct{}{}
 			}
 			modelChannelCount[name]++
