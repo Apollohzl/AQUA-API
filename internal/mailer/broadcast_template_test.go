@@ -89,6 +89,68 @@ func TestRenderBroadcast_计费专线通知关键信息齐全且无链接(t *tes
 	}
 }
 
+// TestRenderBroadcast_按次专线通知关键信息齐全且不泄露定价 覆盖内容与运营约束。
+//
+// 与计费专线模板的区别：本模板面向"按次计费"的 AQUA-CALL/ 专线，
+// 且运营明确要求【不得出现任何具体价格/折扣/充值门槛数字】——
+// 只告知"新分组已上线""上线优惠进行中"。这条一旦被改文案时破坏，
+// 就等于把定价方案直接群发给全体用户，故用测试钉死。
+func TestRenderBroadcast_按次专线通知关键信息齐全且不泄露定价(t *testing.T) {
+	subject, body, ok := RenderBroadcast(BroadcastTemplateCallLine, "AQUA-API")
+	if !ok {
+		t.Fatal("按次专线模板应可渲染")
+	}
+
+	if !strings.Contains(subject, "AQUA-API") || !strings.Contains(subject, "按次") {
+		t.Errorf("主题应含站点名与核心信息（按次专线已上线），实际 %q", subject)
+	}
+
+	// 关键信息逐项核对（每一项缺失都会让通知失去意义）
+	required := []string{
+		"按次专线", "AQUA-CALL/", "上线优惠", "模型广场",
+		"deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4-pro",
+		"glm-5.3", "glm-5.3-flash", "kimi-k3",
+		"gpt-image-2-w", "gpt-image-2.5",
+		"访问令牌", "所属分组",
+	}
+	for _, want := range required {
+		if !strings.Contains(body, want) {
+			t.Errorf("正文缺少关键信息 %q", want)
+		}
+	}
+
+	// 【运营硬约束】不得出现任何具体价格 / 折扣 / 门槛数字
+	// （四档价 0.002/0.005/0.01/0.03、大客户门槛 50 元等一律不写进邮件）
+	for _, leaked := range []string{"0.002", "0.005", "0.01", "0.03", "元", "折", "%"} {
+		if strings.Contains(body, leaked) {
+			t.Errorf("正文不应出现 %q（运营要求：不向用户披露定价）", leaked)
+		}
+	}
+	// 只对管理员开放的批发价分组绝不能出现在面向全体用户的邮件里
+	if strings.Contains(body, "代理拿货") {
+		t.Error("正文不应出现仅后台可分发分组（代理拿货）")
+	}
+
+	// 合规红线：暗示官方关系或绝对化宣传的措辞
+	for _, banned := range []string{"官方中转", "官网价", "高速稳定", "免费公益"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("正文不应出现 %q（合规红线：暗示官方关系或绝对化宣传）", banned)
+		}
+	}
+
+	// 硬约束：不含任何网址（含本站域名），也不含 <a> 超链接
+	for _, forbidden := range []string{"http://", "https://", "<a ", "aqua.is3.cc", "www."} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("正文不应出现 %q（运营要求引导去官网但不挂链接）", forbidden)
+		}
+	}
+
+	// 不该出现的承诺：缓存命中折扣（上游实测 cached_tokens 恒为 0）
+	if strings.Contains(body, "缓存") {
+		t.Error("正文不应承诺缓存相关能力（实测上游不回报缓存命中）")
+	}
+}
+
 // TestRenderBroadcast_站点名被转义 覆盖"半可信输入不得破坏邮件结构"。
 func TestRenderBroadcast_站点名被转义(t *testing.T) {
 	_, body, ok := RenderBroadcast(BroadcastTemplateBillingLine, `<script>x</script>`)

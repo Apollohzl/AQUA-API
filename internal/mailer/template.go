@@ -84,6 +84,12 @@ type BroadcastTemplate struct {
 // BroadcastTemplateBillingLine 是「计费专线上线 + 官方交流群」通知的模板键。
 const BroadcastTemplateBillingLine = "billing_line"
 
+// BroadcastTemplateCallLine 是「按次计费专线上线 + 上线优惠」通知的模板键。
+//
+// 与 billing_line 的区别：billing_line 讲的是**按量计费**的 AQUA/ 专线，
+// 本模板讲的是**按次计费**的 AQUA-CALL/ 专线，两者是并列的两条线，不可混用。
+const BroadcastTemplateCallLine = "call_line"
+
 // BroadcastTemplates 返回可用的通知模板清单。
 //
 // 为什么做成目录而不是让调用方直接调具体函数：后台下拉据此渲染，
@@ -92,6 +98,7 @@ const BroadcastTemplateBillingLine = "billing_line"
 func BroadcastTemplates() []BroadcastTemplate {
 	return []BroadcastTemplate{
 		{Key: BroadcastTemplateBillingLine, Label: "计费专线上线 + 官方交流群"},
+		{Key: BroadcastTemplateCallLine, Label: "按次计费专线上线 + 上线优惠"},
 	}
 }
 
@@ -103,6 +110,8 @@ func RenderBroadcast(templateKey, siteName string) (subject, htmlBody string, ok
 	switch templateKey {
 	case BroadcastTemplateBillingLine:
 		return billingLineEmail(siteName)
+	case BroadcastTemplateCallLine:
+		return callLineEmail(siteName)
 	default:
 		return "", "", false
 	}
@@ -177,6 +186,86 @@ func billingLineEmail(siteName string) (subject, htmlBody string, ok bool) {
     <p style="margin:0 0 22px;font-size:13px;color:#475569;line-height:1.8;">
       如果你的用量较大，或者有接入、定制方面的需求，欢迎加入交流群后私信管理员对接。
       我们会按你的实际用量谈专属方案，量大从优。
+    </p>
+
+    <p style="margin:0;font-size:13px;color:#475569;">感谢你的使用。<br>%[1]s</p>
+
+    <hr style="margin:22px 0 14px;border:none;border-top:1px solid #e2e8f0;">
+    <p style="margin:0;font-size:12px;color:#94a3b8;">本邮件由系统自动发送，请勿直接回复。</p>
+  </div>
+</body>
+</html>`, name)
+
+	return subject, htmlBody, true
+}
+
+// callLineEmail 构造「按次计费专线上线 + 上线优惠」通知的主题与正文。
+//
+// 与 billingLineEmail 共用同一套硬约束（改文案时必须一并守住）：
+//  1. 正文【不出现任何网址/超链接】，包括本站域名；
+//  2. 不承诺缓存命中折扣，也不提上游会注入系统提示等实现细节；
+//  3. 不使用"厂商官网价 N 折""高速稳定"等绝对化/攀附性表述，
+//     价格一律表述为"低于标准档位，以模型广场公示为准"。
+//
+// 本模板额外的一条（运营明确要求）：
+//  4. 【不出现任何具体价格与门槛数字】—— 只说明"新分组已上线""上线优惠进行中"，
+//     金额、折扣、充值门槛一律让用户去站点自行查看。
+//     因此价格档位（0.002/0.005/0.01/0.03）、大客户门槛（50 元）、
+//     以及只对管理员开放的批发价分组，都刻意不出现在正文里。
+func callLineEmail(siteName string) (subject, htmlBody string, ok bool) {
+	name := html.EscapeString(strings.TrimSpace(siteName))
+	if name == "" {
+		name = "AQUA-API"
+	}
+
+	subject = fmt.Sprintf("【%s】按次计费专线已上线", name)
+
+	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>按次计费专线已上线</title></head>
+<body style="margin:0;padding:24px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;color:#0f172a;">
+  <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:28px;">
+    <h1 style="margin:0 0 8px;font-size:18px;font-weight:600;color:#0f172a;">%[1]s</h1>
+    <p style="margin:0 0 22px;font-size:13px;color:#64748b;">这是一封站点通知，有两件新东西想告诉你。</p>
+
+    <h2 style="margin:0 0 10px;font-size:15px;font-weight:600;color:#0f172a;">一、新分组：按次计费专线</h2>
+    <p style="margin:0 0 12px;font-size:13px;color:#475569;line-height:1.8;">
+      按次专线由第三方模型接口服务提供，<strong>按调用次数计费</strong>：
+      一个请求一个价，<strong>提示词再长也不额外加价</strong>。
+      适合长提示词、批量任务，以及调用量比较好预估的场景。
+    </p>
+    <ul style="margin:0 0 12px;padding-left:20px;font-size:13px;color:#475569;line-height:1.9;">
+      <li>首期覆盖 8 个模型，对外名称统一带 <code style="font-family:Consolas,monospace;">AQUA-CALL/</code> 前缀：
+        deepseek-v4-flash、deepseek-v4.1-flash、deepseek-v4-pro、glm-5.3、glm-5.3-flash、
+        kimi-k3、gpt-image-2-w、gpt-image-2.5</li>
+      <li>上线即开放两个分组：
+        <strong>「按次专线」对所有用户直接可选</strong>；
+        用量较大的用户还可使用<strong>「按次专线（大客户）」</strong>优惠档</li>
+      <li>每次调用都在「调用日志」里留痕：可以查到所用模型与本次扣费</li>
+      <li>原有分组保持不变、照常可用；按次专线是多出来的一个选择，不影响你现在的调用</li>
+    </ul>
+
+    <h2 style="margin:0 0 10px;font-size:15px;font-weight:600;color:#0f172a;">二、上线优惠</h2>
+    <p style="margin:0 0 12px;font-size:13px;color:#475569;line-height:1.8;">
+      适逢新线上线，按次专线推出<strong>上线优惠</strong>：专线价格低于标准档位，
+      活动期间的力度还会更大。具体价格与参与方式，以「模型广场」公示为准。
+    </p>
+    <p style="margin:0 0 22px;font-size:13px;color:#475569;line-height:1.8;">
+      如果你用量较大，或者有接入、定制方面的需求，欢迎在站点首页进入「加入交流群」
+      后私信管理员对接，我们会按你的实际用量谈专属方案，量大从优。
+    </p>
+
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:0 0 8px;">
+      <div style="font-size:12px;color:#64748b;letter-spacing:.5px;margin-bottom:8px;">怎么开始用（在站点操作，三步）</div>
+      <ol style="margin:0;padding-left:20px;font-size:13px;color:#0f172a;line-height:1.9;">
+        <li>进入「访问令牌」页，新建一个访问令牌</li>
+        <li>把新令牌的「所属分组」选为「按次专线」（用量较大的用户可选「按次专线（大客户）」）</li>
+        <li>调用时模型名填 <code style="font-family:Consolas,monospace;">AQUA-CALL/</code> 开头的名称（例如 <code style="font-family:Consolas,monospace;">AQUA-CALL/glm-5.3</code>）</li>
+      </ol>
+    </div>
+    <p style="margin:8px 0 22px;font-size:12px;color:#94a3b8;line-height:1.7;">
+      建议新建令牌而不是改现有的那一个：免费与计费并存，方便对比，也方便随时切回去。
+      各模型的详细价格与全部可用模型，请在「模型广场」查看。
     </p>
 
     <p style="margin:0;font-size:13px;color:#475569;">感谢你的使用。<br>%[1]s</p>
