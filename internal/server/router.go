@@ -23,6 +23,9 @@
 package server
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -36,15 +39,24 @@ import (
 // IP 维度限流完全无效。按用户名计数才能把攻击成本压在攻击者
 // 无法无限扩展的维度上（账号名）。
 //
-// 关于读请求体：gin 会把 body 缓存在内存，这里 ShouldBindJSON 一次之后
-// 处理器仍能再次绑定（gin 内部用可重复读的 Reader）。
-// 解析失败时返回空串，此时 Allow 会放行（见 RateLimiter.Allow 的说明）：
-// 畸形请求会在处理器内被 400 拒绝，不需要限流器参与。
+// 【读请求体必须把 body 放回】（线上事故，勿删此说明）：
+//
+//	gin 的 ShouldBindJSON 直接读 c.Request.Body，读完即空，且**不会**自动复原。
+//	这个 keyFunc 跑在业务处理器之前，一旦在此吃掉 body，
+//	紧随其后的 handleLogin 就会拿到 EOF、一律回 "请求体格式错误" —— 表现为
+//	**所有账号都无法登录**。因此这里用 io.ReadAll 读一次、立刻把同一份字节
+//	塞回 c.Request.Body，再对内存里的字节做解析（不要再 ShouldBindJSON）。
 func loginUsernameKey(c *gin.Context) string {
+	raw, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return ""
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(raw))
+
 	var req struct {
 		Username string `json:"username"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := json.Unmarshal(raw, &req); err != nil {
 		return ""
 	}
 	// 统一小写：避免攻击者用 Admin / ADMIN / admin 绕过同一账号的计数
