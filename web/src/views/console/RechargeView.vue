@@ -562,7 +562,6 @@ onBeforeUnmount(stopPolling)
           <ul class="mt-3 space-y-1.5 text-xs leading-relaxed text-ink-400">
             <li>· 充值金额实时到账，余额可直接用于所有已定价的模型调用。</li>
             <li>· 支付超时的订单会被自动关闭，关闭后不再受理，重新下单即可。</li>
-            <li>· 已支付订单如需退款，请联系管理员在后台处理（会扣回已入账余额）。</li>
             <li>
               · 余额以人民币显示；站内计费使用更细的计量单位「额度」
               <template v-if="rateText">（{{ rateText }}，即 {{ rawQuotaText(quotaPerYuan) }} = ¥1.00）</template>

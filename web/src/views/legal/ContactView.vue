@@ -30,7 +30,7 @@ onMounted(() => {
 <template>
   <LegalDocLayout
     title="联系方式"
-    description="如对服务、账单、退款或内容有任何疑问，请通过以下渠道与我们联系。"
+    description="如对服务、账单或内容有任何疑问，请通过以下渠道与我们联系。"
     updated-at="2026-09-27"
   >
     <section>

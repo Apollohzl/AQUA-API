@@ -90,9 +90,13 @@ const routes: RouteRecordRaw[] = [
 
   /* ── 合规文件页（公开，页脚可从任意页面直达）───────────────── */
   {
-    // 这五份文件是经营性服务必须公示的内容：用户协议、隐私政策、充值退款规则、
+    // 这四份文件是经营性服务必须公示的内容：用户协议、隐私政策、
     // 联系方式、投诉举报。它们各自独立成路由（而不是塞进某个页面的锚点），
     // 因为核查与用户投诉时都是"直接要一个可访问的链接"。
+    //
+    // 为什么没有「充值退款规则」这一页：充值退款属于站方与用户之间另行约定的事项，
+    // 不以公开条款的形式对外承诺，因此不设此页（历史上曾存在 /refund，已下线）。
+    // 相关表述也不得再出现在其他公开页面里。
     path: '/terms',
     name: 'terms',
     component: () => import('@/views/legal/TermsView.vue'),
@@ -103,12 +107,6 @@ const routes: RouteRecordRaw[] = [
     name: 'privacy',
     component: () => import('@/views/legal/PrivacyView.vue'),
     meta: { title: '隐私政策' },
-  },
-  {
-    path: '/refund',
-    name: 'refund',
-    component: () => import('@/views/legal/RefundView.vue'),
-    meta: { title: '充值退款' },
   },
   {
     path: '/contact',

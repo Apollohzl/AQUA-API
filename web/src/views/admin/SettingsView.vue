@@ -1324,7 +1324,7 @@ onMounted(() => {
                 placeholder="support@example.com"
               />
               <p class="hint" :class="contactEmailInvalid ? 'text-red-600' : ''">
-                用于用户咨询、退款与投诉举报；留空则相关页面隐藏该入口。
+                用于用户咨询与投诉举报；留空则相关页面隐藏该入口。
               </p>
             </div>
             <div>

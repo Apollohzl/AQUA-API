@@ -180,8 +180,9 @@ func (r *paymentOrderRepository) MarkPaid(ctx context.Context, tradeNo, provider
 
 // UpdateStatus 修改订单状态。
 //
-// 仅允许"待支付 → 已关闭"与"已支付 → 已退款"两种流转之外的调用，
-// 由上层业务判断；这里只保证不会把终态改回待支付。
+// 这里只是一个"能改就改"的底层写入：状态流转是否合法（如待支付 → 已关闭、
+// 已支付 → 已退款）由上层业务判断。函数本身不校验流转方向，
+// 唯一的保证是订单不存在时返回 ErrPaymentOrderNotFound（影响行数为 0）。
 func (r *paymentOrderRepository) UpdateStatus(ctx context.Context, tradeNo string, status model.PaymentStatus) error {
 	res, err := r.db.ExecContext(ctx,
 		"UPDATE payment_orders SET status = ?, updated_at = ? WHERE trade_no = ?",
@@ -240,7 +241,7 @@ func (r *paymentOrderRepository) CreditOrder(ctx context.Context, tradeNo string
 	}
 
 	// 用户被删除时不能静默跳过：额度无处可加，必须让事务回滚并报错，
-	// 以便运营介入（恢复用户或改为退款），而不是让钱消失在一笔"成功"的订单里。
+	// 以便运营介入（恢复用户），而不是让钱消失在一笔"成功"的订单里。
 	var userExists int
 	if err := tx.QueryRowContext(ctx, "SELECT COUNT(1) FROM users WHERE id = ?", userID).Scan(&userExists); err != nil {
 		return false, fmt.Errorf("store: 校验订单归属用户失败: %w", err)

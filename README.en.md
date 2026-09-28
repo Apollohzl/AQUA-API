@@ -167,7 +167,7 @@ Every row below is a decision made after being burned by the alternative:
 - **Semantics**: `-1` means unlimited; the check is "remaining ≤ 0" rather than "== 0", closing an overdraft hole
 - **Payment channels**: manual / Epay / **Stripe** / **Alipay** (RSA2) / **WeChat Pay** (APIv3 + platform cert verification + AES-GCM)
 - **Redeem codes**: bulk generation; redemption is a single atomic transaction (10 concurrent attempts on one code → exactly one wins)
-- **Order accounting**: callback verification, idempotent crediting, manual fulfilment / close / refund
+- **Order accounting**: callback verification, idempotent crediting, manual fulfilment / close (no refund endpoint — refunds are handled privately between the operator and the user)
 
 ### 🛠 Operations & console
 

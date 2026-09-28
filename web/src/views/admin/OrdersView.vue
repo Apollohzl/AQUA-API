@@ -1,13 +1,16 @@
 <script setup lang="ts">
 /**
- * 管理后台 · 充值订单：人工确认入账、关单与退款。
+ * 管理后台 · 充值订单：人工确认入账与关单。
  *
  * 意图（Why）：
- *   这是"钱与额度"的对账页面，三类操作的语义必须让管理员一眼看懂：
+ *   这是"钱与额度"的对账页面，两类操作的语义必须让管理员一眼看懂：
  *     - 确认入账：人工通道的核心动作，也用于"用户已付款但回调丢失"的补救。
  *       后端是幂等的，重复点击不会重复加额度。
  *     - 关闭订单：仅对「待支付」有效，用于用户下错单但收银台未过期的情况。
- *     - 退款：仅对「已支付」有效，会把已入账额度扣回（订单置为已退款）。
+ *
+ *   刻意没有"退款"：退款属于站方与用户之间另行约定的事项，不以公开条款
+ *   或自助功能的形式对外提供，因此本页不提供退款入口
+ *   （「已退款」只作为历史订单状态保留在筛选与徽标里）。
  *
  * 为什么把"是否已入账"单独显示：支付成功与额度到账是两件事。
  *   正常情况下两者同时完成；若出现"已支付但未入账"，说明需要人工补入账
@@ -15,7 +18,7 @@
  *
  * 流转（Flow）：
  *   进入页面 → listAllOrders({page,size,status}) → 表格
- *   操作 → markOrderPaid / closeOrder / refundOrder → 重新加载
+ *   操作 → markOrderPaid / closeOrder → 重新加载
  *
  * 扩展（Extend）：
  *   新增订单状态时：后端 model.PaymentStatus 加常量 → 本页筛选下拉与徽标各补一处。
@@ -26,7 +29,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import DataState from '@/components/DataState.vue'
 import Pagination from '@/components/Pagination.vue'
 import { ApiError } from '@/api/client'
-import { closeOrder, listAllOrders, markOrderPaid, refundOrder } from '@/api/admin'
+import { closeOrder, listAllOrders, markOrderPaid } from '@/api/admin'
 import type { PaymentOrder } from '@/api/types'
 import {
   ORDER_STATUS_CLOSED,
@@ -139,17 +142,6 @@ async function handleClose(order: PaymentOrder): Promise<void> {
   })
   if (!ok) return
   await run(order.trade_no, () => closeOrder(order.trade_no), '订单已关闭')
-}
-
-async function handleRefund(order: PaymentOrder): Promise<void> {
-  const ok = await confirmDialog({
-    title: '退款并扣回额度',
-    message: `将扣回该订单已入账的 ${formatNumber(order.quota)} 额度，并把订单标记为已退款。请先确认已完成实际退款（本操作不涉及第三方支付平台的退款流程）。`,
-    confirmText: '确认退款',
-    danger: true,
-  })
-  if (!ok) return
-  await run(order.trade_no, () => refundOrder(order.trade_no), '已退款并扣回额度')
 }
 
 /**
@@ -319,16 +311,6 @@ const emptyHint = computed(() =>
                 >
                   <AppIcon name="close" :size="14" />
                 </button>
-                <button
-                  v-if="order.status === ORDER_STATUS_PAID"
-                  type="button"
-                  class="btn-row"
-                  :disabled="acting === order.trade_no"
-                  title="退款并扣回额度"
-                  @click="handleRefund(order)"
-                >
-                  <AppIcon name="refresh" :size="14" />
-                </button>
               </div>
             </td>
           </tr>
@@ -350,12 +332,12 @@ const emptyHint = computed(() =>
     <section class="mt-5 card card-pad">
       <h3 class="section-title flex items-center gap-2">
         <AppIcon name="info" :size="16" class="text-brand-700" />
-        关于退款
+        关于订单状态
       </h3>
       <ul class="mt-3 space-y-1.5 text-xs leading-relaxed text-ink-400">
-        <li>· 本页的「退款」只负责<strong>扣回已入账额度</strong>并把订单置为已退款，不会调用第三方支付平台的退款接口。</li>
-        <li>· 请先在实际收款渠道完成退款，再回到本页操作，避免账实不符。</li>
-        <li>· 若用户已把额度消耗掉，扣回后其额度可能变为负数（表现为无法继续调用），属于预期行为。</li>
+        <li>· 「确认入账」是幂等的：用户已付款但回调丢失时可用它补救，重复点击不会重复加额度。</li>
+        <li>· 「关闭订单」只对「待支付」有效，关闭后用户无法再完成支付，也不会产生扣费。</li>
+        <li>· 「已退款」是历史订单状态，本站不提供退款入口与公开退款条款；如确有退款需求，属于站方与用户之间另行约定的事项。</li>
       </ul>
     </section>
   </div>

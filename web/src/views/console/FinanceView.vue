@@ -217,7 +217,7 @@ onMounted(async () => {
       </StatCard>
       <StatCard label="累计充值" :value="rechargedText" icon="wallet" tone="ok">
         <p class="text-xs text-ink-400">
-          共 {{ formatNumber(summary?.recharge_count ?? 0) }} 笔已支付订单（退款后自动扣除）
+          共 {{ formatNumber(summary?.recharge_count ?? 0) }} 笔已支付订单
         </p>
       </StatCard>
       <StatCard label="累计奖励" :value="rewardText" icon="users" tone="brand">

@@ -313,7 +313,6 @@ var auditActionLabels = map[string]string{
 	"DELETE /api/admin/redeem-codes/:id":        "删除兑换码",
 	"POST /api/admin/orders/:tradeNo/mark-paid": "确认订单入账",
 	"POST /api/admin/orders/:tradeNo/close":     "关闭订单",
-	"POST /api/admin/orders/:tradeNo/refund":    "订单退款",
 
 	"POST /api/admin/sensitive-words":        "新增敏感词",
 	"POST /api/admin/sensitive-words/import": "批量导入敏感词",

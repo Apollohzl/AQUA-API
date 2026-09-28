@@ -325,11 +325,14 @@ func (s *Server) registerRoutes() {
 	admin.PUT("/redeem-codes/:id", s.handleAdminUpdateRedeemCode)
 	admin.DELETE("/redeem-codes/:id", s.handleAdminDeleteRedeemCode)
 
-	// 充值订单管理（人工确认入账 / 关单 / 退款）
+	// 充值订单管理（人工确认入账 / 关单）
+	//
+	// 刻意没有"退款"接口：退款属于站方与用户之间另行约定的事项，
+	// 不以公开条款或自助功能的形式对外提供，故不暴露任何退款入口
+	// （历史上曾存在 POST /orders/:tradeNo/refund，已下线）。
 	admin.GET("/orders", s.handleAdminListOrders)
 	admin.POST("/orders/:tradeNo/mark-paid", s.handleAdminMarkOrderPaid)
 	admin.POST("/orders/:tradeNo/close", s.handleAdminCloseOrder)
-	admin.POST("/orders/:tradeNo/refund", s.handleAdminRefundOrder)
 
 	// ── 模型 API（访问令牌鉴权）──────────────────────────────────
 	//

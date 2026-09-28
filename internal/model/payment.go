@@ -61,6 +61,10 @@ const (
 	// PaymentStatusClosed 已关闭：超时未支付或被管理员关闭（终态）。
 	PaymentStatusClosed PaymentStatus = 3
 	// PaymentStatusRefunded 已退款：额度已扣回（终态）。
+	//
+	// 保留原因：这是历史数据里真实存在的状态值，且 0010 迁移已把它写进了表注释，
+	// 不能改数值。本站已不再提供任何退款入口与退款条款，因此不会再产生新的该状态订单；
+	// 保留它只是为了能正确读出历史订单、并让后台的状态筛选仍然自洽。
 	PaymentStatusRefunded PaymentStatus = 4
 )
 
@@ -238,7 +242,7 @@ type PaymentOrderRepository interface {
 	// 条件更新（WHERE status = 待支付）由数据库保证只有一个赢家。
 	MarkPaid(ctx context.Context, tradeNo, providerTradeNo, payload string, paidAt time.Time) (bool, error)
 
-	// UpdateStatus 修改订单状态（用于关闭、退款等由管理员触发的流转）。
+	// UpdateStatus 修改订单状态（用于关闭订单、标记历史退款等由管理员触发的流转）。
 	UpdateStatus(ctx context.Context, tradeNo string, status PaymentStatus) error
 
 	// CreditOrder 给订单入账：在【同一事务】内标记已入账并把额度加到用户账户。

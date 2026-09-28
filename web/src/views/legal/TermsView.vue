@@ -48,7 +48,7 @@ import LegalDocLayout from '@/components/LegalDocLayout.vue'
     <section>
       <h2 class="section-title">三、计费与额度</h2>
       <ul class="list-disc space-y-1.5 pl-5">
-        <li>本服务按用量计费，模型单价以「模型广场」公示的报价为准，充值以人民币结算。</li>
+        <li>本服务按用量计费，模型单价以「模型广场」公示的报价为准。</li>
         <li>站内存在用于换算的内部计量单位，仅用于计算模型单价，不影响实际扣费金额。</li>
         <li>每次调用的输入/输出用量与扣费金额都记录在「调用日志」中，可逐笔核对。</li>
         <li>免费开放的模型或分组不计费，但其范围与可用模型可能随时调整。</li>

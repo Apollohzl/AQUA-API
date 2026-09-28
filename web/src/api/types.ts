@@ -1552,7 +1552,7 @@ export interface FinanceSummary {
   balance_quota: number
   /** 累计消费额度 */
   used_quota: number
-  /** 累计有效充值额度（已支付且未退款：退款后会自动从合计里消失） */
+  /** 累计有效充值额度（仅统计已支付的订单） */
   recharged_quota: number
   /** 已支付订单笔数 */
   recharge_count: number

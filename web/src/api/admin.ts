@@ -423,11 +423,6 @@ export function closeOrder(tradeNo: string): Promise<PaymentOrder> {
   return api.post<PaymentOrder>(`/admin/orders/${encodeURIComponent(tradeNo)}/close`)
 }
 
-/** POST /api/admin/orders/{tradeNo}/refund：退款（扣回已入账额度） */
-export function refundOrder(tradeNo: string): Promise<PaymentOrder> {
-  return api.post<PaymentOrder>(`/admin/orders/${encodeURIComponent(tradeNo)}/refund`)
-}
-
 /* ── OAuth 提供方 ───────────────────────────────────────── */
 
 /** GET /api/admin/oauth-providers：订阅账号刷新令牌所需的提供方配置 */

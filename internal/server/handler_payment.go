@@ -16,7 +16,9 @@
 //	管理（需管理员）：GET  /api/admin/orders       —— 全部订单
 //	                POST /api/admin/orders/{no}/mark-paid —— 人工确认入账
 //	                POST /api/admin/orders/{no}/close     —— 关闭订单
-//	                POST /api/admin/orders/{no}/refund    —— 退款（扣回额度）
+//
+// 刻意不提供"退款"接口与退款条款：退款属于站方与用户之间另行约定的事项，
+// 不以公开条款或自助功能的形式对外提供（历史上曾有 refund 接口，已下线）。
 //
 // 回调（无需登录）：POST /api/payments/{method}/notify
 //
@@ -525,45 +527,6 @@ func (s *Server) handleAdminCloseOrder(c *gin.Context) {
 		return
 	}
 	order.Status = model.PaymentStatusClosed
-	c.JSON(http.StatusOK, toOrderDTO(order))
-}
-
-// handleAdminRefundOrder 处理 POST /api/admin/orders/{tradeNo}/refund。
-//
-// 语义：把已入账的额度扣回（退款）。这是"用户已用掉额度"时唯一的正确处理方式——
-// 不能只改状态，否则账面上用户白拿了额度。
-//
-// 实现：用 AddUsedQuota 施加负增量（相当于把"已用额度"抵回），
-// 从而在不改动总额度的前提下回收额度，历史用量记录保持完整可审计。
-func (s *Server) handleAdminRefundOrder(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	order, err := s.deps.Orders.GetByTradeNo(ctx, c.Param("tradeNo"))
-	if err != nil {
-		writeOrderLookupError(c, err)
-		return
-	}
-	if order.Status != model.PaymentStatusPaid {
-		oai.WriteError(c.Writer, http.StatusConflict,
-			"仅已支付订单可以退款（当前状态："+order.Status.String()+"）",
-			oai.TypeInvalidRequest, "order_not_paid")
-		return
-	}
-
-	// 允许负数入参是刻意的：AddUsedQuota 的语义是"调整已用额度"，
-	// 负数即把已用额度抵回，等价于退还。这里用 -quota 表示"退回这笔充值"。
-	if order.Quota > 0 {
-		if err := s.deps.Users.AddUsedQuota(ctx, order.UserID, -order.Quota); err != nil {
-			s.respondInternalError(c, "退还额度失败")
-			return
-		}
-	}
-	if err := s.deps.Orders.UpdateStatus(ctx, order.TradeNo, model.PaymentStatusRefunded); err != nil {
-		s.respondInternalError(c, "更新订单状态失败")
-		return
-	}
-
-	order.Status = model.PaymentStatusRefunded
 	c.JSON(http.StatusOK, toOrderDTO(order))
 }
 
