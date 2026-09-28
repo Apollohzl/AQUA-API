@@ -23,7 +23,7 @@
  *   新增任务类别（音乐等）时无需改动本组件（kind_text 由后端给出）；
  *   新增可选列（渠道、额度）时加 prop 并在表头/单元格各补一处，同时补词条键。
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import AppIcon from './AppIcon.vue'
@@ -74,6 +74,24 @@ const emptyMessage = computed(() => props.emptyText ?? t('components.taskTable.e
 
 /** 详情弹窗当前展示的任务 */
 const detail = ref<Task | null>(null)
+
+/**
+ * 任务状态变为终态后自动收起详情弹窗。
+ *
+ * 为什么需要这个监听：取消任务要走"确认框 → 调接口 → 刷新列表"，
+ * 而确认框与接口调用都在页面侧。若点击时立刻把详情弹窗关掉，
+ * 视觉上就成了"已经取消了"，可此时用户还没确认 —— 顺序反了。
+ * 现在点击只发出请求，弹窗保持打开；等列表刷新到该任务已是终态（真取消成功），
+ * 或用户主动点关闭，弹窗才收起。用户撤销确认时弹窗原样留着，什么都没发生。
+ */
+watch(
+  () => props.tasks,
+  (list) => {
+    if (!detail.value) return
+    const fresh = list.find((item) => item.task_ref === detail.value?.task_ref)
+    if (fresh && isTerminal(fresh)) detail.value = null
+  },
+)
 
 /** 列数：用于 DataState 的 colspan，必须与表头列数严格一致 */
 const columnCount = computed(() => 6 + (props.showUser ? 1 : 0) + (props.allowCancel ? 1 : 0))
@@ -340,7 +358,8 @@ function openDetail(task: Task): void {
           v-if="detail && allowCancel && !isTerminal(detail)"
           type="button"
           class="btn btn-danger"
-          @click="emit('cancel', detail); detail = null"
+          :disabled="cancelling === detail.task_ref"
+          @click="emit('cancel', detail)"
         >
           <AppIcon name="close" :size="14" />
           {{ $t('components.taskTable.cancel') }}

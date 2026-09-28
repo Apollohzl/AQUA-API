@@ -198,8 +198,10 @@ function methodClass(method: string): string {
         <AppIcon name="list" :size="16" class="text-brand-700" />
         <h3 class="section-title">接口一览</h3>
       </div>
-      <div class="table-wrap">
-        <table class="data-table min-w-[560px]">
+      <!-- 与其它页面的表格保持同一套窄屏降级：table-cards 让 375px 下
+           每一行渲染成「标签 : 值」的卡片，而不是只能横向滑动。 -->
+      <div class="table-wrap table-cards">
+        <table class="data-table">
           <thead>
             <tr>
               <th>方法</th>
@@ -209,11 +211,11 @@ function methodClass(method: string): string {
           </thead>
           <tbody>
             <tr v-for="item in ENDPOINTS" :key="item.method + item.path">
-              <td>
+              <td data-label="方法">
                 <span class="badge" :class="methodClass(item.method)">{{ item.method }}</span>
               </td>
-              <td class="font-mono text-[13px] text-ink-100">{{ item.path }}</td>
-              <td class="cell-muted">{{ item.desc }}</td>
+              <td class="font-mono text-[13px] text-ink-100" data-label="路径" dir="ltr">{{ item.path }}</td>
+              <td class="cell-muted" data-label="说明">{{ item.desc }}</td>
             </tr>
           </tbody>
         </table>

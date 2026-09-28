@@ -63,7 +63,14 @@ async function handleSubmit(): Promise<void> {
     submitError.value = '请设置管理员密码'
     return
   }
-  if (confirmPassword.value && confirmPassword.value !== password.value) {
+  // 确认框必须填且必须一致。
+  // 此前写成 `confirmPassword.value && …`，等于"留空即通过"，
+  // 于是空值会被原样提交给后端，用户只能拿到一条后端报错，不知道是哪个框没填。
+  if (!confirmPassword.value) {
+    submitError.value = '请再次输入管理员密码以确认'
+    return
+  }
+  if (confirmPassword.value !== password.value) {
     submitError.value = '两次输入的密码不一致'
     return
   }

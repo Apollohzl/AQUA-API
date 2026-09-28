@@ -160,13 +160,27 @@ async function submit(): Promise<void> {
   }
 }
 
+/**
+ * 分组是否仍被引用（渠道 / 计价规则）。
+ *
+ * 被引用时不允许删除：此前按钮可点，确认框里写着"后端会拒绝删除"，
+ * 等于让管理员完整走一遍注定失败的流程，最后拿到一条报错。
+ * 现在直接置灰并用 title 说明原因与解除办法。
+ */
+function isGroupInUse(group: ModelGroup): boolean {
+  return group.channel_count + group.price_count > 0
+}
+
 async function remove(group: ModelGroup): Promise<void> {
-  const used = group.channel_count + group.price_count > 0
+  // 模板上已置灰，这里再拦一道，避免将来从别处调用绕过按钮状态
+  if (isGroupInUse(group)) {
+    toastError('该分组仍被渠道或计价规则使用，请先调整这些配置的分组归属。')
+    return
+  }
+
   const ok = await confirmDialog({
     title: `删除分组「${group.label}」`,
-    message: used
-      ? `该分组正被 ${group.channel_count} 个渠道与 ${group.price_count} 条计价规则使用，后端会拒绝删除。请先调整这些配置的分组。`
-      : '删除后无法恢复。若仍有渠道或计价规则引用该分组名，它们将失去分组归属。',
+    message: '删除后无法恢复。仅在没有任何渠道或计价规则引用该分组时才能删除。',
     confirmText: '删除',
     danger: true,
   })
@@ -276,8 +290,14 @@ function unlockText(group: ModelGroup): string {
                 <button
                   type="button"
                   class="btn-row"
-                  :disabled="group.name === 'default'"
-                  :title="group.name === 'default' ? '默认分组不可删除' : '删除'"
+                  :disabled="group.name === 'default' || isGroupInUse(group)"
+                  :title="
+                    group.name === 'default'
+                      ? '默认分组不可删除'
+                      : isGroupInUse(group)
+                        ? `仍被 ${group.channel_count} 个渠道与 ${group.price_count} 条计价规则使用，需先解除引用`
+                        : '删除'
+                  "
                   @click="remove(group)"
                 >
                   <AppIcon name="trash" :size="14" />

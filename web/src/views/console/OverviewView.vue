@@ -381,7 +381,19 @@ const hasModelData = computed(() => (usage.value?.by_model ?? []).length > 0)
           </div>
         </div>
         <div class="card-pad">
-          <div v-if="usageError" class="text-sm text-red-700">{{ usageError }}</div>
+          <!-- 错误态与「用量趋势」保持同一套表达：都带重试入口。
+               此前这里只有一行红字，用户看不出能不能重试，与同页的图表区不一致。 -->
+          <div
+            v-if="usageError"
+            class="flex flex-wrap items-center gap-3 rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-3"
+          >
+            <AppIcon name="alert" :size="16" class="text-red-700" />
+            <p class="flex-1 text-sm text-red-800">{{ usageError }}</p>
+            <button type="button" class="btn btn-secondary btn-sm" @click="loadUsage">
+              <AppIcon name="refresh" :size="14" />
+              重试
+            </button>
+          </div>
           <div v-else-if="usageLoading" class="flex h-[280px] max-sm:h-[240px] items-center justify-center text-sm text-ink-400">
             正在加载…
           </div>

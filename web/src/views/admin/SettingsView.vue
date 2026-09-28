@@ -539,6 +539,26 @@ function collectSeoPayload(): UpdateSeoSettingsPayload {
   }
 }
 
+/**
+ * 保存按钮不可用的原因（空串表示可以保存）。
+ *
+ * 抽出来有两个理由：
+ *   1) 页头与页面底部的固定操作条要用同一套判断，复制两份条件迟早漏改一处；
+ *   2) 把"为什么不能保存"显式写出来 —— 直接置灰一个按钮，
+ *      用户只能靠挨个翻六段表单去猜哪里填错了。
+ */
+const saveBlockedReason = computed(() => {
+  if (loading.value) return '正在读取系统设置…'
+  if (emailCodeUnavailable.value) return '已开启邮箱验证码注册，但邮件通道未就绪。'
+  if (paymentInvalid.value) return '支付配置不完整或有误，请检查「支付设置」。'
+  if (seoInvalid.value) return 'SEO 配置有误，请检查「搜索引擎优化」。'
+  if (contactEmailInvalid.value) return '客服邮箱格式不正确，请检查「合规信息」。'
+  return ''
+})
+
+/** 保存按钮的禁用条件（保存中、加载中、或存在校验错误） */
+const saveDisabled = computed(() => saving.value || Boolean(saveBlockedReason.value))
+
 async function handleSave(): Promise<void> {
   if (emailCodeUnavailable.value) {
     toastError('邮件服务未配置，无法开启邮箱验证码校验')
@@ -631,7 +651,8 @@ onMounted(() => {
       <button
         type="button"
         class="btn btn-primary"
-        :disabled="saving || loading || emailCodeUnavailable || paymentInvalid || seoInvalid || contactEmailInvalid"
+        :disabled="saveDisabled"
+        :title="saveBlockedReason || '保存设置'"
         @click="handleSave"
       >
         <span
@@ -652,7 +673,8 @@ onMounted(() => {
       @retry="load"
     />
 
-    <div v-else class="grid gap-5 lg:grid-cols-3">
+    <template v-else>
+      <div class="grid gap-5 lg:grid-cols-3">
       <!-- 站点信息 -->
       <section class="card lg:col-span-2">
         <div class="card-head">
@@ -1329,6 +1351,34 @@ onMounted(() => {
           <p v-if="contactEmailInvalid" class="field-error">客服邮箱格式不正确。</p>
         </div>
       </section>
-    </div>
+      </div>
+
+      <!-- 底部固定操作条。
+           为什么需要它：本页有六段表单、纵向很长，保存按钮只放在页头时，
+           管理员改完最下面的「SEO」「合规信息」就看不到保存入口了。
+           这里用 position: sticky + bottom:0 —— 元素正常流位置在文档末尾，
+           sticky 会把它"拉"到视口底部常驻，直到滚到真正的末尾就位；
+           页头的按钮保留，两种习惯（自上而下改 / 自下而上改）都不用回滚页面。
+           禁用原因直接写在左侧，而不是只给一个无法解释的灰按钮。 -->
+      <div
+        class="sticky bottom-0 z-10 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink-800/70 bg-white/95 px-5 py-3 shadow-panel"
+      >
+        <p class="text-xs leading-relaxed text-ink-400">
+          <template v-if="saveBlockedReason">
+            <span class="text-amber-700">{{ saveBlockedReason }}</span>
+          </template>
+          <template v-else>六段设置共用同一个保存动作，改动后点击右侧按钮才会生效。</template>
+        </p>
+        <button type="button" class="btn btn-primary" :disabled="saveDisabled" @click="handleSave">
+          <span
+            v-if="saving"
+            class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+            aria-hidden="true"
+          />
+          <AppIcon v-else name="check" :size="16" />
+          {{ saving ? '保存中…' : '保存设置' }}
+        </button>
+      </div>
+    </template>
   </div>
 </template>
