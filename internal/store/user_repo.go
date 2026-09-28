@@ -269,6 +269,33 @@ func (r *userRepository) Update(ctx context.Context, u *model.User) error {
 	return nil
 }
 
+// UpdatePassword 按 ID 只更新口令哈希（改密/重置密码专用）。
+//
+// 刻意不复用 Update：Update 会把整行写回，调用方若拿的是改密前读到的副本，
+// 就会把并发期间刚入账的额度或刚改的状态覆盖回去。
+func (r *userRepository) UpdatePassword(ctx context.Context, id uint64, passwordHash string) error {
+	hash := strings.TrimSpace(passwordHash)
+	if hash == "" {
+		return errors.New("store: 口令哈希不能为空")
+	}
+
+	res, err := r.db.ExecContext(ctx,
+		"UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
+		hash, time.Now().Unix(), id)
+	if err != nil {
+		return fmt.Errorf("store: 更新用户 %d 口令失败: %w", id, err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: 读取更新影响行数失败: %w", err)
+	}
+	if affected == 0 {
+		return model.ErrUserNotFound
+	}
+	return nil
+}
+
 // Delete 按 ID 删除用户。
 func (r *userRepository) Delete(ctx context.Context, id uint64) error {
 	res, err := r.db.ExecContext(ctx, "DELETE FROM users WHERE id = ?", id)

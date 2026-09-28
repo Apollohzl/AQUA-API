@@ -45,6 +45,18 @@ import (
 const (
 	// EmailCodePurposeRegister 注册用途。
 	EmailCodePurposeRegister = "register"
+	// EmailCodePurposeLogin 邮箱验证码登录用途。
+	//
+	// 与注册分开的理由：两者对"邮箱是否已注册"的要求正好相反
+	// （注册要求未被占用、登录要求已存在），共用一个用途串会让
+	// 校验侧无法判断该按哪套规则来，也会让验证码跨场景复用。
+	EmailCodePurposeLogin = "login"
+	// EmailCodePurposeReset 邮箱验证码重置口令用途。
+	//
+	// 与登录分开而不是复用：重置口令是比登录更高危的动作
+	// （改完之后旧口令立即失效），单独一个用途便于在风控上区别对待，
+	// 也避免"用来登录的那条码"顺手被拿去改密。
+	EmailCodePurposeReset = "reset"
 
 	// EmailCodeLength 验证码位数。
 	//

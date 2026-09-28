@@ -21,6 +21,18 @@ import (
 	"time"
 )
 
+// emailCodeCopy 是验证码邮件的可变文案部分（不同用途只差这几句）。
+//
+// 抽出来的理由：注册 / 登录 / 重置口令三种验证码邮件的**结构完全一致**
+// （都是"标题 + 大号验证码 + 有效期说明"），只有文案不同。
+// 复制三份 HTML 意味着以后改一次样式要改三处，必然漏。
+type emailCodeCopy struct {
+	subjectTail string // 主题后缀，如「注册验证码」
+	lead        string // 首段说明（告诉用户这封信是干什么的）
+	action      string // 验证码的用途陈述
+	extra       string // 额外提示；空串表示不显示该段
+}
+
 // RegisterCodeEmail 构造注册验证码邮件的主题与 HTML 正文。
 //
 // 参数：
@@ -28,6 +40,37 @@ import (
 //   - code：验证码明文；
 //   - ttl：有效期。
 func RegisterCodeEmail(siteName, code string, ttl time.Duration) (subject, htmlBody string) {
+	return renderEmailCode(siteName, code, ttl, emailCodeCopy{
+		subjectTail: "注册验证码",
+		lead:        "您正在注册账号，请使用以下验证码完成验证。",
+		action:      "验证码",
+	})
+}
+
+// LoginCodeEmail 构造「邮箱验证码登录」邮件的主题与 HTML 正文。
+func LoginCodeEmail(siteName, code string, ttl time.Duration) (subject, htmlBody string) {
+	return renderEmailCode(siteName, code, ttl, emailCodeCopy{
+		subjectTail: "登录验证码",
+		lead:        "您正在使用邮箱验证码登录，请使用以下验证码完成验证。",
+		action:      "登录验证码",
+		extra:       "若非本人操作，请忽略本邮件，您的账号不会被登录。",
+	})
+}
+
+// ResetPasswordCodeEmail 构造「重置密码」邮件的主题与 HTML 正文。
+func ResetPasswordCodeEmail(siteName, code string, ttl time.Duration) (subject, htmlBody string) {
+	return renderEmailCode(siteName, code, ttl, emailCodeCopy{
+		subjectTail: "重置密码验证码",
+		lead:        "您正在重置账号密码，请使用以下验证码完成验证。",
+		action:      "重置验证码",
+		// 必须提前告知"改完会踢下线"：否则用户改完密码发现所有设备都要重登，
+		// 会以为是站点出了问题，反而来投诉。
+		extra: "重置成功后，该账号此前所有登录状态都会失效，需要重新登录。",
+	})
+}
+
+// renderEmailCode 渲染验证码邮件（三种用途共用同一套结构与样式）。
+func renderEmailCode(siteName, code string, ttl time.Duration, c emailCodeCopy) (subject, htmlBody string) {
 	// 站点名来自后台设置，属于半可信输入：这里做 HTML 转义，
 	// 避免管理员无意间填入的字符破坏邮件结构（或在客户端触发脚本解析）。
 	name := html.EscapeString(strings.TrimSpace(siteName))
@@ -40,9 +83,15 @@ func RegisterCodeEmail(siteName, code string, ttl time.Duration) (subject, htmlB
 		minutes = 5
 	}
 
-	subject = fmt.Sprintf("【%s】注册验证码", name)
+	extraBlock := ""
+	if c.extra != "" {
+		extraBlock = fmt.Sprintf(`
+    <p style="margin:14px 0 0;font-size:12px;color:#94a3b8;line-height:1.7;">%s</p>`, c.extra)
+	}
 
-	// 用 fmt.Sprintf 拼装而非 html/template：结构固定且只有三个变量，
+	subject = fmt.Sprintf("【%s】%s", name, c.subjectTail)
+
+	// 用 fmt.Sprintf 拼装而非 html/template：结构固定且只有少量变量，
 	// 引入模板引擎的复杂度不值得；转义已在上方显式完成。
 	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
 <html lang="zh-CN">
@@ -50,10 +99,10 @@ func RegisterCodeEmail(siteName, code string, ttl time.Duration) (subject, htmlB
 <body style="margin:0;padding:24px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;color:#0f172a;">
   <div style="max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:28px;">
     <h1 style="margin:0 0 8px;font-size:18px;font-weight:600;color:#0f172a;">%[1]s</h1>
-    <p style="margin:0 0 20px;font-size:13px;color:#64748b;">您正在注册账号，请使用以下验证码完成验证。</p>
+    <p style="margin:0 0 20px;font-size:13px;color:#64748b;">%[4]s</p>
 
     <div style="background:#ecfeff;border:1px solid #a5f3fc;border-radius:12px;padding:18px;text-align:center;">
-      <div style="font-size:12px;color:#0e7490;letter-spacing:1px;">验证码</div>
+      <div style="font-size:12px;color:#0e7490;letter-spacing:1px;">%[5]s</div>
       <div style="margin-top:8px;font-size:32px;font-weight:700;letter-spacing:8px;color:#0891b2;font-family:'SFMono-Regular',Consolas,monospace;">%[2]s</div>
     </div>
 
@@ -61,12 +110,13 @@ func RegisterCodeEmail(siteName, code string, ttl time.Duration) (subject, htmlB
       验证码 <strong>%[3]d 分钟</strong>内有效，且只能使用一次。<br>
       若非本人操作，请忽略本邮件，您的账号不会受到影响。
     </p>
+%[6]s
 
     <hr style="margin:22px 0 14px;border:none;border-top:1px solid #e2e8f0;">
     <p style="margin:0;font-size:12px;color:#94a3b8;">本邮件由系统自动发送，请勿直接回复。</p>
   </div>
 </body>
-</html>`, name, code, minutes)
+</html>`, name, code, minutes, c.lead, c.action, extraBlock)
 
 	return subject, htmlBody
 }

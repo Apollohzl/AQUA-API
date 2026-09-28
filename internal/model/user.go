@@ -275,6 +275,14 @@ type UserRepository interface {
 	// Update 按 ID 更新用户（不修改创建时间），不存在时返回 ErrUserNotFound。
 	Update(ctx context.Context, u *User) error
 
+	// UpdatePassword 按 ID 只更新口令哈希，不存在时返回 ErrUserNotFound。
+	//
+	// 为什么不用 Update：改密（含"邮箱验证码重置密码"）只应改一列，
+	// 而 Update 会把整行写回——调用方若持有的是改密前读到的副本，
+	// 就会把并发期间刚入账的额度/刚改的状态一并覆盖回去。
+	// 单列增量更新天然没有这个风险。
+	UpdatePassword(ctx context.Context, id uint64, passwordHash string) error
+
 	// Delete 按 ID 删除用户，不存在时返回 ErrUserNotFound。
 	Delete(ctx context.Context, id uint64) error
 

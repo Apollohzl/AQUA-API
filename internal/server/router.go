@@ -123,9 +123,14 @@ func (s *Server) registerRoutes() {
 	// 安装请求同样含 bcrypt 运算，因此也套限流。
 	api.GET("/install/status", s.handleInstallStatus)
 	api.POST("/install", authLimit, s.handleInstall)
-	// 发送注册邮箱验证码。同样叠加限流：该接口会触发真实发信（有成本），
+	// 发送邮箱验证码（注册 / 登录 / 重置密码三种用途共用一个入口，
+	// 由请求体里的 purpose 区分）。同样叠加限流：该接口会触发真实发信（有成本），
 	// 且是"把本站当邮件轰炸机"的直接入口。
 	api.POST("/auth/email-code", authLimit, s.handleSendEmailCode)
+	// 邮箱验证码登录：忘记用户名或忘记密码时的一站式自助入口。
+	api.POST("/auth/email-login", authLimit, s.handleEmailLogin)
+	// 邮箱验证码重置密码：重置成功后会吊销该账号全部会话。
+	api.POST("/auth/password-reset", authLimit, s.handleResetPassword)
 
 	// ── 需登录（网站会话）────────────────────────────────────────
 	authed := api.Group("")
