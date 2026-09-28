@@ -491,3 +491,77 @@ func TestMyGroups_下发解锁状态(t *testing.T) {
 		t.Errorf("累计充值应为 10000 分，实际 %v", item["paid_amount_cents"])
 	}
 }
+
+// withAdminGrantOnlyGroup 建一个「仅后台可分发的分组」（批发价分组）+ 一个启用渠道。
+//
+// 为什么必须同时建渠道：门户分组下拉只下发"确实有启用渠道在服务"的分组，
+// 没有渠道时该分组本来就不会出现，就无法区分"因为没渠道而不见"与"因为仅后台而不见"。
+func (fx *tokenGroupFixture) withAdminGrantOnlyGroup(t *testing.T, name string, ratio int64) {
+	t.Helper()
+	ctx := context.Background()
+
+	if err := fx.groups.Create(ctx, &model.ModelGroup{
+		Name: name, DisplayName: name, Ratio: ratio, AdminOnly: true, Enabled: true,
+	}); err != nil {
+		t.Fatalf("创建分组 %s 失败: %v", name, err)
+	}
+	if err := fx.channels.Create(ctx, &model.Channel{
+		Name: name + "-渠道", Type: 1, BaseURL: "https://" + name + ".example.com",
+		APIKey: "sk-" + name, Models: []string{name + "-model"}, Group: name,
+		Priority: 1, Weight: 1, Status: model.ChannelStatusEnabled,
+	}); err != nil {
+		t.Fatalf("创建渠道 %s 失败: %v", name, err)
+	}
+}
+
+// TestTokenGroup_仅后台分组_用户自选被拒 锁住批发价分组的服务端闸门。
+//
+// 这是"代理拿货价只由后台分发"的唯一保障：界面上不显示远远不够，
+// 必须让别人直接调接口也拿不到——绕过一次就等于永久拿到批发价。
+func TestTokenGroup_仅后台分组_用户自选被拒(t *testing.T) {
+	fx := newTokenGroupFixture(t)
+	fx.withAdminGrantOnlyGroup(t, "call_agent", 70)
+
+	rec, _ := doBearerJSON(t, fx.srv, http.MethodPost, "/api/user/tokens", fx.userTok,
+		`{"name":"想自己拿批发价","unlimited_quota":true,"group_name":"call_agent"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("普通用户自选仅后台分组应 403，实际 %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestTokenGroup_仅后台分组_管理员代为创建放行 锁住"判据是发起人、不是归属者"。
+//
+// 这条用例防的是一个很容易写错的实现：若判据写成"令牌归属者是否管理员"，
+// 后台代客户建令牌会被拦（归属者是普通客户），代理令牌就根本建不出来——
+// 功能等于废掉，而表面上看只是"后台报了个 403"。
+func TestTokenGroup_仅后台分组_管理员代为创建放行(t *testing.T) {
+	fx := newTokenGroupFixture(t)
+	fx.withAdminGrantOnlyGroup(t, "call_agent", 70)
+
+	body := `{"user_id":` + strconv.FormatUint(fx.userID, 10) +
+		`,"name":"代理商令牌","unlimited_quota":true,"group_name":"call_agent"}`
+	rec, created := doBearerJSON(t, fx.srv, http.MethodPost, "/api/admin/tokens", fx.adminTok, body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("管理员代建仅后台分组令牌应放行，实际 %d %s", rec.Code, rec.Body.String())
+	}
+	if got, _ := created["group_name"].(string); got != "call_agent" {
+		t.Fatalf("分组应为 call_agent，实际 %q", got)
+	}
+}
+
+// TestMyGroups_不下发仅后台分组 保证批发价分组的"存在"本身对普通用户不可见。
+//
+// 让它出现在下拉里再置灰，等于向所有人明示"这里有个更便宜的分组"，
+// 只会引来"为什么我不能用"的追问；正确做法是根本不下发。
+func TestMyGroups_不下发仅后台分组(t *testing.T) {
+	fx := newTokenGroupFixture(t)
+	fx.withAdminGrantOnlyGroup(t, "call_agent", 70)
+
+	rec, body := doBearerJSON(t, fx.srv, http.MethodGet, "/api/user/groups", fx.userTok, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("查询可选分组失败：%d %s", rec.Code, rec.Body.String())
+	}
+	if item := findGroupItem(body, "call_agent"); item != nil {
+		t.Fatalf("仅后台分发的分组不应下发给普通用户，实际下发：%v", item)
+	}
+}

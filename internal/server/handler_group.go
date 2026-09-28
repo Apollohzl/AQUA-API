@@ -62,6 +62,9 @@ type modelGroupDTO struct {
 	// 用"分"而不是"元"透出：金额一旦经过浮点就会在门槛比较上出现 99.99999 < 100 之类的
 	// 假性未达标，整数分是唯一安全的表示（前端负责换算成元展示与输入）。
 	UnlockMinRechargeCents int64 `json:"unlock_min_recharge_cents"`
+	// AdminOnly 表示本分组只能由管理员分发（门户不下发、非管理员指定即 403）。
+	// 用于批发价分组（如"代理拿货"）：这类价格一旦能被自助拿到，价格体系就塌了。
+	AdminOnly bool `json:"admin_only"`
 	// ChannelCount / PriceCount 是引用统计，便于管理员判断"这个分组能不能删"。
 	ChannelCount int   `json:"channel_count"`
 	PriceCount   int   `json:"price_count"`
@@ -81,6 +84,7 @@ func toModelGroupDTO(group *model.ModelGroup, channelCount, priceCount int) mode
 		Label:                  group.Label(),
 		Ratio:                  group.Ratio,
 		UnlockMinRechargeCents: group.UnlockMinRechargeCents,
+		AdminOnly:              group.AdminOnly,
 		Description:            group.Description,
 		Enabled:                group.Enabled,
 		ChannelCount:           channelCount,
@@ -157,6 +161,9 @@ type modelGroupUpsertRequest struct {
 	// UnlockMinRechargeCents 是解锁门槛（分）。用指针区分"未传"与"传 0"：
 	// 未传 = 保持原值，传 0 = 明确清除门槛。
 	UnlockMinRechargeCents *int64 `json:"unlock_min_recharge_cents"`
+	// AdminOnly 是"仅后台可分发的分组"开关。同样用指针区分未传与显式 false：
+	// 未传 = 保持原值（避免"只想改倍率"的一次 PUT 把批发价分组意外放开给所有用户）。
+	AdminOnly *bool `json:"admin_only"`
 }
 
 // handleCreateGroup 处理 POST /api/admin/groups。
@@ -189,6 +196,9 @@ func (s *Server) handleCreateGroup(c *gin.Context) {
 	}
 	if req.UnlockMinRechargeCents != nil {
 		group.UnlockMinRechargeCents = *req.UnlockMinRechargeCents
+	}
+	if req.AdminOnly != nil {
+		group.AdminOnly = *req.AdminOnly
 	}
 
 	if err := s.deps.Groups.Create(c.Request.Context(), group); err != nil {
@@ -254,6 +264,9 @@ func (s *Server) handleUpdateGroup(c *gin.Context) {
 	}
 	if req.UnlockMinRechargeCents != nil {
 		group.UnlockMinRechargeCents = *req.UnlockMinRechargeCents
+	}
+	if req.AdminOnly != nil {
+		group.AdminOnly = *req.AdminOnly
 	}
 
 	if err := s.deps.Groups.Update(ctx, group); err != nil {
@@ -519,6 +532,12 @@ func (s *Server) handleMyGroups(c *gin.Context) {
 		// 只下发"确实有启用渠道在服务"的分组：选到空分组后所有请求都会
 		// 503（无可用渠道），而用户从界面上完全看不出原因。
 		if !served[group.Name] {
+			continue
+		}
+		// 仅后台可分发的分组（批发价）对普通用户直接不下发：
+		// 让它出现在下拉里再置灰，等于把"存在一个更便宜的分组"明示给所有人，
+		// 反而会引来"为什么我不能用"的追问；服务端的 403 是真正的闸门。
+		if group.RequiresAdminGrant() {
 			continue
 		}
 		items = append(items, portalGroupDTO{

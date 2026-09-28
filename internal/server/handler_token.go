@@ -333,7 +333,38 @@ func (s *Server) resolveTokenGroupName(c *gin.Context, raw string, ownerID uint6
 	if !s.checkGroupUnlock(c, group, ownerID) {
 		return "", false
 	}
+	// 仅后台可分发的分组（批发价）：判据是【发起请求的人】是否管理员，
+	// 而不是令牌归属者——后台代建令牌传的是目标用户 id，
+	// 按归属者判定会让代理令牌在后台也建不出来（功能等于废掉）。
+	if !s.checkGroupAdminGrant(c, group) {
+		return "", false
+	}
 	return name, true
+}
+
+// checkGroupAdminGrant 校验「仅后台可分发的分组」是否允许本次请求使用。
+//
+// 与 checkGroupUnlock 的分工（两者互不替代，也不叠加）：
+//   - checkGroupUnlock 看【令牌归属用户】的累计充值是否达标 —— 面向客户的资格门槛；
+//   - 本函数看【发起请求的人】是否管理员 —— 面向分发渠道的授权。
+//
+// 为什么批发价分组需要单独一个维度：站长的原话是"代理只由后台创建，不要设充值门槛"
+// （门槛设高了会把小代理挡在门外）。而"分组是用户自选的"这条前提没变，
+// 所以必须有一道服务端闸门把"能自助拿到"这件事本身关掉。
+//
+// 管理员在后台"代客户建令牌"时，发起人是管理员 → 放行，令牌归到客户名下；
+// 客户自己建令牌时，发起人是他自己 → 403。这正是"只由后台分发"的准确语义。
+func (s *Server) checkGroupAdminGrant(c *gin.Context, group *model.ModelGroup) bool {
+	if !group.RequiresAdminGrant() {
+		return true
+	}
+	if actor, ok := middleware.CurrentUser(c); ok && actor.IsAdmin() {
+		return true
+	}
+	oai.WriteError(c.Writer, http.StatusForbidden,
+		"该分组为定向开放，暂不支持自助选择；如需使用请联系管理员开通。",
+		oai.TypePermission, "group_admin_only")
+	return false
 }
 
 // checkGroupUnlock 判断归属用户是否有资格使用该分组（充值解锁门槛）。

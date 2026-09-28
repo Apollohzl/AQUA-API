@@ -71,15 +71,35 @@ type ModelGroup struct {
 	//  1) 余额会被消费掉，按余额判定会让"充过 100 元"的用户在用掉一半后失去资格；
 	//  2) quota 是内部记账单位，其数值随兑换比例变动，不适合承载业务承诺。
 	UnlockMinRechargeCents int64
-	Description            string
-	Enabled                bool
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	// AdminOnly 表示本分组【只能由管理员分发】（迁移 0039）。
+	//
+	// 为什么需要它：UnlockMinRechargeCents 能表达"充够钱自动解锁"，
+	// 但表达不了"谁都别想自助拿到，只有后台代建令牌才行"。后者正是**批发价分组**
+	// （如"代理拿货"）唯一正确的落地方式——批发价被普通用户自助拿到，
+	// 整个价格体系就塌了；而设一个很高的充值门槛又会让小代理被挡在门外。
+	//
+	// 语义：
+	//   true  = 门户的可选分组列表不下发该分组；非管理员即使绕过界面直接用接口
+	//           指定它也会被拒；管理员在后台"代客户建令牌"不受限制。
+	//   false = 与迁移前完全一致（默认，也是全部历史数据的取值）。
+	//
+	// 判据必须是【发起请求的人】是否管理员，而不是令牌归属者——
+	// 后台代建令牌传的是目标用户的 id，按归属者判定会让代理令牌在后台也建不出来。
+	AdminOnly   bool
+	Description string
+	Enabled     bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // RequiresRechargeUnlock 表示本分组是否设有充值解锁门槛。
 func (g *ModelGroup) RequiresRechargeUnlock() bool {
 	return g != nil && g.UnlockMinRechargeCents > 0
+}
+
+// RequiresAdminGrant 表示本分组是否只能由管理员分发（仅后台可分发的批发价分组）。
+func (g *ModelGroup) RequiresAdminGrant() bool {
+	return g != nil && g.AdminOnly
 }
 
 // Validate 校验分组的必要字段。

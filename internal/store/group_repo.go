@@ -33,7 +33,7 @@ import (
 )
 
 // groupColumns 集中定义查询列，顺序必须与 scanModelGroup 的扫描顺序严格一致。
-const groupColumns = `id, name, display_name, ratio, unlock_min_recharge_cents, description, enabled, created_at, updated_at`
+const groupColumns = `id, name, display_name, ratio, unlock_min_recharge_cents, admin_only, description, enabled, created_at, updated_at`
 
 // defaultGroupPageSize / maxGroupPageSize 是分组列表的分页参数。
 //
@@ -66,10 +66,10 @@ func (r *modelGroupRepository) Create(ctx context.Context, group *model.ModelGro
 	group.UpdatedAt = now
 
 	res, err := r.db.ExecContext(ctx, `
-		INSERT INTO model_groups (name, display_name, ratio, unlock_min_recharge_cents, description, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		group.Name, group.DisplayName, group.Ratio, group.UnlockMinRechargeCents, group.Description,
-		boolToInt(group.Enabled), group.CreatedAt.Unix(), group.UpdatedAt.Unix(),
+		INSERT INTO model_groups (name, display_name, ratio, unlock_min_recharge_cents, admin_only, description, enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		group.Name, group.DisplayName, group.Ratio, group.UnlockMinRechargeCents, boolToInt(group.AdminOnly),
+		group.Description, boolToInt(group.Enabled), group.CreatedAt.Unix(), group.UpdatedAt.Unix(),
 	)
 	if err != nil {
 		// 唯一索引冲突即"同名分组已存在"。用错误文本判断而非预查，
@@ -161,10 +161,10 @@ func (r *modelGroupRepository) Update(ctx context.Context, group *model.ModelGro
 	group.UpdatedAt = time.Now()
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE model_groups SET
-			display_name = ?, ratio = ?, unlock_min_recharge_cents = ?, description = ?, enabled = ?, updated_at = ?
+			display_name = ?, ratio = ?, unlock_min_recharge_cents = ?, admin_only = ?, description = ?, enabled = ?, updated_at = ?
 		WHERE id = ?`,
-		group.DisplayName, group.Ratio, group.UnlockMinRechargeCents, group.Description,
-		boolToInt(group.Enabled), group.UpdatedAt.Unix(), group.ID,
+		group.DisplayName, group.Ratio, group.UnlockMinRechargeCents, boolToInt(group.AdminOnly),
+		group.Description, boolToInt(group.Enabled), group.UpdatedAt.Unix(), group.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("store: 更新分组 %d 失败: %w", group.ID, err)
@@ -213,13 +213,14 @@ func scanModelGroup(sc rowScanner) (*model.ModelGroup, error) {
 		displayName string
 		ratio       int64
 		unlockCents int64
+		adminOnly   int
 		description string
 		enabled     int
 		createdAt   int64
 		updatedAt   int64
 	)
 
-	if err := sc.Scan(&id, &name, &displayName, &ratio, &unlockCents, &description, &enabled,
+	if err := sc.Scan(&id, &name, &displayName, &ratio, &unlockCents, &adminOnly, &description, &enabled,
 		&createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
@@ -233,6 +234,7 @@ func scanModelGroup(sc rowScanner) (*model.ModelGroup, error) {
 		DisplayName:            displayName,
 		Ratio:                  ratio,
 		UnlockMinRechargeCents: unlockCents,
+		AdminOnly:              adminOnly != 0,
 		Description:            description,
 		Enabled:                enabled != 0,
 		CreatedAt:              time.Unix(createdAt, 0),
