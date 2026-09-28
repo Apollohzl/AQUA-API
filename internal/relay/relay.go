@@ -39,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	"gitee.com/xiaosu4610/aqua-api/internal/corpus"
 	"gitee.com/xiaosu4610/aqua-api/internal/model"
 	"gitee.com/xiaosu4610/aqua-api/internal/netguard"
 	"gitee.com/xiaosu4610/aqua-api/internal/reqctx"
@@ -96,6 +97,13 @@ type Options struct {
 	// ChannelModelMappings 为渠道级模型映射仓储；为 nil 时禁用模型名映射改写
 	// （请求与响应均按原样透传，行为与引入映射前完全一致）。
 	ChannelModelMappings model.ChannelModelMappingRepository
+	// Corpus 是「语料共建计划」的内存判定组件；为 nil 时完全不采集原文。
+	//
+	// 它只回答"这个模型要不要采"，与用户无关——采集面向全站，
+	// 免计费那一半（按用户）在鉴权与计费处判定。
+	Corpus *corpus.Guard
+	// CorpusSamples 是语料样本仓储；与 Corpus 同时为 nil 时才彻底关闭采集。
+	CorpusSamples model.CorpusRepository
 }
 
 // Relay 是转发引擎，持有渠道仓储与上游 HTTP 客户端。
@@ -119,6 +127,10 @@ type Relay struct {
 	channelMappings model.ChannelModelMappingRepository
 	// mappingCache 缓存"渠道 → 映射列表"（见 model_map.go）。仅在启用映射仓储时非 nil。
 	mappingCache *channelMappingCache
+	// corpus 是语料采集的判定组件（可选）。判定为"否"时链路上零开销。
+	corpus *corpus.Guard
+	// corpusSamples 是语料样本仓储（可选）。为 nil 时不落样本。
+	corpusSamples model.CorpusRepository
 }
 
 // New 创建转发引擎。
@@ -173,6 +185,8 @@ func New(channels model.ChannelRepository, opts Options) *Relay {
 		oauth:           opts.OAuth,
 		channelMappings: opts.ChannelModelMappings,
 		mappingCache:    mappingCache,
+		corpus:          opts.Corpus,
+		corpusSamples:   opts.CorpusSamples,
 		client: &http.Client{
 			Transport: &http.Transport{
 				// 走系统代理环境变量：便于在受限网络中经代理访问上游

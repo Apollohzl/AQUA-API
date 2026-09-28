@@ -36,6 +36,7 @@ import (
 	"net/http"
 	"strings"
 
+	"gitee.com/xiaosu4610/aqua-api/internal/corpus"
 	"gitee.com/xiaosu4610/aqua-api/internal/oai"
 )
 
@@ -248,6 +249,11 @@ func writeAdaptedError(w http.ResponseWriter, adapter Adapter, status int, messa
 func (r *Relay) writeAdapted(w http.ResponseWriter, req *http.Request, resp *http.Response,
 	adapter Adapter, sniffer *usageSniffer, requestBody []byte) {
 
+	// 语料采集：与 usage 抓取器共用同一个写入目标（见 responseTee 的说明）。
+	// 未命中采集清单时为 nil，下面的写入行为与原先完全一致。
+	recorder := corpus.RecorderFrom(req.Context())
+	tee := responseTee(sniffer, recorder)
+
 	// 上游返回重定向/错误：一律脱敏为本站定制错误，绝不把上游的状态码与响应原文
 	// 交给下游。
 	//
@@ -268,10 +274,13 @@ func (r *Relay) writeAdapted(w http.ResponseWriter, req *http.Request, resp *htt
 				oai.TypeServer, oai.CodeUpstreamRequestFailed)
 			return
 		}
-		_, _ = sniffer.Write(raw)
+		_, _ = tee.Write(raw)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if _, err := w.Write(adapter.EncodeResponse(raw)); err != nil {
+			if recorder != nil {
+				recorder.MarkAborted()
+			}
 			return
 		}
 		return
@@ -315,12 +324,16 @@ func (r *Relay) writeAdapted(w http.ResponseWriter, req *http.Request, resp *htt
 		if len(line) > 0 {
 			// 抓 usage 时必须喂原始 SSE 文本（含 data: 前缀），
 			// 与直通路径保持一致，这样 extractUsage 的解析逻辑无需分叉。
-			_, _ = sniffer.Write(line)
+			_, _ = tee.Write(line)
 
 			if payload, ok := sseDataPayload(line); ok {
 				if out := encoder.Chunk(payload); len(out) > 0 {
 					if _, err := w.Write(out); err != nil {
-						// 客户端断开：终止转发，避免继续消耗上游
+						// 客户端断开：终止转发，避免继续消耗上游；
+						// 同时把语料样本标记为"只采到一部分"。
+						if recorder != nil {
+							recorder.MarkAborted()
+						}
 						return
 					}
 					flush()
@@ -329,6 +342,9 @@ func (r *Relay) writeAdapted(w http.ResponseWriter, req *http.Request, resp *htt
 		}
 		if readErr != nil {
 			// io.EOF 表示正常结束；其他错误此时已无法补救（响应头早已发出）
+			if readErr != io.EOF && recorder != nil {
+				recorder.MarkAborted()
+			}
 			break
 		}
 	}

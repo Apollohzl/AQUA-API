@@ -267,6 +267,23 @@ func (s *Server) registerRoutes() {
 	// 到期回收由后台协程负责，不占用接口（见 cmd/aqua 的 runTrialGrantReclaimer）。
 	admin.POST("/trial-grants", s.handleGrantTrial)
 
+	// 语料共建计划：模型清单 / 特别福利账户 / 样本查看与导出。
+	//
+	// 注意两处刻意的路径设计：
+	//   - 删除类操作用 POST + 请求体而不是 DELETE /:name —— 模型名里带斜杠
+	//     （AQUA-CALL/deepseek-v4.1-flash），放进路径会被路由拆成多段；
+	//   - 样本列表只回预览，看全文走 /samples/:id，两条访问路径都会写审计。
+	admin.GET("/corpus/models", s.handleListCorpusModels)
+	admin.POST("/corpus/models", s.handleUpsertCorpusModel)
+	admin.POST("/corpus/models/delete", s.handleDeleteCorpusModel)
+	admin.GET("/corpus/grants", s.handleListCorpusGrants)
+	admin.POST("/corpus/grants", s.handleUpsertCorpusGrant)
+	admin.POST("/corpus/grants/delete", s.handleDeleteCorpusGrant)
+	admin.GET("/corpus/samples", s.handleListCorpusSamples)
+	admin.GET("/corpus/samples/:id", s.handleGetCorpusSample)
+	admin.GET("/corpus/export", s.handleExportCorpusSamples)
+	admin.GET("/corpus/stats", s.handleCorpusStats)
+
 	// 模型计价规则（用量 → 费用的换算依据）
 	admin.GET("/prices", s.handleListPrices)
 	admin.POST("/prices", s.handleCreatePrice)

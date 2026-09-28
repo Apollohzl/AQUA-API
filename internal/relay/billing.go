@@ -97,6 +97,24 @@ type Billing struct {
 	// 以保证二者来自同一时刻的配置，避免"新价格 × 旧倍率"的中间态。
 	mu    sync.RWMutex
 	rules map[string]*cachedRules
+
+	// free 判定"该用户调用该模型是否免计费"（语料共建的特殊福利账户）。
+	//
+	// 为 nil 时行为与引入本功能前完全一致。
+	//
+	// 为什么需要它、以及为什么只在 Charge/ChargeOnce 里判：
+	//   Quote 的签名里没有 userID，"按人免费"在那里无从判定；
+	//   但豁免请求在鉴权阶段就不会创建预留（见 middleware.TokenAuth），
+	//   结算时会走"未预留 → Charge"这条路，因此 Charge 里判一道即可覆盖全链路。
+	free FreeChecker
+}
+
+// FreeChecker 是"按用户 + 模型判断是否免计费"的最小接口。
+//
+// 刻意定义在消费方（本包）而不是生产方：*corpus.Guard 天然满足它，
+// 本包无需依赖语料包的其余能力；测试里也能塞一个三行的假实现。
+type FreeChecker interface {
+	IsFree(userID uint64, model string) bool
 }
 
 // cachedRules 是「某一个分组」的价格规则与倍率的快照。
@@ -137,6 +155,26 @@ func (b *Billing) WithQuotaRepository(quota model.QuotaRepository) *Billing {
 		b.quota = quota
 	}
 	return b
+}
+
+// WithFreeChecker 注入"特殊福利账户"的免计费判定（见 FreeChecker 的说明）。
+//
+// 返回 b 本身以便链式装配；不注入时全部用户照常计费。
+func (b *Billing) WithFreeChecker(free FreeChecker) *Billing {
+	if b != nil {
+		b.free = free
+	}
+	return b
+}
+
+// IsFreeForUser 判断该用户在该模型上是否享有免计费福利（语料共建的特殊福利账户）。
+//
+// 为什么导出：鉴权中间件要用它把"这次调用不算钱"提前到额度墙之前，
+// 但它又不该为此多一个构造参数（那会牵动全部调用点与测试）。
+// 于是中间件对预留器做一次**可选接口断言**来取这项能力——
+// 断言不到就等于"本站没有福利账户"，行为与引入本功能前完全一致。
+func (b *Billing) IsFreeForUser(userID uint64, modelName string) bool {
+	return b != nil && b.free != nil && b.free.IsFree(userID, modelName)
 }
 
 // DefaultGroup 返回"请求未指定分组时"本组件使用的分组。
@@ -384,6 +422,11 @@ func (b *Billing) ChargeOnce(ctx context.Context, group string, userID, tokenID 
 		// 是为了让"免费"这条业务规则在代码里显式可查（将来加"免费额度上限"时改这里）。
 		return 0
 	}
+	// 语料共建的福利账户：在指定模型上免计费。
+	// 放在价格判定之后：它只"免除收费"，不会把"本来就不收费"变成别的语义。
+	if b.IsFreeForUser(userID, modelName) {
+		return 0
+	}
 
 	quota := applyRatio(price.ComputePerCallQuota(count), b.ratioFor(ctx, group))
 	if quota <= 0 {
@@ -455,6 +498,10 @@ func (b *Billing) Charge(ctx context.Context, group string, userID, tokenID uint
 	if price.IsFree() {
 		// 显式免费：价格字段即使填了也不生效——免费是站长的明确决定，
 		// 不能被"顺手填过的价格"覆盖，否则会出现"选了免费还在扣费"的投诉。
+		return 0
+	}
+	// 语料共建的福利账户：在指定模型上免计费（与 ChargeOnce 同一口径）。
+	if b.IsFreeForUser(userID, modelName) {
 		return 0
 	}
 

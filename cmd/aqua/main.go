@@ -49,6 +49,7 @@ import (
 	aqua "gitee.com/xiaosu4610/aqua-api"
 	"gitee.com/xiaosu4610/aqua-api/internal/broadcast"
 	"gitee.com/xiaosu4610/aqua-api/internal/config"
+	"gitee.com/xiaosu4610/aqua-api/internal/corpus"
 	"gitee.com/xiaosu4610/aqua-api/internal/crypto"
 	"gitee.com/xiaosu4610/aqua-api/internal/mailer"
 	"gitee.com/xiaosu4610/aqua-api/internal/model"
@@ -227,6 +228,11 @@ func run() error {
 	channelModelCosts := store.NewChannelModelCostRepository(st.DB())
 	// 限时试用额度：发放台账（后台发放、到期回收、门户展示）。
 	trialGrants := store.NewTrialGrantRepository(st.DB())
+	// 语料共建计划：模型清单 / 语料样本 / 特殊福利账户。
+	corpusRepo := store.NewCorpusRepository(st.DB())
+	// 语料判定组件：把"采哪些模型""谁免计费"做成内存快照，
+	// 让转发热点路径上零数据库查询（与本项目敏感词过滤器同一套做法）。
+	corpusGuard := corpus.NewGuard(corpusRepo)
 
 	// 启动时清理过期会话：会话表随登录次数持续增长，不清理会无限膨胀。
 	// 清理失败不阻断启动（这只是维护动作，不影响核心功能）。
@@ -401,7 +407,9 @@ func run() error {
 	// 结果是收费模型被免费调用（余额 0 也能调），账单上还看不出异常。
 	// 历史上这里曾写死空串（回退常量 "default"），而 relay_group 被配成 free，正是这个错配。
 	billing := relay.NewBilling(modelPrices, modelGroups, tokens, users, cfg.RelayGroup).
-		WithQuotaRepository(quotaReservations)
+		WithQuotaRepository(quotaReservations).
+		// 语料共建的特殊福利账户：在指定模型上免计费（判定走内存快照）。
+		WithFreeChecker(corpusGuard)
 
 	// 订阅账号令牌刷新器：让 OAuth 凭据在 access_token 过期前自动续期
 	oauthRefresher := relay.NewOAuthRefresher(oauthProviders, channelKeys)
@@ -422,7 +430,14 @@ func run() error {
 		// 渠道级模型映射：让"对外名 ↔ 上游名"的改写真正在转发链路生效
 		// （后台改完映射会主动清缓存，见 handler_model_meta.go）
 		ChannelModelMappings: channelModelMappings,
+		// 语料共建：判定组件 + 样本仓储（同时非 nil 才启用原文采集）
+		Corpus:        corpusGuard,
+		CorpusSamples: corpusRepo,
 	})
+
+	// 语料共建快照的后台刷新：启动加载一次，之后每 30 秒刷新。
+	// 刷新失败保留旧快照（不清空），因此"撤销福利资格"最多延迟一个周期失效。
+	go corpusGuard.Start(ctx, 0)
 
 	// 异步任务编排：把"选渠道 → 扣费 → 提交上游 → 落库 → 轮询推进"串起来。
 	// 轮询器以 goroutine 启动，随进程退出信号一起结束（ctx 取消即返回）。

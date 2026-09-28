@@ -40,6 +40,7 @@ import (
 	"strings"
 	"time"
 
+	"gitee.com/xiaosu4610/aqua-api/internal/corpus"
 	"gitee.com/xiaosu4610/aqua-api/internal/model"
 	"gitee.com/xiaosu4610/aqua-api/internal/reqctx"
 )
@@ -496,7 +497,10 @@ func (r *Relay) recordUsage(ctx context.Context, entry usageEntry) {
 		IsStream:         entry.IsStream,
 		StatusCode:       entry.StatusCode,
 		Error:            entry.ErrorText,
-		CreatedAt:        time.Now(),
+		// request_id 是"这一次调用"的唯一标识，也是把调用日志与语料样本对上账的
+		// 唯一依据（此前该列从未被写入，等于死列，一并在此补上）。
+		RequestID: identityFromRequest(ctx).RequestID,
+		CreatedAt: time.Now(),
 	}
 	// 计费：优先走"预留 → 结算/退还"（鉴权阶段已预扣），未预留时退化为响应后扣费。
 	//
@@ -512,11 +516,65 @@ func (r *Relay) recordUsage(ctx context.Context, entry usageEntry) {
 		slog.Warn("写入调用日志失败", "error", err, "model", entry.Model, "channel_id", entry.ChannelID)
 	}
 
+	// 语料共建：把本次请求的原文落库（仅在入口判定命中采集清单时才有缓冲）。
+	r.saveCorpusSample(writeCtx, ctx, entry)
+
 	// 更新令牌最近使用时间：让使用者能辨认哪些 key 还在用
 	if entry.TokenID > 0 && r.tokens != nil {
 		if err := r.tokens.RecordUsage(writeCtx, entry.TokenID, time.Now()); err != nil {
 			slog.Warn("更新令牌使用时间失败", "error", err, "token_id", entry.TokenID)
 		}
+	}
+}
+
+// saveCorpusSample 把本次请求的原文写入语料样本表（语料共建计划）。
+//
+// 前置条件：入口处已判定该模型在采集清单内，并把 Recorder 挂到了请求上下文上。
+// 两条都不满足时直接返回——绝大多数请求走的就是这条零开销路径。
+//
+// 只对成功响应建档：错误正文对语料没有价值，而且上游的报错里常带内部信息
+// （渠道名、上游地址），采下来反而是负担。
+//
+// 与 recordUsage 一样，本方法对错误只记日志、绝不向上抛：
+// 它发生在响应已回传之后，采集出问题不该让一次正常调用变成失败。
+func (r *Relay) saveCorpusSample(writeCtx, reqCtx context.Context, entry usageEntry) {
+	if r.corpusSamples == nil {
+		return
+	}
+	recorder := corpus.RecorderFrom(reqCtx)
+	if recorder == nil {
+		return
+	}
+	if entry.StatusCode >= http.StatusBadRequest {
+		return
+	}
+
+	snapshot := recorder.Snapshot()
+	sample := &model.CorpusSample{
+		RequestID:     identityFromRequest(reqCtx).RequestID,
+		UserID:        entry.UserID,
+		TokenID:       entry.TokenID,
+		Model:         entry.Model,
+		UpstreamModel: entry.UpstreamModel,
+		ChannelID:     entry.ChannelID,
+		ChannelKeyID:  entry.ChannelKeyID,
+		IsStream:      entry.IsStream,
+		StatusCode:    entry.StatusCode,
+		RequestBody:   snapshot.RequestBody,
+		ResponseBody:  snapshot.ResponseBody,
+		RequestBytes:  snapshot.RequestBytes,
+		ResponseBytes: snapshot.ResponseBytes,
+		Truncated:     snapshot.Truncated,
+		Incomplete:    snapshot.Incomplete,
+		CreatedAt:     time.Now(),
+	}
+	if err := r.corpusSamples.CreateCorpusSample(writeCtx, sample); err != nil {
+		if errors.Is(err, model.ErrCorpusSampleExists) {
+			// 幂等：同一次请求只会留一条样本，重试不算异常。
+			return
+		}
+		slog.Warn("写入语料样本失败（不影响本次调用）",
+			"error", err, "model", entry.Model, "request_id", sample.RequestID)
 	}
 }
 

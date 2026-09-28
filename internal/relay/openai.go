@@ -34,6 +34,7 @@ import (
 	"strings"
 	"time"
 
+	"gitee.com/xiaosu4610/aqua-api/internal/corpus"
 	"gitee.com/xiaosu4610/aqua-api/internal/model"
 	"gitee.com/xiaosu4610/aqua-api/internal/oai"
 )
@@ -79,6 +80,17 @@ func (r *Relay) ServeChatCompletions(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// ── 步骤 3~6：转发（含失败换渠道重试）───────────────────────
+	// 语料共建：命中采集清单时，把"请求原文 + 返回正文副本"的缓冲挂到请求上下文上。
+	//
+	// 为什么挂 context 而不是加函数参数：下面要经过 forwardWithFallback →
+	// forwardChat（可能多轮重试）→ 适配器回写，逐层加参数会污染一串
+	// 与本功能无关的签名；挂 context 只需在入口挂一次、在落库处取一次。
+	//
+	// 判定为"否"时（绝大多数请求）这里什么都不做，链路上零额外开销。
+	if r.corpus != nil && r.corpusSamples != nil && r.corpus.ShouldCollect(modelName) {
+		req = req.WithContext(corpus.WithRecorder(req.Context(), corpus.NewRecorder(body, corpus.DefaultMaxBytes)))
+	}
+
 	// adapter 为 nil：入站已是 OpenAI 协议，响应直接透传，无需转换。
 	r.forwardWithFallback(w, req, modelName, body, nil, oai.ChatCompletionsPath)
 }
@@ -959,11 +971,20 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 		return forwardResponded
 	}
 
+	// 语料采集：把"返回正文副本"与 usage 抓取器合成同一个写入目标。
+	// 采集器永远返回成功，因此不可能影响客户端看到的内容。
+	recorder := corpus.RecorderFrom(req.Context())
+	tee := responseTee(sniffer, recorder)
+
 	if adapter == nil {
 		// 直通路径：入站与上游同为 OpenAI 协议，成功响应原样透传。
 		copyResponseHeaders(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
-		flushCopy(w, resp.Body, sniffer)
+		if !flushCopy(w, resp.Body, tee) && recorder != nil {
+			// 只转发了一部分（客户端断开 / 上游中断）：如实标注，
+			// 免得半截对话被当成完整语料混进训练集。
+			recorder.MarkAborted()
+		}
 	} else {
 		// 转换路径：由适配器把上游的 OpenAI 响应改写为下游协议格式。
 		// 注意此时响应头由 writeAdapted 决定（各协议的 Content-Type 不同）。
@@ -1128,6 +1149,21 @@ func isHopByHopHeader(key string) bool {
 	return found
 }
 
+// responseTee 把 usage 抓取器与语料采集器合成一个写入目标。
+//
+// 为什么要合成而不是在回写循环里写两次：回写链路只留了一个 tee 挂载点，
+// 用 io.MultiWriter 组合可以让两个互不相干的关注点（解析用量 / 留存原文）
+// 共用同一个挂载点——新增采集就不必再动一次转发主循环，
+// 也就不会因为"多写一次"而引入影响客户端响应的风险。
+//
+// recorder 为 nil（绝大多数请求）时直接返回 sniffer，零额外分配。
+func responseTee(sniffer io.Writer, recorder io.Writer) io.Writer {
+	if recorder == nil {
+		return sniffer
+	}
+	return io.MultiWriter(sniffer, recorder)
+}
+
 // flushCopy 流式拷贝响应体，并在每个分片后立即 Flush。
 //
 // 参数 tee 可为 nil；非 nil 时会把内容同时写入它（用于抓取响应以解析 usage）。
@@ -1136,7 +1172,14 @@ func isHopByHopHeader(key string) bool {
 // 为什么必须 Flush：大模型流式回答依赖 SSE，若数据被缓冲在网关或 HTTP 层，
 // 客户端的体验会从"逐字出现"退化为"等全文生成完再一次性蹦出来"，
 // 与不经网关直连相比是明显的体验倒退。
-func flushCopy(w http.ResponseWriter, src io.Reader, tee io.Writer) {
+//
+// 返回值表示"是否把上游读到了正常结束（EOF）"：
+//
+//	true  = 完整转发完毕；
+//	false = 客户端中途断开或上游中断，只转发了一部分。
+//	调用方据此标注语料样本的 incomplete——否则一条"半截对话"会被当成完整语料，
+//	在训练集里静默地坏掉。忽略返回值的调用方行为不受影响。
+func flushCopy(w http.ResponseWriter, src io.Reader, tee io.Writer) bool {
 	// gin 的 ResponseWriter 实现了 http.Flusher；用类型断言兼容不支持刷新的实现
 	flusher, canFlush := w.(http.Flusher)
 
@@ -1149,7 +1192,7 @@ func flushCopy(w http.ResponseWriter, src io.Reader, tee io.Writer) {
 			}
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
 				// 客户端已断开（例如用户取消），无需继续读取上游，直接结束
-				return
+				return false
 			}
 			if canFlush {
 				flusher.Flush()
@@ -1158,7 +1201,7 @@ func flushCopy(w http.ResponseWriter, src io.Reader, tee io.Writer) {
 		if readErr != nil {
 			// io.EOF 表示正常结束；其他错误（上游中断）此时已无法补救，
 			// 因为响应头早已发出，只能结束本次传输。
-			return
+			return readErr == io.EOF
 		}
 	}
 }

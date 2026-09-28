@@ -273,6 +273,22 @@ func TokenAuth(tokens model.TokenRepository, users model.UserRepository, reserve
 			reserveAmount, modelPriced = reserver.EstimateReserve(
 				c.Request.Context(), tokenGroup, modelName, promptBytes)
 		}
+
+		// 语料共建的特殊福利账户：命中"用户 × 模型"白名单时视同免费——
+		// 既不校验额度、也不创建预留，与"未定价 / 显式免费"走完全相同的分支。
+		//
+		// 为什么必须在这里判：EstimateReserve 的入参里没有用户，
+		// "按人免费"在计费组件内部无从判定；而此处同时拿得到 owner 与 modelName，
+		// 是唯一自然的判定点。判定失败（无此能力）等同于"本站没有福利账户"。
+		if modelPriced && owner != nil && modelName != "" {
+			if checker, ok := reserver.(interface {
+				IsFreeForUser(userID uint64, model string) bool
+			}); ok && checker.IsFreeForUser(owner.ID, modelName) {
+				modelPriced = false
+				reserveAmount = 0
+			}
+		}
+
 		exemptFromQuota := reserver != nil && modelName != "" && !modelPriced
 
 		// ── 步骤 7：账号级额度校验（仅对计费模型生效）──────────

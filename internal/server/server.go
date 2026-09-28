@@ -35,6 +35,7 @@ import (
 
 	"gitee.com/xiaosu4610/aqua-api/internal/broadcast"
 	"gitee.com/xiaosu4610/aqua-api/internal/config"
+	"gitee.com/xiaosu4610/aqua-api/internal/corpus"
 	"gitee.com/xiaosu4610/aqua-api/internal/mailer"
 	"gitee.com/xiaosu4610/aqua-api/internal/model"
 	"gitee.com/xiaosu4610/aqua-api/internal/payment"
@@ -145,6 +146,14 @@ type Deps struct {
 	// 为 nil 时相关接口降级为"没有试用额"（门户横幅不展示）或 503（后台发放），
 	// 而不是 panic——它是可选运营能力，缺失不应拖垮整个服务。
 	TrialGrants model.TrialGrantRepository
+
+	// Corpus 是语料共建计划的判定组件（内存快照），供后台展示与接口层使用；
+	// CorpusSamples 是语料样本仓储（后台列表 / 导出 / 统计）。
+	//
+	// 两者都为 nil 时，后台的语料接口统一返回 503；转发链路的采集能力
+	// 由 relay.Options 单独注入，与本字段无关。
+	Corpus        *corpus.Guard
+	CorpusSamples model.CorpusRepository
 }
 
 // Server 是 HTTP 服务的运行时载体。
