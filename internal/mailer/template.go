@@ -90,6 +90,14 @@ const BroadcastTemplateBillingLine = "billing_line"
 // 本模板讲的是**按次计费**的 AQUA-CALL/ 专线，两者是并列的两条线，不可混用。
 const BroadcastTemplateCallLine = "call_line"
 
+// BroadcastTemplateTrialGrant 是「限时试用额已发放」通知的模板键。
+//
+// 注意：本模板里的金额与时长是**写死的**（0.1 元 / 24 小时），
+// 因为渲染入口只接收站点名，没有"每次发送时传参"的通道。
+// 因此后台的模板名里也标注了口径；若将来要发别的金额/时长，
+// 应给 RenderBroadcast 加参数而不是改这里的文案（否则历史邮件与文案会对不上）。
+const BroadcastTemplateTrialGrant = "trial_grant"
+
 // BroadcastTemplates 返回可用的通知模板清单。
 //
 // 为什么做成目录而不是让调用方直接调具体函数：后台下拉据此渲染，
@@ -99,6 +107,7 @@ func BroadcastTemplates() []BroadcastTemplate {
 	return []BroadcastTemplate{
 		{Key: BroadcastTemplateBillingLine, Label: "计费专线上线 + 官方交流群"},
 		{Key: BroadcastTemplateCallLine, Label: "按次计费专线上线 + 上线优惠"},
+		{Key: BroadcastTemplateTrialGrant, Label: "限时试用额已发放（0.1 元 / 24 小时）"},
 	}
 }
 
@@ -112,6 +121,8 @@ func RenderBroadcast(templateKey, siteName string) (subject, htmlBody string, ok
 		return billingLineEmail(siteName)
 	case BroadcastTemplateCallLine:
 		return callLineEmail(siteName)
+	case BroadcastTemplateTrialGrant:
+		return trialGrantEmail(siteName)
 	default:
 		return "", "", false
 	}
@@ -186,6 +197,82 @@ func billingLineEmail(siteName string) (subject, htmlBody string, ok bool) {
     <p style="margin:0 0 22px;font-size:13px;color:#475569;line-height:1.8;">
       如果你的用量较大，或者有接入、定制方面的需求，欢迎加入交流群后私信管理员对接。
       我们会按你的实际用量谈专属方案，量大从优。
+    </p>
+
+    <p style="margin:0;font-size:13px;color:#475569;">感谢你的使用。<br>%[1]s</p>
+
+    <hr style="margin:22px 0 14px;border:none;border-top:1px solid #e2e8f0;">
+    <p style="margin:0;font-size:12px;color:#94a3b8;">本邮件由系统自动发送，请勿直接回复。</p>
+  </div>
+</body>
+</html>`, name)
+
+	return subject, htmlBody, true
+}
+
+// trialGrantEmail 构造「限时试用额已发放」通知的主题与正文。
+//
+// 与另外两个模板共用同一套硬约束（改文案时必须一并守住）：
+//  1. 正文【不出现任何网址/超链接】，包括本站域名；
+//  2. 不承诺缓存命中折扣，也不提上游实现细节；
+//  3. 不使用"厂商官网价 N 折""高速稳定"等绝对化/攀附性表述。
+//
+// 本模板与它们唯一的区别：**必须明确写出金额与有效期**。
+// 原因：这封信的全部意义就是让用户知道"有 0.1 元、只有 24 小时"，
+// 不写金额用户不会去用，不写期限用户会以为额度丢失。这也是它
+// 与"上线通知"（刻意不披露定价）在此处的口径差异。
+//
+// 金额与时长是写死的（渲染入口只接收站点名），因此后台模板名里也标注了口径；
+// 将来若要换金额，应给 RenderBroadcast 加参数，而不是改这里的文案。
+func trialGrantEmail(siteName string) (subject, htmlBody string, ok bool) {
+	name := html.EscapeString(strings.TrimSpace(siteName))
+	if name == "" {
+		name = "AQUA-API"
+	}
+
+	subject = fmt.Sprintf("【%s】限时试用额已发放", name)
+
+	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>限时试用额已发放</title></head>
+<body style="margin:0;padding:24px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;color:#0f172a;">
+  <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:28px;">
+    <h1 style="margin:0 0 8px;font-size:18px;font-weight:600;color:#0f172a;">%[1]s</h1>
+    <p style="margin:0 0 22px;font-size:13px;color:#64748b;">这是一封站点通知，有一笔额度已经送到你的账户。</p>
+
+    <div style="background:#ecfeff;border:1px solid #a5f3fc;border-radius:12px;padding:18px;text-align:center;margin:0 0 20px;">
+      <div style="font-size:12px;color:#0e7490;letter-spacing:1px;">限时试用额</div>
+      <div style="margin-top:8px;font-size:30px;font-weight:700;color:#0891b2;font-family:'SFMono-Regular',Consolas,monospace;">0.1 元</div>
+      <div style="margin-top:8px;font-size:12px;color:#0e7490;">自发放起 <strong>24 小时</strong>内有效，到期未用完的部分自动收回</div>
+    </div>
+
+    <h2 style="margin:0 0 10px;font-size:15px;font-weight:600;color:#0f172a;">一、这笔额度怎么用</h2>
+    <ul style="margin:0 0 12px;padding-left:20px;font-size:13px;color:#475569;line-height:1.9;">
+      <li>已经直接充入你的账户，<strong>不需要领取、也不需要兑换码</strong></li>
+      <li>扣费时<strong>优先抵扣试用额</strong>，它与你自己充值的余额可以一起使用</li>
+      <li>在「概览」页可以看到这笔额度的剩余金额与倒计时</li>
+      <li>有效期内用掉的部分就是你的；过期后<strong>未用完的部分会被收回</strong>，请尽快体验</li>
+    </ul>
+
+    <h2 style="margin:0 0 10px;font-size:15px;font-weight:600;color:#0f172a;">二、推荐用来体验按次计费专线</h2>
+    <p style="margin:0 0 10px;font-size:13px;color:#475569;line-height:1.8;">
+      按次专线<strong>按调用次数计费</strong>：一个请求一个价，提示词再长也不额外加价。
+      首期覆盖 8 个模型，对外名称统一带 <code style="font-family:Consolas,monospace;">AQUA-CALL/</code> 前缀：
+      deepseek-v4-flash、deepseek-v4.1-flash、deepseek-v4-pro、glm-5.3、glm-5.3-flash、
+      kimi-k3、gpt-image-2-w、gpt-image-2.5。
+    </p>
+
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:0 0 8px;">
+      <div style="font-size:12px;color:#64748b;letter-spacing:.5px;margin-bottom:8px;">怎么开始用（在站点操作，三步）</div>
+      <ol style="margin:0;padding-left:20px;font-size:13px;color:#0f172a;line-height:1.9;">
+        <li>进入「访问令牌」页，新建一个访问令牌</li>
+        <li>把新令牌的「所属分组」选为「按次专线」</li>
+        <li>调用时模型名填 <code style="font-family:Consolas,monospace;">AQUA-CALL/</code> 开头的名称（例如 <code style="font-family:Consolas,monospace;">AQUA-CALL/glm-5.3</code>）</li>
+      </ol>
+    </div>
+    <p style="margin:8px 0 22px;font-size:12px;color:#94a3b8;line-height:1.7;">
+      已经有令牌的话，也可以直接新建一个"按次专线"分组的令牌来体验，
+      原有令牌与免费分组不受影响。
     </p>
 
     <p style="margin:0;font-size:13px;color:#475569;">感谢你的使用。<br>%[1]s</p>

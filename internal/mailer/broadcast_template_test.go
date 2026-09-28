@@ -151,6 +151,57 @@ func TestRenderBroadcast_按次专线通知关键信息齐全且不泄露定价(
 	}
 }
 
+// TestRenderBroadcast_试用额通知写明金额与期限 覆盖本模板特有的口径要求。
+//
+// 与前两个模板相反：这封信**必须**写出金额（0.1 元）与期限（24 小时），
+// 否则用户既不会去用、过期后还会以为额度凭空消失。
+// 但模型单价仍然一个字都不能出现（写了就等于把定价方案群发出去）。
+func TestRenderBroadcast_试用额通知写明金额与期限(t *testing.T) {
+	subject, body, ok := RenderBroadcast(BroadcastTemplateTrialGrant, "AQUA-API")
+	if !ok {
+		t.Fatal("试用额模板应可渲染")
+	}
+	if !strings.Contains(subject, "AQUA-API") || !strings.Contains(subject, "试用额") {
+		t.Errorf("主题应含站点名与核心信息（试用额已发放），实际 %q", subject)
+	}
+
+	// 必须写明的两项信息
+	for _, want := range []string{"0.1 元", "24 小时", "试用额", "概览", "优先"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("正文应明确提到 %q（写不清用户就不会用，过期后还会以为额度丢了）", want)
+		}
+	}
+
+	// 引导到按次专线的关键信息
+	for _, want := range []string{"AQUA-CALL/", "按次专线", "访问令牌", "所属分组", "glm-5.3"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("正文缺少关键信息 %q", want)
+		}
+	}
+
+	// 模型单价一律不得出现（写了就是把定价方案群发出去）
+	for _, leaked := range []string{"0.002", "0.005", "0.03"} {
+		if strings.Contains(body, leaked) {
+			t.Errorf("正文不应出现模型单价 %q", leaked)
+		}
+	}
+
+	// 合规红线与硬约束（与其它模板一致）
+	for _, banned := range []string{"官方中转", "官网价", "高速稳定", "免费公益"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("正文不应出现 %q（合规红线）", banned)
+		}
+	}
+	for _, forbidden := range []string{"http://", "https://", "<a ", "aqua.is3.cc", "www."} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("正文不应出现 %q（运营要求引导去官网但不挂链接）", forbidden)
+		}
+	}
+	if strings.Contains(body, "缓存") {
+		t.Error("正文不应承诺缓存相关能力（实测上游不回报缓存命中）")
+	}
+}
+
 // TestRenderBroadcast_站点名被转义 覆盖"半可信输入不得破坏邮件结构"。
 func TestRenderBroadcast_站点名被转义(t *testing.T) {
 	_, body, ok := RenderBroadcast(BroadcastTemplateBillingLine, `<script>x</script>`)
