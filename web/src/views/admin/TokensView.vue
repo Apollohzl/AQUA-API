@@ -253,6 +253,19 @@ async function submitEdit(): Promise<void> {
 
 async function toggleStatus(token: AccessToken): Promise<void> {
   const nextStatus = token.status === STATUS_ENABLED ? STATUS_DISABLED : STATUS_ENABLED
+
+  // 只在「停用」方向二次确认：管理端停用的往往是别人的令牌，
+  // 影响的是真实业务流量（客户端会立即收到鉴权错误）；启用则不拦。
+  if (nextStatus === STATUS_DISABLED) {
+    const ok = await confirmDialog({
+      title: '停用访问令牌',
+      message: `停用「${token.name}」后，使用它的客户端会立即收到鉴权错误。`,
+      confirmText: '停用令牌',
+      danger: true,
+    })
+    if (!ok) return
+  }
+
   busyId.value = token.id
   try {
     await updateToken(token.id, { status: nextStatus })

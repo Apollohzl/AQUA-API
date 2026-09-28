@@ -188,6 +188,19 @@ function replaceToken(updated: AccessToken): void {
 
 async function toggleStatus(token: AccessToken): Promise<void> {
   const nextStatus = token.status === STATUS_ENABLED ? STATUS_DISABLED : STATUS_ENABLED
+
+  // 只在「停用」方向二次确认：停用会立刻让所有正在使用这把令牌的客户端收到鉴权错误，
+  // 属于容易误点且影响面外溢的动作；「启用」是恢复性操作，不再多问一次。
+  if (nextStatus === STATUS_DISABLED) {
+    const ok = await confirmDialog({
+      title: '停用访问令牌',
+      message: `停用「${token.name}」后，使用它的客户端会立即收到鉴权错误，需要排查时请再手动启用。`,
+      confirmText: '停用令牌',
+      danger: true,
+    })
+    if (!ok) return
+  }
+
   rowBusyId.value = token.id
   try {
     const updated = await updateMyToken(token.id, { status: nextStatus })

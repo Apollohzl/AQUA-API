@@ -109,6 +109,20 @@ onMounted(async () => {
 
 async function toggleSwitch(): Promise<void> {
   const next = !filterEnabled.value
+
+  // 关闭是合规相关的动作：一旦关闭，站内所有内容不再被扫描，
+  // 而模块名/按钮位置与"开启"完全相同，误点一次就静默失效。
+  // 因此只在关闭方向要求确认，并写明后果；开启则直接生效。
+  if (!next) {
+    const ok = await confirmDialog({
+      title: '关闭敏感词过滤',
+      message: '关闭后，所有经过本站的请求内容都不再被扫描，命中词表也不会被拦截。合规检查期间建议保持开启。',
+      confirmText: '关闭过滤',
+      danger: true,
+    })
+    if (!ok) return
+  }
+
   togglingSwitch.value = true
   try {
     await updateSettings({ safeguard: { sensitive_filter_enabled: next } })

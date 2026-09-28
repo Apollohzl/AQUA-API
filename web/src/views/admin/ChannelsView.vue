@@ -825,7 +825,7 @@ async function openEdit(channel: Channel): Promise<void> {
 }
 
 function validateForm(): string | null {
-  if (typeUnavailable.value) return '该接入类型的适配器尚未实现，暂不可选用'
+  if (typeUnavailable.value) return '该接入类型暂不可选用'
   if (!form.value.name.trim()) return '请填写渠道名称'
   if (!form.value.base_url.trim()) return '请填写上游 Base URL'
   if (!/^https?:\/\//i.test(form.value.base_url.trim())) return 'Base URL 需以 http:// 或 https:// 开头'
@@ -1517,6 +1517,20 @@ async function runTest(channel: Channel): Promise<void> {
 
 async function toggleStatus(channel: Channel): Promise<void> {
   const nextStatus = channel.status === STATUS_ENABLED ? STATUS_DISABLED : STATUS_ENABLED
+
+  // 只在「停用」方向二次确认：停用渠道会让依赖它的模型立刻不可用
+  //（若没有其它渠道兜底，用户侧会直接报错），而渠道行上的启停图标很小、很容易误点。
+  // 「启用」是恢复性操作，不再多问一次。
+  if (nextStatus === STATUS_DISABLED) {
+    const ok = await confirmDialog({
+      title: '停用渠道',
+      message: `停用「${channel.name}」后，该渠道不再参与请求调度。仅由该渠道提供的模型会立即不可用，请确认已有其它渠道兜底。`,
+      confirmText: '停用渠道',
+      danger: true,
+    })
+    if (!ok) return
+  }
+
   busyId.value = channel.id
   try {
     // 契约中渠道更新为 PUT（全量），因此提交当前渠道的完整配置，仅替换 status
@@ -1856,7 +1870,7 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
 
         <div class="grid gap-5 sm:grid-cols-2">
           <div>
-            <label class="label" for="channel-type">协议编号（兼容字段）</label>
+            <label class="label" for="channel-type">协议编号</label>
             <input
               id="channel-type"
               v-model.number="form.type"
@@ -1868,7 +1882,7 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
             <datalist id="channel-type-options">
               <option value="1">OpenAI 兼容</option>
             </datalist>
-            <p class="hint">提交给后端的 type 编号；当前版本仅支持 1（OpenAI 兼容协议）。</p>
+            <p class="hint">当前仅支持 1（OpenAI 兼容协议）。</p>
           </div>
 
           <div>
@@ -1949,7 +1963,7 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
           </div>
 
           <p v-if="!selectedChannelType.available" class="mt-3 text-xs text-amber-700">
-            该类型适配器尚未实现，暂不可选用（保存会被拒绝）。
+            该接入类型暂不可选用。
           </p>
 
           <!-- 额外参数：只属于少数类型（如部署名/api-version），因此按选中类型动态展开 -->
@@ -1976,7 +1990,7 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
           </div>
 
           <p class="hint mt-3">
-            该类型的专用参数：当前版本后端仅保存通用渠道字段，这些参数会在对应适配器接入后随渠道保存。
+            该类型的专用参数：当前保存渠道时不会记录这些值，等该类型正式可用后再填写。
           </p>
         </div>
 

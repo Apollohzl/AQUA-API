@@ -210,6 +210,20 @@ async function submitQuota(): Promise<void> {
 
 async function toggleStatus(user: AdminUser): Promise<void> {
   const nextStatus = user.status === STATUS_ENABLED ? STATUS_DISABLED : STATUS_ENABLED
+
+  // 只在「禁用」方向二次确认：禁用会立刻让该用户无法登录、名下令牌全部失效、
+  // 正在进行的调用被拒，属于影响面较大的动作；而「启用」是恢复性操作，
+  // 多做一次确认只会变成负担。
+  if (nextStatus === STATUS_DISABLED) {
+    const ok = await confirmDialog({
+      title: '禁用用户',
+      message: `禁用「${user.username}」后，该用户将无法登录，其名下所有访问令牌立即失效，正在进行的调用也会被拒绝。`,
+      confirmText: '禁用用户',
+      danger: true,
+    })
+    if (!ok) return
+  }
+
   busyId.value = user.id
   try {
     await updateUser(user.id, { status: nextStatus })
@@ -476,7 +490,7 @@ const isEmpty = computed(() => !loading.value && !error.value && users.value.len
           </div>
         </div>
 
-        <p class="hint">密码重置不在本版本范围内（接口契约未定义），如需重置请联系后端补充接口。</p>
+        <p class="hint">后台暂不支持为用户重置密码；如需重置，请联系运维在服务器上处理。</p>
         <p v-if="editError" class="field-error">{{ editError }}</p>
       </div>
 
