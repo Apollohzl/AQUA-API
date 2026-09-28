@@ -27,7 +27,10 @@ package model
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -38,6 +41,23 @@ var ErrQuotaInsufficient = errors.New("model: 额度不足")
 
 // ErrReservationNotFound 表示未找到指定 request_id 的预留记录。
 var ErrReservationNotFound = errors.New("model: 预留记录不存在")
+
+// NewRequestID 生成一次调用的唯一标识。
+//
+// 两处用途共用它，因此放在领域层而不是某个包内：
+//   - 额度预留台账的幂等键（同一 request_id 重复预留不会重复扣减）；
+//   - 调用日志与语料样本的关联键（"这次花了多少" ↔ "这次说了什么"）。
+//
+// 为什么用随机数而不是自增：调用可能跨进程、跨重启，随机值不需要协调中心，
+// 16 字节（128 位）也足以让碰撞概率可忽略。随机源不可用时退化为时间戳——
+// 它只影响"唯一性强度"，不影响任何业务语义，因此不值得让调用失败。
+func NewRequestID() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("req-%d", time.Now().UnixNano())
+	}
+	return "req-" + hex.EncodeToString(buf)
+}
 
 // QuotaUnknown 是"未取得用量"时传给 Settle 的哨兵值。
 //

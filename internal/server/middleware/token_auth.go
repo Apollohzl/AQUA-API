@@ -35,10 +35,7 @@ package middleware
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -385,7 +382,7 @@ func tryReserveQuota(c *gin.Context, reserver QuotaReserver, token *model.Token,
 		return "", true
 	}
 
-	requestID := newRequestID()
+	requestID := model.NewRequestID()
 	if _, err := reserver.Reserve(ctx, model.ReserveRequest{
 		RequestID: requestID,
 		UserID:    owner.ID,
@@ -484,19 +481,6 @@ func writeModelBodyError(c *gin.Context, err error) {
 		abortWithErrorKey(c, http.StatusBadRequest,
 			"request.malformed_json", oai.TypeInvalidRequest, oai.CodeInvalidJSON)
 	}
-}
-
-// newRequestID 生成一次调用的幂等键（用于额度预留的去重）。
-//
-// 使用 crypto/rand：虽然它只是幂等键、不是凭据，但可预测的键会带来
-// "不同请求撞到同一键 → 误判为重复预留"的风险，因此仍用密码学随机源。
-func newRequestID() string {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		// 极端情况（随机源不可用）：退化为时间戳，仍能保证基本唯一性。
-		return fmt.Sprintf("req-%d", time.Now().UnixNano())
-	}
-	return "req-" + hex.EncodeToString(buf)
 }
 
 // extractAPIKey 从请求头中提取令牌明文。

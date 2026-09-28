@@ -492,6 +492,9 @@ func run() error {
 		SMTPBase: smtpBase,
 		// 限时试用额：后台发放、到期回收、门户展示
 		TrialGrants: trialGrants,
+		// 语料共建：后台清单/福利/样本/导出接口所需的仓储与判定组件
+		Corpus:        corpusGuard,
+		CorpusSamples: corpusRepo,
 		// 前端构建产物（web/dist）已通过根包的 go:embed 嵌入二进制
 		WebFS: aqua.WebDist,
 	})

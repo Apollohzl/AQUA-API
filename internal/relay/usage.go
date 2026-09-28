@@ -479,6 +479,19 @@ func (r *Relay) recordUsage(ctx context.Context, entry usageEntry) {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 
+	// 记录用的 request_id：优先复用鉴权阶段生成的（做了预留时非空）。
+	//
+	// 未做预留的调用（免费模型 / 福利账户 / 信任额度旁路）在鉴权阶段不会生成它，
+	// 但调用日志与语料样本仍需要一个能互相关联的标识，否则"这次花了多少"与
+	// "这次说了什么"就对不上账。因此这里补生成一个。
+	//
+	// 【重要】补出来的这个只用于记录，绝不参与结算：结算读的是
+	// identityFromRequest(ctx).RequestID（为空即表示没做过预留，走反响扣费路径）。
+	recordRequestID := identityFromRequest(ctx).RequestID
+	if recordRequestID == "" {
+		recordRequestID = model.NewRequestID()
+	}
+
 	logEntry := &model.UsageLog{
 		UserID:           entry.UserID,
 		TokenID:          entry.TokenID,
@@ -499,7 +512,7 @@ func (r *Relay) recordUsage(ctx context.Context, entry usageEntry) {
 		Error:            entry.ErrorText,
 		// request_id 是"这一次调用"的唯一标识，也是把调用日志与语料样本对上账的
 		// 唯一依据（此前该列从未被写入，等于死列，一并在此补上）。
-		RequestID: identityFromRequest(ctx).RequestID,
+		RequestID: recordRequestID,
 		CreatedAt: time.Now(),
 	}
 	// 计费：优先走"预留 → 结算/退还"（鉴权阶段已预扣），未预留时退化为响应后扣费。
@@ -517,7 +530,7 @@ func (r *Relay) recordUsage(ctx context.Context, entry usageEntry) {
 	}
 
 	// 语料共建：把本次请求的原文落库（仅在入口判定命中采集清单时才有缓冲）。
-	r.saveCorpusSample(writeCtx, ctx, entry)
+	r.saveCorpusSample(writeCtx, ctx, entry, recordRequestID)
 
 	// 更新令牌最近使用时间：让使用者能辨认哪些 key 还在用
 	if entry.TokenID > 0 && r.tokens != nil {
@@ -532,12 +545,14 @@ func (r *Relay) recordUsage(ctx context.Context, entry usageEntry) {
 // 前置条件：入口处已判定该模型在采集清单内，并把 Recorder 挂到了请求上下文上。
 // 两条都不满足时直接返回——绝大多数请求走的就是这条零开销路径。
 //
+// requestID 由调用方传入（与调用日志同值），保证两张表能一一对上。
+//
 // 只对成功响应建档：错误正文对语料没有价值，而且上游的报错里常带内部信息
 // （渠道名、上游地址），采下来反而是负担。
 //
 // 与 recordUsage 一样，本方法对错误只记日志、绝不向上抛：
 // 它发生在响应已回传之后，采集出问题不该让一次正常调用变成失败。
-func (r *Relay) saveCorpusSample(writeCtx, reqCtx context.Context, entry usageEntry) {
+func (r *Relay) saveCorpusSample(writeCtx, reqCtx context.Context, entry usageEntry, requestID string) {
 	if r.corpusSamples == nil {
 		return
 	}
@@ -551,7 +566,7 @@ func (r *Relay) saveCorpusSample(writeCtx, reqCtx context.Context, entry usageEn
 
 	snapshot := recorder.Snapshot()
 	sample := &model.CorpusSample{
-		RequestID:     identityFromRequest(reqCtx).RequestID,
+		RequestID:     requestID,
 		UserID:        entry.UserID,
 		TokenID:       entry.TokenID,
 		Model:         entry.Model,
