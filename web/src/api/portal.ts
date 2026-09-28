@@ -26,6 +26,7 @@ import type {
   PaymentOrder,
   Task,
   TaskQuery,
+  TrialGrant,
   UpdateTokenPayload,
   UsageLog,
   UsageStats,
@@ -108,6 +109,15 @@ export function createOrder(payload: CreateOrderPayload): Promise<PaymentOrder> 
  */
 export function fetchFinanceSummary(): Promise<FinanceSummary> {
   return api.get<FinanceSummary>('/user/finance')
+}
+
+/**
+ * GET /api/user/trial：当前用户的限时试用额（概览页横幅用）。
+ *
+ * 没有试用额时后端返回 active=false（而不是 404），因此前端无需处理错误态。
+ */
+export function fetchMyTrial(): Promise<TrialGrant> {
+  return api.get<TrialGrant>('/user/trial')
 }
 
 /**

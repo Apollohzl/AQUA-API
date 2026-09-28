@@ -1570,6 +1570,23 @@ export interface FinanceSummary {
   reward_quota: number
 }
 
+/**
+ * GET /api/user/trial：当前用户的限时试用额状态。
+ *
+ * 恒为非 null（后端总是返回对象），前端据 active 决定要不要展示横幅。
+ * remaining 是额度（站内单位），展示时交给 useQuotaUnit 折算成人民币。
+ */
+export interface TrialGrant {
+  /** 是否处于生效中（未过期且未用完） */
+  active: boolean
+  /** 仍可用的试用额度（站内单位） */
+  remaining: number
+  /** 到期时间（unix 秒）；active=false 时为 0 */
+  expires_at: number
+  /** 距到期的剩余秒数，用于直接渲染倒计时 */
+  expires_in_seconds: number
+}
+
 /** 一条返利明细（GET /api/user/referral/rewards） */
 export interface ReferralReward {
   id: number

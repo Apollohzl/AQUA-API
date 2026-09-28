@@ -37,8 +37,8 @@ import OneTimeKeyDialog from '@/components/OneTimeKeyDialog.vue'
 import StatCard from '@/components/StatCard.vue'
 import TokenFormFields from '@/components/TokenFormFields.vue'
 import { ApiError } from '@/api/client'
-import { createMyToken, fetchMyUsage, listMyLogs } from '@/api/portal'
-import type { UsageLog, UsageStats } from '@/api/types'
+import { createMyToken, fetchMyTrial, fetchMyUsage, listMyLogs } from '@/api/portal'
+import type { TrialGrant, UsageLog, UsageStats } from '@/api/types'
 import {
   emptyTokenForm,
   toTokenPayload,
@@ -74,6 +74,24 @@ const logs = ref<UsageLog[]>([])
 const logsLoading = ref(true)
 const logsError = ref('')
 
+/**
+ * 限时试用额：只在"生效中"时展示横幅。
+ *
+ * 为什么单独拉一个接口而不塞进 /api/auth/me：试用额是可选运营能力
+ * （后端没启用时该接口返回 active=false），塞进 me 会让所有页面
+ * 都背上一个与本页无关的查询；概览页是唯一需要提示它的地方。
+ * 拉取失败一律当作"没有试用额"处理——横幅是增益信息，不值得为它报错。
+ */
+const trial = ref<TrialGrant | null>(null)
+
+async function loadTrial(): Promise<void> {
+  try {
+    trial.value = await fetchMyTrial()
+  } catch {
+    trial.value = null
+  }
+}
+
 /** 拉取用量统计（区间切换时复用） */
 async function loadUsage(): Promise<void> {
   usageLoading.value = true
@@ -104,8 +122,8 @@ async function loadRecentLogs(): Promise<void> {
 }
 
 onMounted(async () => {
-  // 并行发起：四个区块互不依赖，减少首屏等待
-  await Promise.all([auth.refreshUser(), loadUsage(), loadRecentLogs(), site.load()])
+  // 并行发起：五个区块互不依赖，减少首屏等待
+  await Promise.all([auth.refreshUser(), loadUsage(), loadRecentLogs(), site.load(), loadTrial()])
 })
 
 /** 区间切换：只重取用量统计（日志不受区间影响） */
@@ -185,6 +203,22 @@ const balanceHint = computed(() => {
 })
 const requestsText = computed(() => formatNumber(usage.value?.total_requests ?? 0))
 const tokensText = computed(() => formatCompact(usage.value?.total_tokens ?? 0))
+
+/* ── 限时试用额横幅 ───────────────────────────────────── */
+
+/** 只在"生效中且还有余额"时展示：过期或用完自动消失，不需要用户手动关闭 */
+const trialActive = computed(() => trial.value?.active === true && (trial.value?.remaining ?? 0) > 0)
+const trialAmountText = computed(() => yuanText(trial.value?.remaining ?? 0))
+
+/** 剩余有效期：不足 1 小时只报分钟（"0 小时 43 分"读起来像出错了） */
+const trialDeadlineText = computed(() => {
+  const seconds = trial.value?.expires_in_seconds ?? 0
+  if (seconds <= 0) return '即将到期'
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (hours <= 0) return `${Math.max(minutes, 1)} 分钟`
+  return `${hours} 小时 ${minutes} 分`
+})
 
 /* ── 图表配置 ───────────────────────────────────────── */
 
@@ -305,6 +339,19 @@ const hasModelData = computed(() => (usage.value?.by_model ?? []).length > 0)
         </RouterLink>
       </div>
     </div>
+
+    <!-- 限时试用额：只在生效期内出现，过期或用完自动消失（无需用户手动关闭） -->
+    <section
+      v-if="trialActive"
+      class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-brand-500/25 bg-brand-500/10 px-4 py-3"
+    >
+      <AppIcon name="clock" :size="16" class="text-brand-700" />
+      <p class="flex-1 text-sm text-brand-700">
+        你有一笔 <strong>{{ trialAmountText }}</strong> 试用额，剩余
+        <strong>{{ trialDeadlineText }}</strong> 到期；到期后未用完的部分会自动收回。
+      </p>
+      <RouterLink to="/console/tokens" class="btn btn-primary btn-sm">去创建令牌</RouterLink>
+    </section>
 
     <!-- 余额与用量汇总 -->
     <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
