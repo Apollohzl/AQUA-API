@@ -154,12 +154,15 @@ var catalog = Catalog{
 		Ar:   "مطلوب صلاحيات المسؤول",
 	},
 	"auth.invalid_credentials": {
-		ZhCN: "用户名或密码错误",
-		En:   "Incorrect username or password",
-		Fr:   "Nom d'utilisateur ou mot de passe incorrect",
-		Ru:   "Неверное имя пользователя или пароль",
-		Es:   "Nombre de usuario o contraseña incorrectos",
-		Ar:   "اسم المستخدم أو كلمة المرور غير صحيحة",
+		// 登录标识符现在可以是用户名，也可以是绑定的邮箱，
+		// 文案用"账号"一词把两种情况都覆盖住，避免"用邮箱登录失败时
+		// 提示却只说用户名"造成的困惑。
+		ZhCN: "账号或密码错误",
+		En:   "Incorrect account or password",
+		Fr:   "Compte ou mot de passe incorrect",
+		Ru:   "Неверный аккаунт или пароль",
+		Es:   "Cuenta o contraseña incorrectas",
+		Ar:   "الحساب أو كلمة المرور غير صحيحة",
 	},
 	"auth.username_taken": {
 		ZhCN: "用户名已被占用",

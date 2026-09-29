@@ -37,6 +37,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gitee.com/xiaosu4610/aqua-api/internal/config"
@@ -54,6 +55,23 @@ const (
 
 // portImplicitTLS 是使用"直接 TLS"的端口（无需 STARTTLS 协商）。
 const portImplicitTLS = 465
+
+// msgIDCounter 是 Message-ID 的进程内序号（配合纳秒时间戳保证唯一）。
+//
+// 为什么需要它：并发发送时两封信的 UnixNano 完全可能相同，
+// 尾缀的自增计数器是最后一道防重复的闸。
+var msgIDCounter atomic.Uint64
+
+// domainOf 取邮箱地址中 @ 之后的域名部分；取不到（没有 @）时回退到本机名。
+//
+// 用途：拼装 Message-ID 的右域。回退值只在 From 被配成怪值时兜底，
+// 此时生成的 ID 仍然合法（RFC 允许任意域），只是不具备可溯源语义。
+func domainOf(email string) string {
+	if _, domain, found := strings.Cut(strings.TrimSpace(email), "@"); found && domain != "" {
+		return domain
+	}
+	return "aqua.local"
+}
 
 // ErrNotConfigured 表示邮件功能未配置。
 //
@@ -223,7 +241,8 @@ func (s *Sender) Send(ctx context.Context, to, subject, htmlBody string) error {
 //     否则部分邮件客户端会显示成乱码；
 //   - 正文【必须】显式声明 charset=UTF-8 并做 base64 编码，
 //     否则出现"中文被截断"或"smtp: 行过长"错误；
-//   - 头部与正文之间必须空一行，且换行统一用 CRLF（SMTP 规范要求）。
+//   - 头部与正文之间必须空一行，且换行统一用 CRLF（SMTP 规范要求）；
+//   - Date 与 Message-ID【必须】有（见下），缺失是"用户收不到信"的常见根因。
 func buildMessage(cfg config.SMTPConfig, to, subject, htmlBody string) []byte {
 	var buf bytes.Buffer
 
@@ -235,6 +254,14 @@ func buildMessage(cfg config.SMTPConfig, to, subject, htmlBody string) []byte {
 	writeHeader(&buf, "From", fromHeader)
 	writeHeader(&buf, "To", to)
 	writeHeader(&buf, "Subject", mime.BEncoding.Encode("UTF-8", subject))
+	// Date（RFC 5322）：多数收件方（QQ / 网易 / Gmail）把缺 Date 的邮件
+	// 判为可疑甚至直接拒收；格式必须用英文星期与月份缩写（RFC 1123 风格）。
+	writeHeader(&buf, "Date", time.Now().Format(time.RFC1123Z))
+	// Message-ID（RFC 5325）：唯一标识一封邮件，用于收件方的去重与线索归并；
+	// 缺失同样会被垃圾评分系统扣分。域部分取发件地址的域名，
+	// 使其形如 <随机数.纳秒@aqua.is3.cc>——这是"由本系统生成"的标准形态。
+	writeHeader(&buf, "Message-ID", fmt.Sprintf("<%d.%d@%s>",
+		time.Now().UnixNano(), msgIDCounter.Add(1), domainOf(cfg.From)))
 	writeHeader(&buf, "MIME-Version", "1.0")
 	writeHeader(&buf, "Content-Type", `text/html; charset="UTF-8"`)
 	writeHeader(&buf, "Content-Transfer-Encoding", "base64")

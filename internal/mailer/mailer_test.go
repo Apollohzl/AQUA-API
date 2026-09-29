@@ -73,6 +73,16 @@ func TestBuildMessage_中文主题与HTML正文_应可正确解码(t *testing.T)
 		}
 	}
 
+	// 2.5) Date 与 Message-ID 必须存在：
+	// 收件方（QQ/网易/Gmail）普遍把缺这两个头的邮件判为可疑甚至拒收，
+	// 这是"验证码发出去了但用户收不到信"的常见根因，因此钉死在回归里。
+	if !strings.Contains(headerPart, "Date: ") {
+		t.Error("邮件头部缺少 Date 头（缺失易被收件方拒收）")
+	}
+	if !strings.Contains(headerPart, "Message-ID: <") {
+		t.Error("邮件头部缺少 Message-ID 头（缺失易被判为垃圾邮件）")
+	}
+
 	// 3) 收件人应原样出现在 To 头
 	if !strings.Contains(headerPart, "user@example.com") {
 		t.Error("To 头未包含收件人地址")

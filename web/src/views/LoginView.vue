@@ -151,7 +151,7 @@ function describe(error: unknown, fallback: string): string {
 async function handlePasswordLogin(): Promise<void> {
   errorMessage.value = ''
   if (!username.value.trim() || !password.value) {
-    errorMessage.value = '请输入用户名与密码'
+    errorMessage.value = '请输入账号（用户名或邮箱）与密码'
     return
   }
   // 协议同意：仅前端强制；后端登录接口不做此校验（见 agreedTerms 的说明）
@@ -229,6 +229,9 @@ async function handleResetPassword(): Promise<void> {
     newPassword.value = ''
     newPassword2.value = ''
     code.value = ''
+    // 把邮箱回填进账号框：登录已支持"邮箱 + 密码"，用户改完密码
+    // 不必再想"我的用户名叫什么"，直接输入新密码即可登录。
+    username.value = email.value.trim()
     mode.value = 'password'
     successMessage.value = '密码已重置，请用新密码登录'
     toastSuccess('密码已重置，请用新密码登录')
@@ -371,14 +374,14 @@ function reloadSite(): void {
             @submit.prevent="handlePasswordLogin"
           >
             <div>
-              <label class="label" for="login-username">用户名</label>
+              <label class="label" for="login-username">用户名或邮箱</label>
               <input
                 id="login-username"
                 v-model="username"
                 class="input"
                 type="text"
                 autocomplete="username"
-                placeholder="请输入用户名"
+                placeholder="请输入用户名或绑定的邮箱"
                 :disabled="submitting"
               />
             </div>

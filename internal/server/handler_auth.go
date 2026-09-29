@@ -16,7 +16,7 @@
 // 流转（Flow）：
 //
 //	POST /api/auth/register → 校验开关 → 校验口令强度 → HashPassword → 建用户 → 建会话
-//	POST /api/auth/login    → 查用户 → VerifyPassword → 建会话 → 返回会话令牌
+//	POST /api/auth/login    → 标识符（用户名或绑定邮箱）定位用户 → VerifyPassword → 建会话
 //	POST /api/auth/logout   → 删除当前会话（按摘要）
 //	GET  /api/auth/me       → 返回当前登录用户
 //
@@ -406,12 +406,39 @@ func (s *Server) applyInviteOnRegister(ctx context.Context, user *model.User, ra
 // ---------------------------------------------------------------------------
 
 // loginRequest 是登录请求体。
+//
+// Username 字段的语义是【登录标识符】：可以是用户名，也可以是绑定的邮箱
+// （见 findUserByLoginIdentifier）。JSON 字段名保持 username 不变——
+// 登录接口被 CLI/脚本等既有客户端复用，改字段名会直接打断它们。
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
-// handleLogin 处理登录。
+// findUserByLoginIdentifier 按"登录标识符"定位用户：先用户名、后邮箱。
+//
+// 查询顺序的取舍（为什么用户名优先）：
+//
+//	用户名只限制非空与长度，允许包含 @ —— 理论上可以有人把用户名起成
+//	邮箱形状。若把邮箱放在前面，这类用户会"永远登录到自己账号之外"；
+//	用户名放在前面则保证"标识符优先命中用户名"，邮箱只在用户名未命中时兜底，
+//	两种用户都能按自己的预期登录。
+//
+// 与防枚举的关系：两条路径的失败分支都会执行 dummyPasswordHash 比对
+// （见 handleLogin），因此多查一次邮箱不会引入时间侧信道——
+// "用户名未命中但邮箱命中"的耗时与"用户名直接命中"几乎一致，
+// 攻击者无法凭响应时间区分这两条路径。
+func (s *Server) findUserByLoginIdentifier(ctx context.Context, identifier string) (*model.User, error) {
+	user, err := s.deps.Users.GetByUsername(ctx, identifier)
+	if err == nil || !errors.Is(err, model.ErrUserNotFound) {
+		return user, err
+	}
+	// 用户名未命中：作为邮箱再试一次（GetByEmail 内部会做归一化，
+	// 空值与非邮箱串都会安全地返回 ErrUserNotFound）。
+	return s.deps.Users.GetByEmail(ctx, identifier)
+}
+
+// handleLogin 处理登录（支持"用户名或邮箱 + 密码"）。
 //
 // 注意：本接口必须挂在登录限流中间件之后（见 router 注册处）。
 func (s *Server) handleLogin(c *gin.Context) {
@@ -422,11 +449,12 @@ func (s *Server) handleLogin(c *gin.Context) {
 		return
 	}
 
-	user, err := s.deps.Users.GetByUsername(c.Request.Context(), strings.TrimSpace(req.Username))
+	identifier := strings.TrimSpace(req.Username)
+	user, err := s.findUserByLoginIdentifier(c.Request.Context(), identifier)
 	if err != nil {
 		if errors.Is(err, model.ErrUserNotFound) {
 			// 关键：即使用户不存在也执行一次哈希比对，抹平与"口令错误"的耗时差异，
-			// 防止攻击者通过响应时间枚举有效用户名。
+			// 防止攻击者通过响应时间枚举有效用户名（现在也包含有效邮箱）。
 			crypto.VerifyPassword(req.Password, dummyPasswordHash)
 			writeUserError(c, http.StatusUnauthorized,
 				"auth.invalid_credentials", oai.TypeAuthentication, oai.CodeInvalidAPIKey)
