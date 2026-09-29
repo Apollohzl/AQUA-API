@@ -128,14 +128,6 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/legal/SecurityCreditsView.vue'),
     meta: { title: '安全致谢' },
   },
-  {
-    // 语料共建说明：因"对话内容被留存用于训练"这件事需要被单独讲清，
-    // 与《用户协议》并列成页，用户协议第六条指向这里。
-    path: '/corpus',
-    name: 'corpus-notice',
-    component: () => import('@/views/legal/CorpusView.vue'),
-    meta: { title: '语料共建说明' },
-  },
 
   /* ── 用户门户 ─────────────────────────────────────────── */
   {

@@ -83,42 +83,7 @@ import LegalDocLayout from '@/components/LegalDocLayout.vue'
     </section>
 
     <section>
-      <h2 class="section-title">六、语料共建与数据使用</h2>
-      <p>
-        本站开展「语料共建计划」：<strong>当你调用本站声明的共建模型时，
-        本次调用的请求内容（含提示词与对话消息）与模型返回内容会被留存，
-        经脱敏与匿名化处理后用于改进与训练自有模型、构建语料数据集。</strong>
-      </p>
-      <ul class="list-disc space-y-1.5 pl-5">
-        <li>
-          <strong>采集范围</strong>：仅限本站声明参与共建的模型（实时清单见
-          <RouterLink to="/corpus" class="text-brand-700 hover:underline">《语料共建说明》</RouterLink>
-          与站内公告），且仅限请求内容与模型返回内容。
-        </li>
-        <li>
-          <strong>不采集</strong>：任何请求头（因此不含访问令牌与密钥）、IP 地址、
-          浏览器或设备信息，以及未列入清单的模型调用与失败的调用。
-        </li>
-        <li>
-          <strong>第三方环节</strong>：本站通过第三方模型服务商转发请求，
-          你的内容会经其传输与处理，其留存与使用不在本站可控范围内。
-        </li>
-        <li>
-          <strong>用途限制</strong>：留存内容仅用于训练与改进模型、构建语料数据集，
-          以及依法配合有权机关的要求；不用于向第三方出售。
-        </li>
-        <li>
-          <strong>你的选择</strong>：继续使用本服务即视为同意上述处理。
-          如你不同意，请停止调用共建清单内的模型（其余模型与功能不受影响），
-          也可通过
-          <RouterLink to="/contact" class="text-brand-700 hover:underline">联系方式</RouterLink>
-          页与我们联系。
-        </li>
-      </ul>
-    </section>
-
-    <section>
-      <h2 class="section-title">七、服务可用性</h2>
+      <h2 class="section-title">六、服务可用性</h2>
       <ul class="list-disc space-y-1.5 pl-5">
         <li>模型线路由第三方提供，可能因上游故障、限流、排队或调整而暂时不可用。</li>
         <li>我们不对服务可用性作出承诺；持续不可用的线路我们会及时下架或调整。</li>
@@ -127,7 +92,7 @@ import LegalDocLayout from '@/components/LegalDocLayout.vue'
     </section>
 
     <section>
-      <h2 class="section-title">八、协议变更与终止</h2>
+      <h2 class="section-title">七、协议变更与终止</h2>
       <ul class="list-disc space-y-1.5 pl-5">
         <li>本协议可能随业务与法规要求更新，更新后在本页公示，重大变更会通过站内公告提醒。</li>
         <li>你可以随时停止使用本服务；账号的注销与数据处理方式见《隐私政策》。</li>
@@ -136,7 +101,7 @@ import LegalDocLayout from '@/components/LegalDocLayout.vue'
     </section>
 
     <section>
-      <h2 class="section-title">九、联系我们</h2>
+      <h2 class="section-title">八、联系我们</h2>
       <p>
         对本协议有疑问，或需要举报违规使用，请通过
         <RouterLink to="/contact" class="text-brand-700 hover:underline">联系方式</RouterLink>
