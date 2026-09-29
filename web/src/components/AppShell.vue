@@ -174,12 +174,12 @@ async function handleSignOut(): Promise<void> {
 
     <!-- 侧边栏：start-0 跟随书写方向贴边；关闭态在 RTL 下改为向左收起到右侧 -->
     <aside
-      class="sidebar-safe fixed inset-y-0 start-0 z-40 flex w-60 flex-col border-e border-ink-800 bg-ink-900/95
+      class="sidebar-safe fixed inset-y-0 start-0 z-40 flex w-60 flex-col border-e border-ink-700 bg-ink-900/95
         transition-transform duration-200 lg:translate-x-0"
       :class="sidebarOpen ? 'translate-x-0' : rtl ? 'translate-x-full' : '-translate-x-full'"
     >
       <!-- 品牌区 -->
-      <RouterLink to="/" class="flex items-center gap-2.5 border-b border-ink-800 px-4 py-4">
+      <RouterLink to="/" class="flex items-center gap-2.5 border-b border-ink-700 px-4 py-4">
         <img src="/favicon.ico" alt="" class="h-8 w-8 rounded-lg" />
         <span class="min-w-0">
           <span class="block truncate text-sm font-semibold text-ink-50">{{ site.siteName }}</span>
@@ -206,7 +206,7 @@ async function handleSignOut(): Promise<void> {
           </RouterLink>
         </div>
 
-        <div v-if="adminEntry" class="space-y-1 border-t border-ink-800 pt-4">
+        <div v-if="adminEntry" class="space-y-1 border-t border-ink-700 pt-4">
           <RouterLink to="/admin" class="nav-item">
             <AppIcon name="shield" :size="17" />
             {{ t('components.shell.admin') }}
@@ -215,7 +215,7 @@ async function handleSignOut(): Promise<void> {
       </nav>
 
       <!-- 用户区 -->
-      <div class="border-t border-ink-800 p-3">
+      <div class="border-t border-ink-700 p-3">
         <div class="flex items-center gap-2.5 rounded-lg bg-ink-850/70 px-3 py-2.5">
           <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-500/15 text-sm font-semibold text-brand-700">
             {{ avatarText }}
@@ -243,7 +243,7 @@ async function handleSignOut(): Promise<void> {
     <!-- 主内容区：ps-60 为逻辑内边距，RTL 下自动改到另一侧 -->
     <div class="lg:ps-60">
       <header
-        class="app-header sticky top-0 z-20 flex items-center gap-3 border-b border-ink-800 bg-white/90 px-4 lg:px-8"
+        class="app-header sticky top-0 z-20 flex items-center gap-3 border-b border-ink-700 bg-ink-950/90 px-4 lg:px-8"
       >
         <button
           type="button"

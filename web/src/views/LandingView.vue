@@ -1,24 +1,19 @@
 <script setup lang="ts">
 /**
- * 落地页：品牌海报（hero）+ 快速接入 + 核心能力 + 可用模型（无需登录）。
+ * 落地页：「深水夜航」版（2026-09-29 全站视觉重构）。
  *
  * 意图（Why）：
  *   这是对外展示的「门面」，访客在 10 秒内要能回答三个问题——
  *   「这是谁」「现在能用哪些模型」「我该怎么接」。
  *
- *   因此本页在 2026-09 做了一次结构性的重排，取向从"功能罗列"改为"品牌海报"：
- *     1) 首屏是一张满幅的深色影像（水面与折射光，呼应 AQUA），
- *        品牌名是全站最大的一行字——先回答"这是谁"，再回答"做什么"；
- *     2) 首屏只留一个主操作 + 一个次操作，其余入口降级为一行安静的文字链
- *        （此前首屏堆了四个按钮，视线无处落脚）；
- *     3) 接入示例从 hero 里搬出来，与"三步开始调用"合成同一节——
- *        此前 hero 与快速接入各有一份代码块，是同一件事说两遍；
- *     4) 核心能力从六张卡片改为一栏横排的"账本式"清单：
- *        卡片网格会把六件并列的事说得比实际重要，横排细线更克制；
- *     5) 首屏为整屏高度（.hero-viewport），顶栏叠在影像之上，
- *        滚动后顶栏才转成白底——避免"顶栏 + 内容"超出首屏。
- *
- *   更多设计取舍见 style.css 的 .hero-brand / .hero-scrim / .reveal。
+ *   本次重写的三条设计主线：
+ *     1) 背景不再用外链照片，改为【原创算法艺术】：CausticCanvas 用三组
+ *        正弦干涉场实时画出"深水焦散光网"，页面从第一帧起就是活的；
+ *     2) 文案全部事实化：不写"赋能/极致/领先"式广告语，只用
+ *        「这是谁、有什么、怎么接」的陈述句，产品自己说话；
+ *     3) 排版走"仪表 + 编辑"混合：Unbounded 几何字负责拉丁大字，
+ *        中文标题回退思源宋体；数字一律等宽（tabular-nums），
+ *        与焦散光、网格一起构成"水下仪器舱"的观感。
  *
  * 流转（Flow）：
  *   main.ts 预取站点信息 → 本页读取 stores/site（名称/描述/版本/模型列表）
@@ -27,15 +22,14 @@
  * 扩展（Extend）：
  *   新增展示区块：在 <main> 内按「先价值后细节」的顺序插入，并给区块加 v-reveal；
  *   新增接入语言示例：在 codeSamples 追加一项（会自动多出一个 Tab）；
- *   更换 hero 影像：改 HERO_IMAGE 的 prompt 即可（遮罩在 CSS 里，
- *   与图片内容解耦，因此换任何一张图都不需要重新调遮罩）。
- *   注意：本页不放置任何本地图片资源，视觉由影像层 + CSS 网格与细线构成。
+ *   终端演示的剧本：改 terminalScript 数组即可，播放逻辑不用动。
  */
 import { computed, onBeforeUnmount, onMounted, ref, type Directive } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import AppIcon from '@/components/AppIcon.vue'
 import AnnouncementBanner from '@/components/AnnouncementBanner.vue'
+import CausticCanvas from '@/components/CausticCanvas.vue'
 import CopyButton from '@/components/CopyButton.vue'
 import SiteFooter from '@/components/SiteFooter.vue'
 import { type IconName } from '@/components/icons'
@@ -48,30 +42,10 @@ const auth = useAuthStore()
 /** 站点根地址：用浏览器地址而非硬编码域名，任何部署环境复制出来都能直接用 */
 const baseUrl = computed(() => window.location.origin)
 /** 示例里优先用站点真实开放的模型，空则给一个通用占位（避免出现 undefined） */
-const sampleModel = computed(() => site.models[0] || 'gpt-4o')
+const sampleModel = computed(() => site.models[0] || 'AQUA-CALL/deepseek-v4-flash')
 
-/**
- * 首屏影像（真实照片锚点）。
- *
- * 为什么首屏必须要一张"真实的影像"而不是纯 CSS 渐变底纹：
- * 渐变与网格是氛围，不是主体——访客第一眼需要一个"具体的东西"，
- * 否则页面读起来像一张尚未设计的线框图。
- * 选"深色水面 + 折射光"是让影像与品牌名（AQUA）互为注解。
- *
- * 兜底：影像层之下是 hero 自带的深海底色，图片加载慢或失败时
- * 页面依然是完整可读的深色海报，不会出现破图或半个空白。
- */
-const HERO_IMAGE =
-  'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?image_size=landscape_16_9&prompt=' +
-  encodeURIComponent(
-    'aerial view of deep dark navy ocean water surface, soft caustic light refraction patterns, ' +
-      'moody cinematic deep blue, minimal, high contrast, wide shot',
-  )
-
-/* ── 顶栏：滚动后从"透明叠在影像上"转为"白底" ─────────────
-   为什么不做成两个顶栏（一个透明、一个白底）：那样要维护两份导航，
-   且切换瞬间会闪。只切背景与文字颜色，结构始终只有一份。 */
-
+/* ── 顶栏：滚动后从"透明叠在焦散场上"转为"面板底" ──────────
+   只切背景与文字颜色，结构只有一份。 */
 const scrolled = ref(false)
 
 function onScroll(): void {
@@ -82,26 +56,21 @@ onMounted(() => {
   onScroll()
   window.addEventListener('scroll', onScroll, { passive: true })
 })
-
 onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
 
-/** 顶栏按钮的两种皮肤：影像上（透明底）用 invert 系列，白底上用常规系列 */
+/** 顶栏按钮的两种皮肤：焦散场上（透明）用 invert 系列，面板底用常规系列 */
 const navGhostClass = computed(() => (scrolled.value ? 'btn-ghost' : 'btn-ghost-invert'))
 const navPrimaryClass = computed(() => (scrolled.value ? 'btn-primary' : 'btn-invert'))
 
-/** 顶栏锚点：只在桌面端显示，窄屏由页面内的区块顺序承担导航 */
 const anchors = [
-  { href: '#quickstart', label: '快速接入' },
-  { href: '#capabilities', label: '核心能力' },
-  { href: '#models', label: '可用模型' },
+  { href: '#terminal', label: '实时链路' },
+  { href: '#capabilities', label: '能力' },
+  { href: '#models', label: '模型' },
 ]
 
 /* ── 滚动进场指令（局部注册）──────────────────────────────
-   为什么不做成全局指令：只有落地页这种"长页面"需要滚动节奏感，
-   控制台/后台是操作界面，滚动动画只会拖慢操作。
    兜底：隐藏样式在挂载时才挂上，JS 未执行时内容默认可见；
    系统开启"减少动态效果"时直接跳过。 */
-
 const revealObservers = new WeakMap<HTMLElement, IntersectionObserver>()
 
 const vReveal: Directive<HTMLElement, number | undefined> = {
@@ -131,54 +100,63 @@ const vReveal: Directive<HTMLElement, number | undefined> = {
   },
 }
 
-/* ── 首屏事实清单 ─────────────────────────────────────── */
+/* ── 首屏事实条：数字而非形容词（数据全部来自站点信息接口）── */
+const heroStats = computed(() => {
+  const items: { value: string; label: string }[] = []
+  if (site.models.length) items.push({ value: String(site.models.length), label: '模型在线' })
+  items.push({ value: '3', label: '协议族 OpenAI / Anthropic / Gemini' })
+  items.push({ value: '24×7', label: '自托管进程常驻' })
+  return items
+})
 
-const heroFacts = ['兼容 OpenAI 接口', '令牌级额度控制', '逐次调用留痕']
-
-/* ── 核心能力 ─────────────────────────────────────────── */
-
+/* ── 核心能力：账本式清单（内容与后端能力一一对应）────────── */
 interface Capability {
   icon: IconName
   title: string
   desc: string
+  metric: string
 }
 
-/** 能力清单：内容与后端能力一一对应，避免出现「宣传了但没有」的功能 */
 const capabilities: Capability[] = [
   {
-    icon: 'server',
-    title: '统一接入入口',
-    desc: '自有渠道与自托管模型收敛成一个入口，客户端只需要认一套地址与协议。',
-  },
-  {
     icon: 'layers',
-    title: 'OpenAI 协议兼容',
-    desc: '对外提供 /v1/chat/completions 兼容接口，既有的 SDK、IDE 插件与脚本无需改造。',
+    title: '一个入口，三套协议',
+    desc: 'OpenAI / Anthropic / Gemini 协议互转，既有 SDK、CLI 与 IDE 插件不用改一行代码。',
+    metric: '3 protocol',
   },
   {
     icon: 'globe',
     title: '渠道调度与容错',
-    desc: '按分组、优先级与权重分配请求；渠道异常会被自动标记，降低故障对业务的影响。',
+    desc: '按分组、权重与优先级分流；凭据失败自动冷却、半开恢复，故障不传染。',
+    metric: '79 channel type',
   },
   {
     icon: 'key',
     title: '令牌即权限边界',
-    desc: '按人、按用途签发访问令牌，可限定可用模型、有效期与额度，随时停用或删除。',
+    desc: '按人、按用途签发访问令牌，可限定模型、有效期与额度，随时停用。',
+    metric: 'per-token',
   },
   {
     icon: 'quota',
-    title: '用量可对账',
-    desc: '每次调用都记录 Token 与额度消耗，后台可按天、按模型、按令牌逐条核查。',
+    title: '每一笔都可对账',
+    desc: '预扣 → 结算 → 退还三段式记账，并发不透支；调用日志逐条留痕。',
+    metric: 'ledger',
   },
   {
     icon: 'lock',
-    title: '自托管更可控',
-    desc: '单二进制 + 本地数据库部署，密钥只走环境变量，请求与账目数据不出自己的机器。',
+    title: '密钥不出机器',
+    desc: '上游密钥 AES-256-GCM 加密落库，主密钥只从环境变量注入，后台也看不到明文。',
+    metric: 'AES-256',
+  },
+  {
+    icon: 'server',
+    title: '单二进制交付',
+    desc: '零 CGO、前端内嵌，一条命令拉起完整网关；SQLite 落地，数据跟着目录走。',
+    metric: '1 binary',
   },
 ]
 
 /* ── 接入示例 ─────────────────────────────────────────── */
-
 interface CodeSample {
   key: string
   label: string
@@ -195,7 +173,7 @@ const codeSamples = computed<CodeSample[]>(() => [
   -d '{
     "model": "${sampleModel.value}",
     "messages": [{"role": "user", "content": "你好，介绍一下你自己"}],
-    "stream": false
+    "stream": true
   }'`,
   },
   {
@@ -215,22 +193,12 @@ resp = client.chat.completions.create(
 print(resp.choices[0].message.content)`,
   },
   {
-    key: 'node',
-    label: 'Node / fetch',
-    code: `const res = await fetch("${baseUrl.value}/v1/chat/completions", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    Authorization: \`Bearer \${process.env.AQUA_API_KEY}\`,
-  },
-  body: JSON.stringify({
-    model: "${sampleModel.value}",
-    messages: [{ role: "user", content: "你好，介绍一下你自己" }],
-  }),
-})
-
-const data = await res.json()
-console.log(data.choices[0].message.content)`,
+    key: 'claude',
+    label: 'Claude Code',
+    code: `# AQUA-API 原生支持 Anthropic 协议，可直接接管 Claude Code：
+export ANTHROPIC_BASE_URL=${baseUrl.value}
+export ANTHROPIC_AUTH_TOKEN=sk-你的令牌
+claude`,
   },
 ])
 
@@ -241,45 +209,92 @@ const currentCode = computed(() => codeSamples.value.find((item) => item.key ===
 /** 登录后按钮的目标：管理员去后台，普通用户去门户 */
 const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
 
-/** 首页最多展示的模型数：上游动辄上百个，全铺开会把页面拉得极长 */
+/** 本页最多展示的模型数：上游动辄上百个，全铺开会把页面拉得极长 */
 const MODEL_PREVIEW_LIMIT = 24
 
-/**
- * 快速接入的三步说明。
- * 用 computed 而不是写在模板里：步骤文案要引用「当前站点域名」与「真实模型名」，
- * 放在脚本里能直接用 ref，也避免模板里出现长表达式。
- */
-const quickstartSteps = computed(() => [
-  {
-    title: '登录并创建访问令牌',
-    desc: '在「访问令牌」页创建 sk- 开头的密钥，可按用途分别签发，并限定模型或有效期。',
-  },
-  {
-    title: '把基地址指向本网关',
-    desc: `基地址使用 ${baseUrl.value}/v1，请求头携带 Authorization: Bearer sk-…`,
-  },
-  {
-    title: '按模型名发起请求',
-    desc: `使用模型清单中的名称（如 ${sampleModel.value}），调用记录与用量会实时出现在后台。`,
-  },
-])
+/* ── 实时链路终端：把"一次流式调用"演给访客看 ───────────────
+ *
+ * 为什么值得做：目标用户是开发者，"网关是什么"解释三句不如
+ * 播一段真实形态的 SSE 流；它同时演示了基地址、鉴权头、
+ * 模型名与返回结构，是"接入文档"的前置预览。
+ *
+ * 实现：剧本 = 一段开场命令 + 若干"词元"，逐词打出，
+ * 停顿随机抖动模拟网络节奏；播完静默两秒重新开始。
+ * reduce-motion 时只播一遍（不循环、不打字，整段直接展示）。 */
+const terminalLines = ref<string[]>([])
+let terminalTimer: number | undefined
+
+const STREAM_TOKENS = [
+  '流式', '响应', '按', '词元', '送达', '——', '首字', '延迟', '决定', '体感，',
+  '计量', '以', '最终', '帧', '为准，', '中断', '即', '退款。',
+  '\u200b',
+  'route:  nvidia/nemotron-70b   ·   812 tok   ·   214 ms',
+]
+
+function playTerminal(): void {
+  const head = `$ curl ${baseUrl.value}/v1/chat/completions -H "Authorization: Bearer sk-aqua-…" -d '{"model":"${sampleModel.value}","stream":true}'`
+  const full = [head, '', ...STREAM_TOKENS]
+  terminalLines.value = []
+  let i = 0
+  const step = (): void => {
+    if (i < full.length) {
+      terminalLines.value.push(full[i])
+      i += 1
+      // 指令行停顿长（像"等上游"），词元停顿短（像"在生成"）
+      const delay = i <= 1 ? 700 : full[i - 1].length > 30 ? 90 : 140 + Math.random() * 120
+      terminalTimer = window.setTimeout(step, delay)
+    } else {
+      terminalTimer = window.setTimeout(() => {
+        i = 0
+        terminalLines.value = []
+        step()
+      }, 2600)
+    }
+  }
+  step()
+}
+
+onMounted(() => {
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+  if (reduceMotion) {
+    // 静态展示完整剧本，不做打字循环
+    terminalLines.value = [
+      `$ curl ${baseUrl.value}/v1/chat/completions -H "Authorization: Bearer sk-aqua-…" -d '{"model":"${sampleModel.value}","stream":true}'`,
+      '',
+      ...STREAM_TOKENS,
+    ]
+    return
+  }
+  playTerminal()
+})
+
+onBeforeUnmount(() => {
+  if (terminalTimer !== undefined) window.clearTimeout(terminalTimer)
+})
+
+/** 站点信息加载失败时，至少保证落地页可看（提示条给出重试入口） */
+function reloadSite(): void {
+  void site.load(true)
+}
 </script>
 
 <template>
-  <div class="min-h-screen bg-ink-950">
-    <!-- 站点公告横幅：落地页也要能看到运营通知（自包含组件，无公告时不渲染）。
-         放在 hero 之前而不是叠在影像上，避免公告与品牌字抢同一块注意力。 -->
+  <div class="relative min-h-screen bg-ink-950 text-ink-100">
+    <!-- 站点公告横幅：落地页也要能看到运营通知（自包含组件，无公告时不渲染） -->
     <AnnouncementBanner />
 
-    <!-- ── 顶栏：叠在 hero 影像之上，滚动后转白底 ───────────── -->
+    <!-- ── 顶栏：叠在焦散场上，滚动后转面板底 ───────────────── -->
     <header
       class="fixed inset-x-0 top-0 z-30 border-b transition-colors duration-300"
-      :class="scrolled ? 'border-ink-800/70 bg-white/90' : 'border-transparent'"
+      :class="scrolled ? 'border-ink-700/70 bg-ink-950/90' : 'border-transparent'"
     >
       <div class="mx-auto flex max-w-7xl items-center gap-4 px-5 py-3 lg:px-8">
         <RouterLink to="/" class="flex items-center gap-2.5">
           <img src="/favicon.ico" alt="" class="h-8 w-8 rounded-lg" />
-          <span class="text-sm font-semibold tracking-tight" :class="scrolled ? 'text-ink-50' : 'text-white'">
+          <span
+            class="font-display text-sm font-semibold tracking-tight"
+            :class="scrolled ? 'text-ink-50' : 'text-white'"
+          >
             {{ site.siteName }}
           </span>
         </RouterLink>
@@ -309,40 +324,44 @@ const quickstartSteps = computed(() => [
     </header>
 
     <main>
-      <!-- ── 首屏：满幅品牌海报 ─────────────────────────────
-           构成：深色水面影像 → 固定深色遮罩 → 品牌字/主张/操作。
-           只保留一个主操作与一个次操作，其余入口是一行安静的文字链，
-           让视线有明确的落点（见文件头注释第 2 条）。 -->
-      <section class="relative isolate overflow-hidden bg-[#050e1a]">
-        <!-- 影像层与遮罩层：纯装饰，对辅助技术隐藏 -->
+      <!-- ── 首屏：深水焦散场 ──────────────────────────────────
+           背景是本页的"工艺"核心：三组正弦波干涉出光网（算法艺术，
+           非图片），叠加仪表网格与底部渐隐遮罩。 -->
+      <section class="relative isolate overflow-hidden bg-ink-950">
         <div class="absolute inset-0 -z-10" aria-hidden="true">
-          <img :src="HERO_IMAGE" alt="" class="h-full w-full object-cover" decoding="async" />
-          <div class="hero-scrim absolute inset-0" />
-          <div class="bg-grid absolute inset-0 opacity-[0.14]" />
+          <CausticCanvas :intensity="1" :speed="1" :hue="215" />
+          <div class="bg-grid absolute inset-0 opacity-60" />
+          <!-- 底部渐隐：把焦散场"沉"进页面底色，避免硬边 -->
+          <div
+            class="absolute inset-0"
+            style="background: linear-gradient(to top, #050d19 4%, rgba(5,13,25,0.4) 32%, rgba(5,13,25,0) 60%)"
+          />
         </div>
 
         <div class="hero-viewport mx-auto flex max-w-7xl flex-col justify-center px-5 pb-16 pt-28 lg:px-8 lg:pb-24 lg:pt-32">
           <div class="max-w-3xl">
             <div class="hero-reveal flex flex-wrap items-center gap-3" style="--d: 0ms">
               <span class="hero-kicker text-brand-300">
-                <span class="dot" aria-hidden="true" />
+                <span class="dot animate-pulse-soft !bg-brand-400" aria-hidden="true" />
                 Self-hosted LLM Gateway
               </span>
-              <span v-if="site.version" class="chip border-white/20 bg-white/10 text-white/80">v{{ site.version }}</span>
-              <span v-if="site.models.length" class="chip border-white/20 bg-white/10 text-white/80">
-                {{ site.models.length }} 个模型在线
-              </span>
+              <span v-if="site.version" class="chip border-white/15 bg-white/5 text-white/75">v{{ site.version }}</span>
             </div>
 
-            <!-- 品牌名是全站最大的一行字：先回答"这是谁" -->
+            <!-- 品牌名：Unbounded 几何字，全站最大的一行字 -->
             <h1 class="hero-reveal hero-brand mt-7" style="--d: 60ms">{{ site.siteName }}</h1>
 
-            <p class="hero-reveal mt-5 font-display text-2xl font-medium leading-snug text-white/90 sm:text-3xl" style="--d: 120ms">
-              一个入口，接管你所有的大模型调用
+            <!-- 副题用衬线（中文回退思源宋体），陈述而非口号 -->
+            <p
+              class="hero-reveal mt-5 font-display text-2xl font-medium leading-snug text-white/90 sm:text-3xl"
+              style="--d: 120ms"
+            >
+              把每一次模型调用，都收进<span class="text-gradient-brand">同一个入口</span>。
             </p>
 
-            <p class="hero-reveal mt-5 max-w-xl text-sm leading-relaxed text-white/65 sm:text-base" style="--d: 180ms">
-              {{ site.siteDescription || '统一接入渠道与对外协议，负责路由、计费与运营，把账号、密钥、配额与账单收敛到网关内部。' }}
+            <p class="hero-reveal mt-5 max-w-xl text-sm leading-relaxed text-white/60 sm:text-base" style="--d: 180ms">
+              {{ site.siteDescription ||
+                '统一接入渠道与对外协议，负责路由、计费与运营，把账号、密钥、配额与账单收敛到网关内部。' }}
             </p>
 
             <div class="hero-reveal mt-9 flex flex-wrap items-center gap-3" style="--d: 240ms">
@@ -367,10 +386,10 @@ const quickstartSteps = computed(() => [
               </template>
             </div>
 
-            <!-- 三级入口：一行文字链，不再与主操作抢视觉权重 -->
+            <!-- 三级入口：一行文字链 -->
             <div class="hero-reveal mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm" style="--d: 260ms">
-              <a href="#quickstart" class="text-white/70 underline-offset-4 transition-colors hover:text-white hover:underline">
-                查看接入示例
+              <a href="#terminal" class="text-white/70 underline-offset-4 transition-colors hover:text-white hover:underline">
+                看一次流式调用
               </a>
               <RouterLink to="/models" class="text-white/70 underline-offset-4 transition-colors hover:text-white hover:underline">
                 完整模型清单
@@ -379,223 +398,232 @@ const quickstartSteps = computed(() => [
                 加入交流群
               </RouterLink>
             </div>
-
-            <ul class="hero-reveal mt-10 flex flex-wrap gap-x-6 gap-y-2 text-sm text-white/60" style="--d: 320ms">
-              <li v-for="fact in heroFacts" :key="fact" class="flex items-center gap-1.5">
-                <AppIcon name="check" :size="15" class="text-brand-300" />
-                {{ fact }}
-              </li>
-            </ul>
           </div>
+
+          <!-- 事实条：数字而非形容词，贴在 hero 底部像一行仪表读数 -->
+          <dl
+            class="hero-reveal mt-14 flex flex-wrap items-end gap-x-12 gap-y-6 border-t border-white/10 pt-6"
+            style="--d: 320ms"
+            aria-label="站点数据"
+          >
+            <div v-for="stat in heroStats" :key="stat.label">
+              <dt class="text-xs text-white/50">{{ stat.label }}</dt>
+              <dd class="mt-1 font-display text-2xl font-semibold tabular-nums text-white sm:text-3xl">
+                {{ stat.value }}
+              </dd>
+            </div>
+          </dl>
         </div>
       </section>
 
-      <!-- ── 站点信息异常时的提示（不阻断页面）───────────────── -->
+      <!-- ── 站点信息异常提示（不阻断页面）─────────────────────── -->
       <div v-if="site.error" class="mx-auto max-w-6xl px-5 pt-8 lg:px-8">
         <div class="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3">
-          <AppIcon name="alert" :size="16" class="text-amber-700" />
-          <p class="flex-1 text-sm text-amber-800">站点信息加载失败：{{ site.error }}</p>
-          <button type="button" class="btn btn-secondary btn-sm" @click="site.load(true)">
+          <AppIcon name="alert" :size="16" class="text-amber-600" />
+          <p class="flex-1 text-sm text-amber-700">站点信息加载失败：{{ site.error }}</p>
+          <button type="button" class="btn btn-secondary btn-sm" @click="reloadSite">
             <AppIcon name="refresh" :size="14" />
             重试
           </button>
         </div>
       </div>
 
-      <!-- ── 快速接入：三步说明 + 唯一一份代码示例 ───────────────
-           hero 里不再放代码块：同一件事(怎么调用)只说一次，
-           说在"快速接入"这一节，主场明确。 -->
-      <section id="quickstart" class="scroll-mt-20">
-        <div class="mx-auto grid max-w-6xl gap-12 px-5 py-20 lg:grid-cols-[0.85fr_1.15fr] lg:gap-16 lg:px-8 lg:py-28">
-          <div v-reveal>
-            <p class="hero-kicker text-brand-700">快速接入</p>
-            <h2 class="mt-4 font-display text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl">
-              三步开始调用
-            </h2>
-            <p class="mt-4 max-w-md text-sm leading-relaxed text-ink-300">
-              网关只做协议与账务，业务侧继续用熟悉的 OpenAI 写法，不需要引入新的 SDK。
-            </p>
+      <!-- ── 实时链路：终端演示 + 三步接入 ────────────────────────
+           左边"演给你看"，右边"教你怎么接"：开发者看一眼终端
+           就知道请求长什么样，三步清单回答"接下来做什么"。 -->
+      <section id="terminal" class="relative mx-auto max-w-7xl scroll-mt-24 px-5 py-20 lg:px-8 lg:py-24">
+        <div v-reveal class="max-w-2xl">
+          <p class="hero-kicker text-brand-700">Live Route</p>
+          <h2 class="mt-3 font-display text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl">
+            一次流式调用，长这样
+          </h2>
+          <p class="mt-3 text-sm leading-relaxed text-ink-300">
+            基地址指向本网关，请求头带访问令牌，其余与官方接口一致。下面是真实协议形态的回放。
+          </p>
+        </div>
 
-            <ol class="mt-10 space-y-0">
-              <li
-                v-for="(step, index) in quickstartSteps"
-                :key="step.title"
-                class="flex gap-5 border-t border-ink-800/70 py-6"
+        <div class="mt-10 grid gap-6 lg:grid-cols-[1.25fr_1fr]">
+          <!-- 终端：深色块 + 顶部状态灯，逐行"生成" -->
+          <div v-reveal class="code-block shadow-pop">
+            <div class="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
+              <span class="h-2.5 w-2.5 rounded-full bg-red-500/70" />
+              <span class="h-2.5 w-2.5 rounded-full bg-amber-500/70" />
+              <span class="h-2.5 w-2.5 rounded-full bg-emerald-500/70" />
+              <span class="ms-2 font-mono text-[11px] tracking-wider text-white/40">gateway — stream</span>
+              <span class="ms-auto flex items-center gap-1.5 font-mono text-[11px] text-emerald-600">
+                <span class="dot !bg-emerald-500 animate-pulse-soft" aria-hidden="true" />
+                online
+              </span>
+            </div>
+            <pre
+              class="min-h-[240px] font-mono text-[13px] leading-relaxed"
+              dir="ltr"
+            ><span v-for="(line, i) in terminalLines" :key="i" :class="i === 0 ? 'text-brand-300' : 'text-[#d5e2f2]'">{{ line }}{{ i === terminalLines.length - 1 ? '▌' : '\n' }}</span></pre>
+          </div>
+
+          <!-- 三步接入：编号账本式，数字用 Unbounded -->
+          <ol v-reveal="80" class="space-y-5">
+            <li class="flex gap-4">
+              <span class="font-display text-2xl font-semibold text-brand-500/80">01</span>
+              <div>
+                <p class="text-sm font-semibold text-ink-50">登录并创建访问令牌</p>
+                <p class="mt-1 text-xs leading-relaxed text-ink-300">
+                  在「访问令牌」页创建 sk- 开头的密钥，可按用途分别签发，并限定模型或有效期。
+                </p>
+              </div>
+            </li>
+            <li class="flex gap-4">
+              <span class="font-display text-2xl font-semibold text-brand-500/80">02</span>
+              <div>
+                <p class="text-sm font-semibold text-ink-50">把基地址指向本网关</p>
+                <p class="mt-1 break-all font-mono text-xs leading-relaxed text-ink-300">
+                  {{ baseUrl }}/v1
+                </p>
+              </div>
+            </li>
+            <li class="flex gap-4">
+              <span class="font-display text-2xl font-semibold text-brand-500/80">03</span>
+              <div>
+                <p class="text-sm font-semibold text-ink-50">按模型名发起请求</p>
+                <p class="mt-1 text-xs leading-relaxed text-ink-300">
+                  使用模型清单中的名称（如 <span class="font-mono text-brand-700">{{ sampleModel }}</span>），
+                  调用记录与用量实时出现在后台。
+                </p>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- ── 能力矩阵 ──────────────────────────────────────────
+           账本式：一行一个事实 + 右侧等宽小标记，不做"六张等大卡片"
+           的均质网格（那会把六件并列的事说得比实际更重要）。 -->
+      <section id="capabilities" class="mx-auto max-w-7xl scroll-mt-24 px-5 py-20 lg:px-8 lg:py-24">
+        <div v-reveal class="max-w-2xl">
+          <p class="hero-kicker text-brand-700">Capabilities</p>
+          <h2 class="mt-3 font-display text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl">
+            网关该管的事，都在这
+          </h2>
+        </div>
+
+        <ul class="mt-10 divide-y divide-ink-700/60 border-y border-ink-700/60">
+          <li
+            v-for="cap in capabilities"
+            :key="cap.title"
+            v-reveal
+            class="group grid gap-3 py-6 transition-colors duration-200 hover:bg-brand-500/[0.04] sm:grid-cols-[auto_1fr_auto] sm:items-center sm:gap-6 sm:px-4"
+          >
+            <span
+              class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-ink-700 bg-ink-900 text-brand-300 transition-colors group-hover:border-brand-500/40 group-hover:text-brand-300"
+            >
+              <AppIcon :name="cap.icon" :size="20" />
+            </span>
+            <div>
+              <p class="text-sm font-semibold text-ink-50">{{ cap.title }}</p>
+              <p class="mt-1 max-w-2xl text-xs leading-relaxed text-ink-300 sm:text-sm">{{ cap.desc }}</p>
+            </div>
+            <span class="font-mono text-xs tabular-nums text-brand-700/80">{{ cap.metric }}</span>
+          </li>
+        </ul>
+      </section>
+
+      <!-- ── 接入示例：代码页签 ─────────────────────────────────── -->
+      <section class="mx-auto max-w-7xl px-5 py-20 lg:px-8 lg:py-24">
+        <div v-reveal class="max-w-2xl">
+          <p class="hero-kicker text-brand-700">Quickstart</p>
+          <h2 class="mt-3 font-display text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl">
+            复制即用
+          </h2>
+        </div>
+
+        <div v-reveal class="card mt-8 overflow-hidden" dir="ltr">
+          <div class="flex items-center justify-between border-b border-ink-700/70 bg-ink-850/80 px-2 py-1.5">
+            <div class="seg border-0 bg-transparent p-0">
+              <button
+                v-for="sample in codeSamples"
+                :key="sample.key"
+                type="button"
+                class="seg-item"
+                :class="activeSample === sample.key ? 'seg-item-active' : ''"
+                @click="activeSample = sample.key"
               >
-                <span class="mt-0.5 font-mono text-sm text-brand-700">{{ String(index + 1).padStart(2, '0') }}</span>
-                <div>
-                  <p class="text-sm font-medium text-ink-50">{{ step.title }}</p>
-                  <p class="mt-1.5 text-sm leading-relaxed text-ink-400">{{ step.desc }}</p>
-                </div>
-              </li>
-            </ol>
-
-            <RouterLink v-if="!auth.isLoggedIn" to="/login" class="btn btn-primary mt-2">
-              登录后创建令牌
-              <AppIcon name="chevron-right" :size="16" />
-            </RouterLink>
-            <RouterLink v-else to="/console/tokens" class="btn btn-primary mt-2">
-              <AppIcon name="key" :size="16" />
-              我的访问令牌
-            </RouterLink>
-          </div>
-
-          <div v-reveal="80" class="lg:pt-16">
-            <div class="code-block shadow-panel">
-              <div class="flex flex-wrap items-center gap-2 border-b border-white/10 px-3 py-2.5">
-                <button
-                  v-for="sample in codeSamples"
-                  :key="sample.key"
-                  type="button"
-                  class="rounded-md px-2.5 py-1 text-xs font-medium transition-colors"
-                  :class="
-                    activeSample === sample.key
-                      ? 'bg-brand-500/25 text-brand-200'
-                      : 'text-[#8ba6c9] hover:bg-white/10 hover:text-white'
-                  "
-                  @click="activeSample = sample.key"
-                >
-                  {{ sample.label }}
-                </button>
-                <CopyButton :value="currentCode" label="复制" small class="ml-auto" success-text="示例已复制" />
-              </div>
-              <pre>{{ currentCode }}</pre>
-            </div>
-
-            <div class="mt-4 flex items-center gap-3 rounded-xl border border-ink-800 bg-white/70 px-4 py-3">
-              <AppIcon name="lock" :size="16" class="text-brand-700" />
-              <p class="text-xs leading-relaxed text-ink-400">
-                访问令牌仅在创建时明文展示一次；服务端只保存摘要，可随时吊销。
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ── 核心能力：横排账本式清单（不用卡片网格）────────────
-           为什么不用卡片：六张等大的卡片会把"六件并列的事"渲染成
-           六个同等重要的卖点，读者反而记不住任何一条；
-           细线分栏只提供秩序，不增加重量。 -->
-      <section id="capabilities" class="scroll-mt-20 border-y border-ink-800/70 bg-white/40">
-        <div class="mx-auto max-w-6xl px-5 py-20 lg:px-8 lg:py-28">
-          <div v-reveal class="max-w-2xl">
-            <p class="hero-kicker text-brand-700">核心能力</p>
-            <h2 class="mt-4 font-display text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl">
-              该管的都管住，该接的照旧接
-            </h2>
-            <p class="mt-4 text-sm leading-relaxed text-ink-300">
-              把「账号、密钥、配额、账单」这类运维问题收敛到网关内部，业务侧继续用熟悉的 OpenAI 协议调用。
-            </p>
-          </div>
-
-          <div class="mt-12 grid gap-x-12 sm:grid-cols-2">
-            <div v-for="(item, index) in capabilities" :key="item.title" v-reveal="index * 60" class="border-t border-ink-800/70 py-7">
-              <div class="flex items-baseline gap-3">
-                <AppIcon :name="item.icon" :size="17" class="translate-y-0.5 text-brand-600" />
-                <h3 class="text-base font-semibold text-ink-50">{{ item.title }}</h3>
-              </div>
-              <p class="mt-2.5 pl-[29px] text-sm leading-relaxed text-ink-400">{{ item.desc }}</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ── 可用模型 ─────────────────────────────────────── -->
-      <section id="models" class="scroll-mt-20">
-        <div class="mx-auto max-w-6xl px-5 py-20 lg:px-8 lg:py-28">
-          <div v-reveal class="flex flex-wrap items-end justify-between gap-6">
-            <div class="max-w-xl">
-              <p class="hero-kicker text-brand-700">可用模型</p>
-              <h2 class="mt-4 font-display text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl">
-                <template v-if="site.models.length">{{ site.models.length }} 个模型，共用一个入口</template>
-                <template v-else>当前对外提供的模型</template>
-              </h2>
-              <p class="mt-4 text-sm leading-relaxed text-ink-300">
-                来自所有已启用渠道声明模型的并集，随渠道配置变化实时更新。
-              </p>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <RouterLink to="/models" class="btn btn-secondary btn-sm">
-                <AppIcon name="grid" :size="14" />
-                模型广场
-              </RouterLink>
-              <button type="button" class="btn btn-ghost btn-sm" :disabled="site.loading" @click="site.load(true)">
-                <AppIcon name="refresh" :size="14" />
-                刷新列表
+                {{ sample.label }}
               </button>
             </div>
+            <CopyButton :value="currentCode" class="btn-row" />
           </div>
+          <pre class="overflow-x-auto px-5 py-4 font-mono text-[13px] leading-relaxed text-ink-100">{{ currentCode }}</pre>
+        </div>
 
-          <!-- 加载态：骨架块，避免布局跳动 -->
-          <div v-if="site.loading && !site.models.length" class="mt-12 grid gap-x-10 sm:grid-cols-2 lg:grid-cols-3">
-            <div v-for="index in 9" :key="index" class="border-t border-ink-800/70 py-4">
-              <div class="h-4 w-2/3 skeleton" />
-            </div>
-          </div>
+        <p v-reveal class="mt-4 text-xs leading-relaxed text-ink-400">
+          任何 OpenAI 兼容客户端（Cursor、Codex CLI、Cherry Studio、LobeChat 等）选择「自定义 OpenAI 接口」，
+          填入上面的基地址与令牌即可。
+        </p>
+      </section>
 
-          <!-- 空态：说明「为什么为空」并给出下一步 -->
-          <div
-            v-else-if="!site.models.length"
-            class="mt-12 flex flex-col items-start gap-2 rounded-xl border border-dashed border-ink-700 bg-white/50 px-6 py-10"
+      <!-- ── 模型预览：等宽芯片墙 ──────────────────────────────── -->
+      <section id="models" class="mx-auto max-w-7xl scroll-mt-24 px-5 py-20 lg:px-8 lg:py-24">
+        <div v-reveal class="max-w-2xl">
+          <p class="hero-kicker text-brand-700">Models</p>
+          <h2 class="mt-3 font-display text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl">
+            现在就能调用的模型
+          </h2>
+          <p class="mt-3 text-sm leading-relaxed text-ink-300">
+            清单实时来自启用中的渠道；价格与可用性以
+            <RouterLink to="/models" class="text-brand-700 underline-offset-4 hover:underline">模型广场</RouterLink>
+            为准。
+          </p>
+        </div>
+
+        <div v-reveal class="mt-8 flex flex-wrap gap-2">
+          <span
+            v-for="name in site.models.slice(0, MODEL_PREVIEW_LIMIT)"
+            :key="name"
+            class="chip border-ink-700 bg-ink-900/80 font-mono text-xs text-ink-200"
           >
-            <p class="text-sm font-medium text-ink-200">暂无可用模型</p>
-            <p class="max-w-md text-xs leading-relaxed text-ink-400">
-              通常是还没有添加启用状态的渠道。管理员在「渠道管理」中添加渠道后，此处会自动展示可用模型。
-            </p>
-          </div>
+            {{ name }}
+          </span>
+        </div>
 
-          <!-- 模型清单：细线分栏的纯文本列表。
-               为什么不做成带边框的小方块：一屏几十个方框会形成"格子墙"，
-               而模型名本身就是可扫读的短字符串，细线足够承担分组。 -->
-          <div v-else class="mt-12">
-            <ul class="grid gap-x-10 sm:grid-cols-2 lg:grid-cols-3">
-              <li
-                v-for="model in site.models.slice(0, MODEL_PREVIEW_LIMIT)"
-                :key="model"
-                class="flex items-center gap-2 border-t border-ink-800/70 py-3.5"
-              >
-                <AppIcon name="layers" :size="15" class="shrink-0 text-brand-600/70" />
-                <span class="truncate font-mono text-[13px] text-ink-100" :title="model" dir="ltr">{{ model }}</span>
-              </li>
-            </ul>
-            <p v-if="site.models.length > MODEL_PREVIEW_LIMIT" class="mt-6 text-sm text-ink-400">
-              另有 {{ site.models.length - MODEL_PREVIEW_LIMIT }} 个模型同样可用（共 {{ site.models.length }} 个）。
-            </p>
-          </div>
+        <div v-if="site.models.length > MODEL_PREVIEW_LIMIT" v-reveal class="mt-5">
+          <RouterLink to="/models" class="btn btn-secondary btn-sm">
+            查看全部 {{ site.models.length }} 个模型
+            <AppIcon name="chevron-right" :size="14" />
+          </RouterLink>
         </div>
       </section>
 
-      <!-- ── 结尾行动区：回到首屏的深色影像语言，收束全页 ──────── -->
-      <section class="hero-water relative overflow-hidden border-t border-ink-800/70 bg-[#071524]">
-        <div class="relative mx-auto flex max-w-6xl flex-col items-start gap-8 px-5 py-20 lg:flex-row lg:items-center lg:justify-between lg:px-8 lg:py-24">
-          <div v-reveal>
-            <p class="hero-kicker text-brand-300">
-              <span class="dot" aria-hidden="true" />
-              开始接入
-            </p>
-            <h2 class="mt-4 font-display text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-              把模型调用收拢到一个入口
+      <!-- ── 尾部行动区：一句话 + 两个操作，克制收束 ─────────────── -->
+      <section class="hero-water relative mx-auto max-w-7xl px-5 pb-24 pt-8 lg:px-8">
+        <div v-reveal class="relative overflow-hidden rounded-2xl border border-ink-700/70 bg-ink-900/70 px-6 py-14 text-center sm:px-12">
+          <div class="bg-grid absolute inset-0 opacity-40" aria-hidden="true" />
+          <div class="relative">
+            <h2 class="font-display text-2xl font-semibold tracking-tight text-ink-50 sm:text-3xl">
+              拿到令牌，第一行代码就能跑。
             </h2>
-            <p class="mt-4 max-w-xl text-sm leading-relaxed text-white/60">
-              {{ site.registrationEnabled ? '注册即可获得账号，登录后创建你的第一个访问令牌。' : '当前站点未开放自助注册，请联系管理员开通账号。' }}
+            <p class="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-ink-300">
+              注册、建令牌、指向基地址——三步之后，用量与账单都会留在这台属于你的网关里。
             </p>
-          </div>
-          <div v-reveal="80" class="flex flex-wrap gap-3">
-            <RouterLink v-if="site.registrationEnabled && !auth.isLoggedIn" to="/register" class="btn btn-invert">
-              立即注册
-            </RouterLink>
-            <RouterLink v-else-if="!auth.isLoggedIn" to="/login" class="btn btn-invert">登录控制台</RouterLink>
-            <RouterLink v-else :to="consoleTarget" class="btn btn-invert">进入控制台</RouterLink>
-            <RouterLink to="/join" class="btn btn-outline-invert">
-              <AppIcon name="users" :size="16" />
-              加入交流群
-            </RouterLink>
+            <div class="mt-7 flex flex-wrap items-center justify-center gap-3">
+              <template v-if="auth.isLoggedIn">
+                <RouterLink :to="consoleTarget" class="btn btn-primary">
+                  进入控制台
+                  <AppIcon name="chevron-right" :size="16" />
+                </RouterLink>
+              </template>
+              <template v-else>
+                <RouterLink v-if="site.registrationEnabled" to="/register" class="btn btn-primary">
+                  创建账号
+                  <AppIcon name="chevron-right" :size="16" />
+                </RouterLink>
+                <RouterLink to="/login" class="btn btn-secondary">登录控制台</RouterLink>
+              </template>
+            </div>
           </div>
         </div>
       </section>
     </main>
 
-    <!-- ── 页脚（统一合规页脚：主体 / 备案号 / 协议入口 / 服务性质声明）── -->
-    <SiteFooter label="自托管 LLM API 网关" />
+    <SiteFooter />
   </div>
 </template>

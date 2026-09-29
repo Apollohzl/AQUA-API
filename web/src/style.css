@@ -2,28 +2,31 @@
  * AQUA-API 全局样式与设计系统。
  *
  * 意图（Why）：
- *   把「亮色主题的视觉规则」集中在一处：基础层（底色/滚动条/选区）+
+ *   把「视觉规则」集中在一处：基础层（底色/滚动条/选区）+
  *   组件层（按钮/输入/卡片/表格/徽标等的语义类）。
  *   各 .vue 只使用语义类名（.btn .card .data-table），
  *   保证 11 个页面在表格、表单这两个核心交互上完全一致。
  *
- * 主题取向：通透亮色（不含毛玻璃）。
- *   页面底色是极浅冷调，卡片/顶栏使用「白色高不透明度 + 极浅边框 + 轻投影」
- *   形成通透感，层次依靠边框与投影区分。
+ * 主题取向：「深水夜航」暗色工艺（2026-09-29 全站换肤）。
+ *   页面底色是带蓝调的深海墨黑（ink-950），卡片是比底色亮半档的
+ *   ink-900 + 细描边；层次靠【亮度差与描边】而不是阴影。
+ *   暗色的收益：代码块/终端/图表这类"仪表元素"从异质变成主角，
+ *   与"高科技、物联网"的产品气质一致；同时落地页的算法艺术
+ *   （焦散流场）只有压在深色上才有足够的视觉冲击力。
  *
  * 关于 backdrop-filter（改样式前必读）：
  *   本文件刻意【不使用】backdrop-filter。它要求合成器为每个元素实时采样并
  *   模糊其背后的内容，滚动时逐帧重绘；一张列表页会有几十个卡片同时带这个属性，
  *   叠加后就是肉眼可见的滚动卡顿（真实用户反馈过）。
- *   需要"半透明观感"时，用提高白底不透明度（/85、/90）来实现，
- *   视觉上几乎无差别，但完全没有回读背景的开销。
+ *   需要"半透明观感"时，用提高不透明度来实现，视觉上几乎无差别，
+ *   但完全没有回读背景的开销。
  *   例外：弹窗/抽屉的遮罩仍保留极轻微的模糊（backdrop-blur-[2px]）——
  *   它只在浮层打开时出现、只有一层、且此时背景不滚动。
  *
  * 关于 ink 色阶（改色前必读）：
  *   约定 ink-950 最接近页面底色、ink-50 与底色对比最强
- *   （亮色主题下 950 最浅、50 最深，与 Tailwind 默认方向相反）。
- *   因此本文件里 bg-ink-950 是页面底、text-ink-50 是最深文字，属于预期用法。
+ *   （暗色主题下 950 最深、50 最浅，数值越大越接近背景）。
+ *   因此本文件里 bg-ink-950 是页面底、text-ink-50 是最亮文字，属于预期用法。
  *
  * 流转（Flow）：
  *   tailwind 指令 → PostCSS 编译 → 注入所有页面
@@ -40,7 +43,7 @@
 
 @layer base {
   html {
-    color-scheme: light;
+    color-scheme: dark;
     scroll-behavior: smooth;
   }
 
@@ -69,13 +72,14 @@
   }
 
   ::selection {
-    @apply bg-brand-500/25 text-brand-900;
+    @apply bg-brand-500/30 text-brand-900;
   }
 
-  /* 细窄滚动条：管理后台表格横向滚动频繁，默认滚动条过于笨重 */
+  /* 细窄滚动条：管理后台表格横向滚动频繁，默认滚动条过于笨重。
+     暗色主题下滑块用深蓝灰，hover 亮一档。 */
   * {
     scrollbar-width: thin;
-    scrollbar-color: #cbd8e8 transparent;
+    scrollbar-color: #2b3f5c transparent;
   }
 
   *::-webkit-scrollbar {
@@ -88,7 +92,7 @@
   }
 
   *::-webkit-scrollbar-thumb:hover {
-    background-color: #b6c6da;
+    background-color: #3a5173;
     background-clip: content-box;
   }
 
@@ -96,13 +100,14 @@
     background: transparent;
   }
 
-  /* 表单控件在浅色下的自动填充样式修正。
-     Chrome 的自动填充会强行覆盖底色，若不处理会在玻璃质感的表单里
-     出现一块突兀的淡黄色底，破坏整体观感。 */
+  /* 表单控件在暗色下的自动填充样式修正。
+     Chrome 的自动填充会强行覆盖底色，若不处理会在暗色表单里
+     出现一块突兀的淡蓝色底（Chromium 暗色 autofill 用亮蓝），
+     文字色也要一并指定，否则会跟随系统变黑。 */
   input:-webkit-autofill,
   input:-webkit-autofill:focus {
-    -webkit-text-fill-color: #1e293b;
-    -webkit-box-shadow: 0 0 0 1000px #ffffff inset;
+    -webkit-text-fill-color: #d9e4f5;
+    -webkit-box-shadow: 0 0 0 1000px #0b1626 inset;
     transition: background-color 9999s ease-out 0s;
   }
 
@@ -113,12 +118,13 @@
 
 @layer components {
   /* ── 容器 ─────────────────────────────────────────────── */
-  /* 卡片：白色半透明 + 极浅投影。
+  /* 卡片：暗色面板 + 细描边。
      注意这里【不用 backdrop-filter】：它要求合成器为每个元素实时采样其背后的
      内容，滚动时逐帧重绘。一张列表页会有几十个卡片，叠加起来就是肉眼可见的卡顿。
-     改用略高不透明度的白底（/85）——视觉上几乎看不出差别，但完全避免了回读背景。 */
+     暗色主题下卡片比页面底亮半档（ink-900 vs ink-950），
+     层次靠亮度差 + 描边表达，面板感立得住且开销为零。 */
   .card {
-    @apply rounded-xl border border-ink-800/70 bg-white/85 shadow-panel;
+    @apply rounded-xl border border-ink-700/70 bg-ink-900/80 shadow-panel;
   }
 
   .card-pad {
@@ -126,7 +132,7 @@
   }
 
   .card-head {
-    @apply flex items-center justify-between gap-3 border-b border-ink-800/60 px-5 py-4;
+    @apply flex items-center justify-between gap-3 border-b border-ink-700/60 px-5 py-4;
   }
 
   /* 页面标题用衬线 display 字体：与正文的黑体拉开性格，
@@ -152,18 +158,19 @@
   }
 
   /* 主按钮：实底青 + 白字。
-     为什么不用更浅的 brand-400 配深字：浅青底配深字在亮色页面里
-     会显得"发灰、不够醒目"，主操作按钮需要在浅色环境中依然跳出来。 */
+     暗色下按钮是页面里最亮的实体，保持高饱和的 brand-600 实底
+     + hover 亮一档（brand-500），主操作在深色环境中依然是第一落点。 */
   .btn-primary {
-    @apply bg-brand-600 text-white shadow-sm hover:bg-brand-700 active:bg-brand-800;
+    @apply bg-brand-600 text-white shadow-[0_0_0_1px_rgba(92,180,255,0.25),0_8px_24px_-12px_rgba(24,119,232,0.55)]
+      hover:bg-brand-500 active:bg-brand-600;
   }
 
   .btn-secondary {
-    @apply border border-ink-700 bg-white/70 text-ink-100 hover:border-ink-600 hover:bg-white;
+    @apply border border-ink-700 bg-ink-800/80 text-ink-100 hover:border-ink-600 hover:bg-ink-750;
   }
 
   .btn-ghost {
-    @apply text-ink-300 hover:bg-ink-850 hover:text-ink-100;
+    @apply text-ink-300 hover:bg-ink-800 hover:text-ink-100;
   }
 
   .btn-danger {
@@ -181,7 +188,7 @@
   /* 表格操作列：图标按钮统一尺寸，避免行高抖动 */
   .btn-row {
     @apply h-7 w-7 rounded-md border border-transparent text-ink-400
-      hover:border-ink-700 hover:bg-ink-850 hover:text-ink-100
+      hover:border-ink-700 hover:bg-ink-800 hover:text-ink-100
       disabled:cursor-not-allowed disabled:opacity-40;
   }
 
@@ -190,12 +197,12 @@
     @apply mb-1.5 flex items-center gap-1 text-xs font-medium text-ink-300;
   }
 
-  /* 输入框：默认用比卡片略深的底色（页面底色），聚焦后变成纯白，
-     形成"被点亮"的反馈；这比改边框颜色更容易被用户察觉。 */
+  /* 输入框：默认用比卡片更深的底（比页面底亮一档的墨色），
+     聚焦后变成卡片底色 + 品牌描边光，形成"被点亮"的反馈。 */
   .input {
-    @apply w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-ink-100
+    @apply w-full rounded-lg border border-ink-700 bg-ink-950/80 px-3 py-2 text-sm text-ink-100
       transition placeholder:text-ink-500
-      focus:border-brand-500/70 focus:bg-ink-900 focus:ring-2 focus:ring-brand-500/15;
+      focus:border-brand-500/70 focus:bg-ink-900 focus:ring-2 focus:ring-brand-500/20;
   }
 
   .input-mono {
@@ -211,11 +218,11 @@
   }
 
   .field-error {
-    @apply mt-1 text-xs text-red-600;
+    @apply mt-1 text-xs text-red-700;
   }
 
   .checkbox {
-    @apply h-4 w-4 shrink-0 cursor-pointer rounded border-ink-600 bg-white text-brand-600
+    @apply h-4 w-4 shrink-0 cursor-pointer rounded border-ink-600 bg-ink-900 text-brand-600
       focus:ring-2 focus:ring-brand-500/25 focus:ring-offset-0;
   }
 
@@ -225,7 +232,7 @@
        1) 触屏惯性滚动，否则手机上滑动生硬；
        2) 触屏设备上操作按钮放大到 36px，28px 在手指下太难点中。 */
   .table-wrap {
-    @apply overflow-x-auto rounded-xl border border-ink-800/70 bg-white/85;
+    @apply overflow-x-auto rounded-xl border border-ink-700/70 bg-ink-900/80;
     -webkit-overflow-scrolling: touch;
   }
 
@@ -253,12 +260,12 @@
   }
 
   .data-table thead th {
-    @apply whitespace-nowrap border-b border-ink-800/70 bg-ink-850/70 px-4 py-2.5
+    @apply whitespace-nowrap border-b border-ink-700/70 bg-ink-850/80 px-4 py-2.5
       text-xs font-medium tracking-wide text-ink-300;
   }
 
   .data-table tbody td {
-    @apply border-b border-ink-800/50 px-4 py-2.5 align-middle text-ink-100;
+    @apply border-b border-ink-700/50 px-4 py-2.5 align-middle text-ink-100;
   }
 
   .data-table tbody tr:last-child td {
@@ -330,20 +337,19 @@
     @apply relative overflow-hidden rounded-xl border border-[#1c3050] bg-[#0d1b32];
   }
 
-  /* ── 深色影像上的按钮 ───────────────────────────────────
-     落地页 hero 与结尾行动区是深色照片/深色底，常规的
-     btn-primary（湖蓝实底）压在深色上对比度不足，
-     btn-secondary（白底浅边）又会显得"像卡片"。
-     因此单独给一组"深色底专用"按钮：
-       btn-invert         主操作：白底深字，是全站对比度最高的组合
-       btn-outline-invert 次操作：透明白描边，弱于主操作但仍可点
-       btn-ghost-invert   三级文字链：只在悬停时出现底色 */
+  /* ── 深色底上的按钮 ─────────────────────────────────────
+     落地页 hero（算法艺术深底）与登录页的主操作。
+     暗色底上"最亮的实体"就是最强主操作：
+       btn-invert         主操作：近白实底 + 墨蓝深字，全站对比度最高
+       btn-outline-invert 次操作：亮青描边 + 微光
+       btn-ghost-invert   三级文字链：悬停才出现底色 */
   .btn-invert {
-    @apply bg-white text-ink-50 shadow-sm hover:bg-brand-50 active:bg-brand-100;
+    @apply bg-ink-50 text-ink-950 shadow-[0_10px_30px_-12px_rgba(240,246,253,0.4)]
+      hover:bg-brand-300 hover:text-brand-100;
   }
 
   .btn-outline-invert {
-    @apply border border-white/30 text-white hover:border-white/60 hover:bg-white/10;
+    @apply border border-brand-400/50 text-brand-300 hover:border-brand-300 hover:bg-brand-500/10 hover:text-brand-300;
   }
 
   .btn-ghost-invert {
@@ -391,7 +397,7 @@
   }
 
   .filter-bar {
-    @apply flex flex-wrap items-end gap-3 rounded-xl border border-ink-800/70 bg-white/85 p-3.5;
+    @apply flex flex-wrap items-end gap-3 rounded-xl border border-ink-700/70 bg-ink-900/80 p-3.5;
   }
 
   .toolbar {
@@ -438,7 +444,7 @@
      把最高频页面从两步降为一步，是单手可用性的关键。
      桌面端由固定侧边栏承担导航，故 lg 及以上隐藏。 */
   .bottom-nav {
-    @apply fixed inset-x-0 bottom-0 z-20 flex items-stretch border-t border-ink-800 bg-white/95 lg:hidden;
+    @apply fixed inset-x-0 bottom-0 z-20 flex items-stretch border-t border-ink-700 bg-ink-950/95 lg:hidden;
     /* 底部避开 Home 指示条；横屏刘海机型左右也要避开圆角/挖孔 */
     padding-bottom: env(safe-area-inset-bottom);
     padding-left: env(safe-area-inset-left);
@@ -449,7 +455,7 @@
      min-h 取 3.5rem 保证点按区足够大（>=48px）；文字用 leading-none 收紧凑。 */
   .bottom-nav-item {
     @apply flex min-h-[3.5rem] flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2
-      text-[11px] font-medium leading-none text-ink-400 transition-colors active:bg-ink-850;
+      text-[11px] font-medium leading-none text-ink-400 transition-colors active:bg-ink-800;
   }
 
   .bottom-nav-item-active {
@@ -469,20 +475,20 @@
   /* 侧边栏导航项 */
   .nav-item {
     @apply relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-ink-300
-      transition-colors hover:bg-ink-850 hover:text-ink-100;
+      transition-colors hover:bg-ink-800 hover:text-ink-100;
   }
 
   /* 选中态：底色 + 左侧竖条。
-     为什么要竖条：只靠浅底色在"透明亮色"主题下对比度很弱，
-     用户扫一眼侧边栏很难立刻定位"我现在在哪一页"；
-     左边缘的竖条在视觉上是最快能被捕捉的位置标记。 */
+     为什么要竖条：暗色下浅底色对比更弱，用户扫一眼侧边栏
+     很难立刻定位"我现在在哪一页"；左边缘的竖条在视觉上
+     是最快能被捕捉的位置标记。 */
   .nav-item-active {
-    @apply bg-brand-500/15 text-brand-800 hover:bg-brand-500/15 hover:text-brand-800;
+    @apply bg-brand-500/15 text-brand-300 hover:bg-brand-500/15 hover:text-brand-300;
   }
 
   .nav-item-active::before {
     content: '';
-    @apply absolute start-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-brand-600;
+    @apply absolute start-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-brand-400 shadow-[0_0_8px_rgba(92,180,255,0.8)];
   }
 
   /* 表格骨架屏（加载态用，避免布局跳动） */
@@ -492,7 +498,7 @@
 
   /* 卡片骨架屏：与 .model-card 同高，加载完成时不会发生布局跳动 */
   .skeleton-card {
-    @apply h-[176px] animate-pulse rounded-xl border border-ink-800/70 bg-white/60;
+    @apply h-[176px] animate-pulse rounded-xl border border-ink-700/70 bg-ink-900/60;
   }
 
   /* ── 左侧栏目（模型广场 / 筛选面板共用）──────────────────
@@ -501,15 +507,15 @@
      只需要学一次；计数右对齐便于纵向扫读。 */
   .rail-item {
     @apply flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-start text-sm
-      text-ink-200 transition-colors hover:bg-ink-850 hover:text-ink-50;
+      text-ink-200 transition-colors hover:bg-ink-800 hover:text-ink-50;
   }
 
   .rail-item-active {
-    @apply bg-brand-500/15 font-medium text-brand-800 hover:bg-brand-500/15 hover:text-brand-800;
+    @apply bg-brand-500/15 font-medium text-brand-300 hover:bg-brand-500/15 hover:text-brand-300;
   }
 
   .rail-count {
-    @apply ms-auto shrink-0 rounded-md bg-ink-850 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-ink-400;
+    @apply ms-auto shrink-0 rounded-md bg-ink-800 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-ink-400;
   }
 
   .rail-title {
@@ -528,8 +534,9 @@
       text-ink-400 transition-colors hover:text-ink-100;
   }
 
+  /* 激活项：近白实底 + 墨蓝深字 —— 暗色环境里"最亮的一颗"就是选中项 */
   .seg-item-active {
-    @apply bg-white text-brand-700 shadow-sm;
+    @apply bg-ink-50 text-ink-950 shadow-[0_2px_8px_rgba(0,0,0,0.4)];
   }
 
   /* ── 模型卡片 ───────────────────────────────────────────
@@ -542,7 +549,7 @@
           而不是 transition-all：后者会让浏览器为每个属性建立过渡跟踪，
           在列表场景下是纯浪费。 */
   .model-card {
-    @apply relative flex h-full flex-col gap-3 rounded-xl border border-ink-800/70 bg-white/85 p-4
+    @apply relative flex h-full flex-col gap-3 rounded-xl border border-ink-700/70 bg-ink-900/80 p-4
       text-start transition-[transform,border-color,box-shadow] duration-150 ease-out
       hover:-translate-y-0.5 hover:border-brand-500/40 hover:shadow-pop;
   }
@@ -562,11 +569,11 @@
 }
 
 @layer utilities {
-  /* 网格背景：落地页 hero 的几何底纹，纯 CSS 实现，不使用占位图片。
-     亮色下的线条要更淡，否则会显得像表格线而不是底纹。 */
+  /* 网格背景：深色底上的"仪表网格"，线是极淡的品牌蓝光。
+     纯 CSS 实现，不使用占位图片。 */
   .bg-grid {
-    background-image: linear-gradient(to right, rgba(11, 21, 38, 0.045) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(11, 21, 38, 0.045) 1px, transparent 1px);
+    background-image: linear-gradient(to right, rgba(120, 170, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(120, 170, 255, 0.05) 1px, transparent 1px);
     background-size: 44px 44px;
   }
 
@@ -578,20 +585,19 @@
     display: none;
   }
 
-  /* 页面氛围光：在极浅底色上叠两团极淡的品牌色光晕。
-     为什么需要：整站大面积纯色底会让页面显得"平板、单调"，
-     光晕用纯 CSS 实现（不引入图片），既增加纵深又不干扰阅读。
-     配色与新版湖蓝品牌色一致：一团偏青（左上），一团偏靛（右上）。 */
+  /* 页面氛围光：深海底色上叠两团极淡的品牌光晕，营造"水下有光"的纵深。
+     纯 CSS 实现（不引入图片）；一团偏青（左上），一团偏靛（右上）。 */
   .app-ambient {
     background-image:
-      radial-gradient(58rem 30rem at 10% -10%, rgba(46, 127, 224, 0.11), transparent 62%),
-      radial-gradient(46rem 26rem at 94% 2%, rgba(99, 102, 241, 0.09), transparent 64%);
+      radial-gradient(58rem 30rem at 10% -10%, rgba(46, 143, 255, 0.13), transparent 62%),
+      radial-gradient(46rem 26rem at 94% 2%, rgba(56, 189, 248, 0.08), transparent 64%);
     background-repeat: no-repeat;
   }
 
-  /* 标题渐变字：仅用于页面主标题的强调词，不用于正文（正文用渐变会降低可读性） */
+  /* 标题渐变字：仅用于页面主标题的强调词，不用于正文（正文用渐变会降低可读性）。
+     暗色下取亮青 → 亮靛的"冷光"过渡。 */
   .text-gradient-brand {
-    @apply bg-gradient-to-r from-brand-700 via-brand-600 to-indigo-600 bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-brand-300 via-brand-400 to-indigo-600 bg-clip-text text-transparent;
   }
 
   /* ── 落地页 Hero（水感编辑风的核心区块）─────────────────
@@ -622,7 +628,7 @@
     left: -12rem;
     width: 44rem;
     height: 44rem;
-    background: radial-gradient(circle, rgba(46, 127, 224, 0.16), transparent 65%);
+    background: radial-gradient(circle, rgba(46, 143, 255, 0.22), transparent 65%);
   }
 
   .hero-water::after {
@@ -630,7 +636,7 @@
     bottom: -20rem;
     width: 40rem;
     height: 40rem;
-    background: radial-gradient(circle, rgba(99, 102, 241, 0.13), transparent 65%);
+    background: radial-gradient(circle, rgba(56, 189, 248, 0.16), transparent 65%);
     animation-delay: -7s; /* 两团光斑相位错开，避免同步起伏的机械感 */
   }
 
@@ -646,23 +652,6 @@
      而不是一句放到任何站点都成立的价值主张。 */
   .hero-brand {
     @apply font-display text-5xl font-bold leading-[1.02] tracking-tight text-white sm:text-6xl lg:text-7xl;
-  }
-
-  /* hero 影像层：真实照片 + 固定深色遮罩。
-     为什么用"固定遮罩"而不是"挑一张亮度合适的图"：
-     照片内容不可控（生成/更换后可能整体偏亮），
-     只有把遮罩写死在 CSS 里，才能保证任何一种图下面
-     左上角的品牌字都有足够对比度。 */
-  .hero-scrim {
-    background:
-      linear-gradient(
-        100deg,
-        rgba(4, 11, 20, 0.96) 0%,
-        rgba(5, 14, 25, 0.9) 36%,
-        rgba(6, 18, 31, 0.6) 66%,
-        rgba(6, 18, 31, 0.34) 100%
-      ),
-      linear-gradient(to top, rgba(4, 11, 20, 0.9) 0%, rgba(4, 11, 20, 0) 46%);
   }
 
   /* hero 视口高度。
@@ -750,7 +739,7 @@
     /* 数据行才渲染成卡片；空态/加载态那一行（DataState 的 colspan 行）没有
        data-label，用 :has 排除，保持它自己的居中占位样式。 */
     .table-cards .data-table tbody tr:has(td[data-label]) {
-      @apply mb-3 rounded-xl border border-ink-800/70 bg-white/85 px-3.5 py-3;
+      @apply mb-3 rounded-xl border border-ink-700/70 bg-ink-900/80 px-3.5 py-3;
     }
 
     /* 单元格 → 「标签 : 值」两列 */

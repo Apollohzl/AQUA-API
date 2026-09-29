@@ -509,7 +509,7 @@ const isEmpty = computed(() => !loading.value && !error.value && tokens.value.le
       @close="editOpen = false"
     >
       <div class="space-y-5">
-        <div v-if="editTarget" class="rounded-lg border border-ink-800 bg-ink-850/50 px-3.5 py-2.5">
+        <div v-if="editTarget" class="rounded-lg border border-ink-700 bg-ink-850/50 px-3.5 py-2.5">
           <p class="font-mono text-xs text-ink-300">{{ editTarget.masked_key }}</p>
           <p class="mt-1 text-[11px] text-ink-500">
             归属：{{ ownerText(editTarget) }} · 创建于 {{ formatDateTime(editTarget.created_at) }}

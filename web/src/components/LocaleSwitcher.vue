@@ -78,7 +78,7 @@ onBeforeUnmount(() => {
     <!-- 下拉：end-0 使面板在 RTL 下自动贴到另一半，无需两套样式 -->
     <ul
       v-if="open"
-      class="absolute end-0 z-50 mt-1.5 min-w-[9rem] overflow-hidden rounded-lg border border-ink-700 bg-white py-1 shadow-pop"
+      class="absolute end-0 z-50 mt-1.5 min-w-[9rem] overflow-hidden rounded-lg border border-ink-700 bg-ink-900 py-1 shadow-pop"
       role="listbox"
       :aria-label="t('common.language.label')"
     >

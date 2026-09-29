@@ -87,7 +87,7 @@ useDialogA11y({
           :class="width"
           style="padding-bottom: env(safe-area-inset-bottom)"
         >
-          <header class="flex items-start justify-between gap-4 border-b border-ink-800 px-5 py-4">
+          <header class="flex items-start justify-between gap-4 border-b border-ink-700 px-5 py-4">
             <div class="min-w-0">
               <h2 class="text-base font-semibold text-ink-50">{{ title }}</h2>
               <p v-if="subtitle" class="mt-1 text-xs leading-relaxed text-ink-400">{{ subtitle }}</p>
@@ -107,7 +107,7 @@ useDialogA11y({
             <slot />
           </div>
 
-          <footer v-if="$slots.footer" class="flex flex-wrap items-center justify-end gap-2 border-t border-ink-800 px-5 py-4">
+          <footer v-if="$slots.footer" class="flex flex-wrap items-center justify-end gap-2 border-t border-ink-700 px-5 py-4">
             <slot name="footer" />
           </footer>
         </div>

@@ -28,6 +28,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import AppIcon from '@/components/AppIcon.vue'
+import CausticCanvas from '@/components/CausticCanvas.vue'
 import { ApiError } from '@/api/client'
 import { resetPassword, sendEmailCode, type EmailCodePurpose } from '@/api/auth'
 import { toastError, toastSuccess } from '@/composables/useToast'
@@ -274,12 +275,16 @@ function reloadSite(): void {
 
 <template>
   <div class="relative flex min-h-screen flex-col bg-ink-950">
-    <!-- 背景：克制的一处光斑 + 网格，与落地页保持同一视觉语言 -->
-    <div class="pointer-events-none absolute inset-0 bg-grid opacity-40" aria-hidden="true" />
-    <div
-      class="pointer-events-none absolute left-1/2 top-0 h-72 w-72 -translate-x-1/2 rounded-full bg-brand-500/15 blur-[100px]"
-      aria-hidden="true"
-    />
+    <!-- 背景：低强度焦散流场（与落地页同一片"水"），叠加深色渐隐保证表单可读。
+         强度只有落地页的四成，且中心被压暗——表单是主角，水只做氛围。 -->
+    <div class="pointer-events-none absolute inset-0" aria-hidden="true">
+      <CausticCanvas :intensity="0.4" :speed="0.7" :hue="218" />
+      <div
+        class="absolute inset-0"
+        style="background: radial-gradient(60rem 36rem at 50% 8%, rgba(5,13,25,0.3), rgba(5,13,25,0.78) 72%)"
+      />
+      <div class="absolute inset-0 bg-grid opacity-30" />
+    </div>
 
     <header class="relative mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-5 lg:px-8">
       <RouterLink to="/" class="flex items-center gap-2.5">
@@ -519,7 +524,7 @@ function reloadSite(): void {
             {{ errorMessage }}
           </p>
 
-          <div class="mt-5 border-t border-ink-800 pt-4 text-center text-xs text-ink-400">
+          <div class="mt-5 border-t border-ink-700 pt-4 text-center text-xs text-ink-400">
             <template v-if="!registrationReady">
               <span>正在获取站点信息…</span>
             </template>

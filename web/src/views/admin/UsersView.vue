@@ -512,7 +512,7 @@ const isEmpty = computed(() => !loading.value && !error.value && users.value.len
       @close="quotaOpen = false"
     >
       <div v-if="quotaTarget" class="space-y-4">
-        <div class="flex items-center justify-between rounded-lg border border-ink-800 bg-ink-850/50 px-3.5 py-2.5">
+        <div class="flex items-center justify-between rounded-lg border border-ink-700 bg-ink-850/50 px-3.5 py-2.5">
           <span class="text-sm text-ink-200">{{ quotaTarget.username }}</span>
           <span class="text-xs text-ink-400">已用额度 {{ formatNumber(quotaTarget.used_quota) }}</span>
         </div>

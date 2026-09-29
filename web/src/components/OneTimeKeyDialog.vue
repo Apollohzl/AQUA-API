@@ -78,7 +78,7 @@ const baseUrl = computed(() => `${window.location.origin}/v1`)
         </div>
       </div>
 
-      <div class="rounded-xl border border-ink-800 bg-ink-850/50 px-4 py-3">
+      <div class="rounded-xl border border-ink-700 bg-ink-850/50 px-4 py-3">
         <p class="mb-2 text-xs font-medium text-ink-300">{{ t('components.oneTimeKey.nextSteps') }}</p>
         <div class="space-y-2 text-xs leading-relaxed text-ink-400">
           <p>

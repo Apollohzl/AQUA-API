@@ -291,7 +291,7 @@ function openDetail(task: Task): void {
             :href="detail.result_url"
             target="_blank"
             rel="noopener noreferrer"
-            class="block overflow-hidden rounded-lg border border-ink-800"
+            class="block overflow-hidden rounded-lg border border-ink-700"
           >
             <img
               v-if="isImageResult(detail)"
@@ -336,7 +336,7 @@ function openDetail(task: Task): void {
 
         <div>
           <p class="label">{{ $t('components.taskTable.prompt') }}</p>
-          <p class="whitespace-pre-wrap break-words rounded-lg border border-ink-800 bg-ink-950 px-3 py-2 text-sm text-ink-200">
+          <p class="whitespace-pre-wrap break-words rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-ink-200">
             {{ detail.prompt || $t('components.taskTable.noValue') }}
           </p>
         </div>

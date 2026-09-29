@@ -19,6 +19,7 @@ import { ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import AppIcon from '@/components/AppIcon.vue'
+import CausticCanvas from '@/components/CausticCanvas.vue'
 import { ApiError } from '@/api/client'
 import { toastSuccess } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
@@ -93,11 +94,16 @@ async function handleSubmit(): Promise<void> {
 
 <template>
   <div class="relative flex min-h-screen flex-col bg-ink-950">
-    <div class="pointer-events-none absolute inset-0 bg-grid opacity-40" aria-hidden="true" />
-    <div
-      class="pointer-events-none absolute left-1/2 top-0 h-72 w-72 -translate-x-1/2 rounded-full bg-brand-500/15 blur-[100px]"
-      aria-hidden="true"
-    />
+    <!-- 背景：低强度焦散流场（与门户登录页同源），后台入口不做特殊化，
+         保持"同一片水"的整体感 -->
+    <div class="pointer-events-none absolute inset-0" aria-hidden="true">
+      <CausticCanvas :intensity="0.35" :speed="0.6" :hue="218" />
+      <div
+        class="absolute inset-0"
+        style="background: radial-gradient(60rem 36rem at 50% 8%, rgba(5,13,25,0.3), rgba(5,13,25,0.78) 72%)"
+      />
+      <div class="absolute inset-0 bg-grid opacity-30" />
+    </div>
 
     <header class="relative mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-5 lg:px-8">
       <RouterLink to="/" class="flex items-center gap-2.5">
@@ -192,7 +198,7 @@ async function handleSubmit(): Promise<void> {
             </button>
           </form>
 
-          <p class="mt-5 border-t border-ink-800 pt-4 text-[11px] leading-relaxed text-ink-500">
+          <p class="mt-5 border-t border-ink-700 pt-4 text-[11px] leading-relaxed text-ink-500">
             首次部署请先访问 <RouterLink to="/install" class="text-brand-700">/install</RouterLink> 完成安装。
             忘记密码可在服务器上执行
             <code class="rounded bg-ink-850 px-1.5 py-0.5 text-ink-200">aqua -reset-password &lt;用户名&gt;</code>。

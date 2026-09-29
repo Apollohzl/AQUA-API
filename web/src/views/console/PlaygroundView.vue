@@ -447,7 +447,7 @@ const knownTokenHint = computed(() => {
               :class="
                 message.role === 'user'
                   ? 'bg-brand-600 text-white'
-                  : 'border border-ink-800 bg-ink-850/70 text-ink-100'
+                  : 'border border-ink-700 bg-ink-850/70 text-ink-100'
               "
             >
               <span v-if="message.role === 'assistant' && !message.content" class="text-ink-400">…</span>
@@ -459,7 +459,7 @@ const knownTokenHint = computed(() => {
         <!-- AI 生成内容标识：按《人工智能生成合成内容标识办法》，模型输出须明示为 AI 生成 -->
         <p
           v-if="messages.some((m) => m.role === 'assistant' && m.content.trim())"
-          class="mx-5 mb-2 flex items-start gap-2 rounded-lg border border-ink-800 bg-ink-850/60 px-3 py-2 text-[11px] leading-relaxed text-ink-400"
+          class="mx-5 mb-2 flex items-start gap-2 rounded-lg border border-ink-700 bg-ink-850/60 px-3 py-2 text-[11px] leading-relaxed text-ink-400"
         >
           <AppIcon name="alert" :size="13" class="mt-0.5 shrink-0" />
           <span>以上内容由人工智能模型生成，仅供参考，请自行核实；请勿用于违法用途或直接作为专业决策依据。</span>
@@ -475,7 +475,7 @@ const knownTokenHint = computed(() => {
         </p>
 
         <!-- 输入区 -->
-        <div class="border-t border-ink-800 p-3.5">
+        <div class="border-t border-ink-700 p-3.5">
           <textarea
             v-model="prompt"
             class="input min-h-[4.5rem] resize-y"

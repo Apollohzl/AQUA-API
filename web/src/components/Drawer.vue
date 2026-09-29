@@ -60,7 +60,7 @@ useDialogA11y({
         class="drawer-panel absolute end-0 top-0 flex h-full w-full flex-col border-s border-ink-700 bg-ink-900 shadow-pop outline-none animate-slide-in-right"
         :class="width"
       >
-        <header class="flex items-start justify-between gap-4 border-b border-ink-800 px-5 py-4">
+        <header class="flex items-start justify-between gap-4 border-b border-ink-700 px-5 py-4">
           <div class="min-w-0">
             <h2 class="text-base font-semibold text-ink-50">{{ title }}</h2>
             <p v-if="subtitle" class="mt-1 text-xs leading-relaxed text-ink-400">{{ subtitle }}</p>
@@ -76,7 +76,7 @@ useDialogA11y({
 
         <footer
           v-if="$slots.footer"
-          class="flex flex-wrap items-center justify-end gap-2 border-t border-ink-800 bg-ink-900 px-5 py-4"
+          class="flex flex-wrap items-center justify-end gap-2 border-t border-ink-700 bg-ink-900 px-5 py-4"
         >
           <slot name="footer" />
         </footer>

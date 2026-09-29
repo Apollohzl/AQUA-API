@@ -155,7 +155,7 @@ function onCopy(): void {
     </div>
 
     <!-- 价格：按分组逐条列出（这正是"分组"存在的意义） -->
-    <div class="mt-auto space-y-1.5 border-t border-ink-800/60 pt-3">
+    <div class="mt-auto space-y-1.5 border-t border-ink-700/60 pt-3">
       <template v-if="model.prices.length">
         <div
           v-for="price in model.prices"

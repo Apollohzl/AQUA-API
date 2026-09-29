@@ -148,11 +148,11 @@ onMounted(load)
         </div>
 
         <div class="mt-5 grid grid-cols-2 gap-3">
-          <div class="rounded-lg border border-ink-800 px-3 py-3">
+          <div class="rounded-lg border border-ink-700 px-3 py-3">
             <p class="text-xs text-ink-500">已邀请</p>
             <p class="mt-1 font-mono text-xl font-semibold text-ink-100">{{ formatNumber(info.invited_count) }}</p>
           </div>
-          <div class="rounded-lg border border-ink-800 px-3 py-3">
+          <div class="rounded-lg border border-ink-700 px-3 py-3">
             <p class="text-xs text-ink-500">累计奖励</p>
             <p class="mt-1 font-mono text-xl font-semibold text-brand-700">{{ yuanText(info.total_reward_quota) }}</p>
           </div>
@@ -187,15 +187,15 @@ onMounted(load)
           </p>
 
           <div class="mt-4 grid grid-cols-3 gap-3 text-center">
-            <div class="rounded-lg border border-ink-800 px-2 py-3">
+            <div class="rounded-lg border border-ink-700 px-2 py-3">
               <p class="text-xs text-ink-500">连续天数</p>
               <p class="mt-1 font-mono text-lg font-semibold text-ink-100">{{ formatNumber(info.checkin.streak_days) }}</p>
             </div>
-            <div class="rounded-lg border border-ink-800 px-2 py-3">
+            <div class="rounded-lg border border-ink-700 px-2 py-3">
               <p class="text-xs text-ink-500">累计天数</p>
               <p class="mt-1 font-mono text-lg font-semibold text-ink-100">{{ formatNumber(info.checkin.total_days) }}</p>
             </div>
-            <div class="rounded-lg border border-ink-800 px-2 py-3">
+            <div class="rounded-lg border border-ink-700 px-2 py-3">
               <p class="text-xs text-ink-500">累计获得</p>
               <p class="mt-1 font-mono text-lg font-semibold text-brand-700">{{ yuanText(info.checkin.total_quota) }}</p>
             </div>

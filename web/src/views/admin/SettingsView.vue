@@ -717,7 +717,7 @@ onMounted(() => {
             </span>
           </label>
 
-          <label class="flex cursor-pointer items-start gap-3 border-t border-ink-800 pt-4">
+          <label class="flex cursor-pointer items-start gap-3 border-t border-ink-700 pt-4">
             <input v-model="requireEmailCode" class="checkbox mt-0.5" type="checkbox" :disabled="!registrationEnabled" />
             <span>
               <span class="block text-sm text-ink-100">注册必须邮箱验证码</span>
@@ -852,7 +852,7 @@ onMounted(() => {
             </div>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2 border-t border-ink-800 pt-4">
+          <div class="flex flex-wrap items-center gap-2 border-t border-ink-700 pt-4">
             <button type="button" class="btn btn-primary btn-sm" :disabled="smtpSaving" @click="handleSaveSMTP">
               <span
                 v-if="smtpSaving"
@@ -866,7 +866,7 @@ onMounted(() => {
           </div>
 
           <!-- 测试发信：配完当场验证"到底能不能发出去"，是排查发信问题最快的手段 -->
-          <div class="rounded-lg border border-ink-800 bg-ink-950/50 p-3">
+          <div class="rounded-lg border border-ink-700 bg-ink-950/50 p-3">
             <p class="text-sm text-ink-100">发送测试邮件</p>
             <p class="mt-0.5 text-xs leading-relaxed text-ink-400">
               保存配置后点这里会立刻发一封测试邮件。常见失败原因（端口被封、授权码错、发件地址未验证）
@@ -976,7 +976,7 @@ onMounted(() => {
                 v-for="channel in paymentChannels"
                 :key="channel.key"
                 class="rounded-lg border transition-colors"
-                :class="isChannelChecked(channel) ? 'border-brand-500/60 bg-brand-500/5' : 'border-ink-800'"
+                :class="isChannelChecked(channel) ? 'border-brand-500/60 bg-brand-500/5' : 'border-ink-700'"
               >
                 <label
                   class="flex items-start gap-3 px-3 py-2.5"
@@ -1016,7 +1016,7 @@ onMounted(() => {
                 <!-- 触发式展开：仅当该通道被勾选且适配器已实现时才渲染 -->
                 <div
                   v-if="isChannelChecked(channel) && channel.available"
-                  class="border-t border-ink-800/60 px-3 py-3"
+                  class="border-t border-ink-700/60 px-3 py-3"
                 >
                   <div class="grid gap-4 sm:grid-cols-2">
                     <div v-for="field in channel.fields" :key="field.setting_key || field.key">
@@ -1062,7 +1062,7 @@ onMounted(() => {
                             :class="
                               isListOptionOn(field.setting_key, option.value)
                                 ? 'border-brand-500/60 bg-brand-500/5 text-ink-100'
-                                : 'border-ink-800 text-ink-300 hover:border-ink-700'
+                                : 'border-ink-700 text-ink-300 hover:border-ink-700'
                             "
                           >
                             <input
@@ -1249,7 +1249,7 @@ onMounted(() => {
           </div>
 
           <!-- 只读输出地址：站长提交给搜索引擎时直接复制，无需自己拼域名 -->
-          <div class="rounded-lg border border-ink-800 px-3 py-3">
+          <div class="rounded-lg border border-ink-700 px-3 py-3">
             <p class="label mb-2">输出地址（只读）</p>
             <div class="space-y-2">
               <div class="flex flex-wrap items-center gap-2">
@@ -1361,7 +1361,7 @@ onMounted(() => {
            页头的按钮保留，两种习惯（自上而下改 / 自下而上改）都不用回滚页面。
            禁用原因直接写在左侧，而不是只给一个无法解释的灰按钮。 -->
       <div
-        class="sticky bottom-0 z-10 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink-800/70 bg-white/95 px-5 py-3 shadow-panel"
+        class="sticky bottom-0 z-10 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink-700/70 bg-ink-900/95 px-5 py-3 shadow-panel"
       >
         <p class="text-xs leading-relaxed text-ink-400">
           <template v-if="saveBlockedReason">

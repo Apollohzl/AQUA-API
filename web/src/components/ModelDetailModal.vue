@@ -113,7 +113,7 @@ function groupLabel(name: string): string {
   >
     <template v-if="model">
       <!-- 身份行：厂商 + 状态 + 渠道数 -->
-      <div class="flex flex-wrap items-center gap-3 rounded-xl border border-ink-800/70 bg-ink-950/60 p-3.5">
+      <div class="flex flex-wrap items-center gap-3 rounded-xl border border-ink-700/70 bg-ink-950/60 p-3.5">
         <span class="vendor-avatar" :class="vendorTone(vendor)" aria-hidden="true">
           {{ vendorInitial(vendor) }}
         </span>

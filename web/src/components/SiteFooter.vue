@@ -59,7 +59,7 @@ const year = new Date().getFullYear()
 </script>
 
 <template>
-  <footer class="border-t border-ink-800/70">
+  <footer class="border-t border-ink-700/70">
     <div :class="['mx-auto flex flex-col gap-4 px-5 py-8 lg:px-8', props.maxWidth]">
       <!-- 第一行：谁在提供服务 -->
       <div class="flex flex-wrap items-center justify-between gap-3">

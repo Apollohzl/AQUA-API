@@ -268,7 +268,7 @@ defineExpose({ reload: load })
         class="card h-fit lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto"
         :class="railOpen ? 'block' : 'hidden lg:block'"
       >
-        <div class="border-b border-ink-800/60 px-3 py-3">
+        <div class="border-b border-ink-700/60 px-3 py-3">
           <p class="px-1 text-xs text-ink-400">{{ t('components.plaza.totalModels', { total: models.length }) }}</p>
           <p class="mt-1 flex items-center gap-1.5 px-1 text-sm font-semibold text-ink-50">
             <span class="dot bg-emerald-500" />
@@ -465,7 +465,7 @@ defineExpose({ reload: load })
         <!-- 列表视图：模型很多时一屏能扫读更多 -->
         <div v-if="!loading && !error && visible.length && view === 'list'" class="table-wrap">
           <div
-            class="grid grid-cols-[minmax(0,1fr)_120px_140px_92px] gap-3 border-b border-ink-800/70 bg-ink-850/70 px-4 py-2.5 text-xs font-medium text-ink-300"
+            class="grid grid-cols-[minmax(0,1fr)_120px_140px_92px] gap-3 border-b border-ink-700/70 bg-ink-850/70 px-4 py-2.5 text-xs font-medium text-ink-300"
           >
             <span>{{ t('components.plaza.col.model') }}</span>
             <span>{{ t('components.plaza.col.status') }}</span>
@@ -477,7 +477,7 @@ defineExpose({ reload: load })
             v-for="item in visible"
             :key="item.model"
             type="button"
-            class="plaza-row grid grid-cols-[minmax(0,1fr)_120px_140px_92px] border-b border-ink-800/50 last:border-b-0"
+            class="plaza-row grid grid-cols-[minmax(0,1fr)_120px_140px_92px] border-b border-ink-700/50 last:border-b-0"
             @click="openDetail(item)"
           >
             <span class="flex min-w-0 items-center gap-2.5">

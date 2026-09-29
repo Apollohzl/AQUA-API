@@ -1938,7 +1938,7 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
         </div>
 
         <!-- 选中类型的只读提示 + 该类型的额外参数（触发式渲染） -->
-        <div v-if="selectedChannelType" class="rounded-lg border border-ink-800 p-4">
+        <div v-if="selectedChannelType" class="rounded-lg border border-ink-700 p-4">
           <div class="flex flex-wrap items-center gap-2">
             <p class="section-title">{{ selectedChannelType.label }}</p>
             <span v-if="selectedChannelType.available" class="badge badge-ok">可用</span>
@@ -2060,7 +2060,7 @@ const isEmpty = computed(() => !loading.value && !error.value && channels.value.
           </p>
 
           <!-- 余额标记写法说明：上游密钥池“每把余额不同”时按段粘贴 -->
-          <div class="mt-2 rounded-lg border border-ink-800 bg-ink-950/60 p-2.5 text-xs text-ink-400">
+          <div class="mt-2 rounded-lg border border-ink-700 bg-ink-950/60 p-2.5 text-xs text-ink-400">
             <p class="mb-1.5">
               若每把密钥余额不同，可先写一行「余额标记」再写该余额下的密钥；同一标记下的密钥共用该余额：
             </p>
@@ -2109,7 +2109,7 @@ sk-yyyyyyyyyyyy</pre>
                平台模型 ID（对外）= 用户 / SDK 调用时使用的名字，也是模型广场展示的名字；
                上游模型 ID      = 网关转发时【真正发给上游】的名字。
         -->
-        <div class="rounded-lg border border-ink-800 bg-ink-950/40 p-3.5">
+        <div class="rounded-lg border border-ink-700 bg-ink-950/40 p-3.5">
           <label class="label" for="channel-models">平台模型 ID（对外）</label>
           <div class="flex gap-2">
             <input
@@ -2138,7 +2138,7 @@ sk-yyyyyyyyyyyy</pre>
           <p v-if="upstreamError" class="field-error">{{ upstreamError }}</p>
 
           <!-- 上游模型勾选清单：把真实模型名一键勾进来，避免手抄出错 -->
-          <div v-if="upstreamModels.length" class="mt-2 rounded-lg border border-ink-800 bg-ink-950/60 p-2.5">
+          <div v-if="upstreamModels.length" class="mt-2 rounded-lg border border-ink-700 bg-ink-950/60 p-2.5">
             <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
               <span class="text-xs text-ink-400">
                 上游共 {{ upstreamModels.length }} 个模型；点击即按<strong>同名</strong>加入平台模型 ID（不改变发给上游的名字）
@@ -2181,7 +2181,7 @@ sk-yyyyyyyyyyyy</pre>
         </div>
 
         <!-- ── 模型 ID 映射 ─────────────────────────────────────── -->
-        <div class="rounded-lg border border-ink-800 bg-ink-950/40 p-3.5">
+        <div class="rounded-lg border border-ink-700 bg-ink-950/40 p-3.5">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <label class="label mb-0">模型 ID 映射（可选）</label>
             <button type="button" class="btn btn-ghost btn-sm" @click="addMappingRow">
@@ -2198,7 +2198,7 @@ sk-yyyyyyyyyyyy</pre>
           </p>
 
           <!-- 批量生成：上游模型多的时候逐个手填不现实 -->
-          <div class="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-ink-800 bg-ink-950/60 p-2.5">
+          <div class="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-ink-700 bg-ink-950/60 p-2.5">
             <div>
               <label class="label" for="mapping-prefix">平台前缀（批量生成用）</label>
               <input
@@ -2309,7 +2309,7 @@ sk-yyyyyyyyyyyy</pre>
         </div>
 
         <!-- 密钥失败处置策略：决定"密钥失败后是回池子，还是永久退出" -->
-        <div class="rounded-lg border border-ink-800 bg-ink-950/40 p-3.5">
+        <div class="rounded-lg border border-ink-700 bg-ink-950/40 p-3.5">
           <label class="label" for="channel-key-failure-policy">密钥失败后怎么办</label>
           <select
             id="channel-key-failure-policy"
@@ -2360,7 +2360,7 @@ sk-yyyyyyyyyyyy</pre>
         </div>
 
         <!-- 上游错误重试：决定"上游报错后要不要在站内再试一次" -->
-        <div class="rounded-lg border border-ink-800 bg-ink-950/40 p-3.5">
+        <div class="rounded-lg border border-ink-700 bg-ink-950/40 p-3.5">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-[15rem] flex-1">
               <label class="label" for="channel-retry-enabled">上游错误重试</label>

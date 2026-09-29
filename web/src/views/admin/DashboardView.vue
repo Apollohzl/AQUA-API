@@ -293,13 +293,13 @@ const hasTopModels = computed(() => (data.value?.top_models ?? []).length > 0)
         </div>
         <div class="card-pad">
           <div v-if="loading" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div v-for="index in 8" :key="index" class="rounded-lg border border-ink-800 bg-ink-950/40 p-3.5">
+            <div v-for="index in 8" :key="index" class="rounded-lg border border-ink-700 bg-ink-950/40 p-3.5">
               <div class="h-3 w-16 skeleton" />
               <div class="mt-2 h-5 w-24 skeleton" />
             </div>
           </div>
           <div v-else class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div v-for="item in todayMetrics" :key="item.label" class="rounded-lg border border-ink-800 bg-ink-950/40 p-3.5">
+            <div v-for="item in todayMetrics" :key="item.label" class="rounded-lg border border-ink-700 bg-ink-950/40 p-3.5">
               <p class="text-xs text-ink-400">{{ item.label }}</p>
               <p class="mt-1 truncate text-lg font-semibold text-ink-100" :title="item.hint">{{ item.value }}</p>
             </div>

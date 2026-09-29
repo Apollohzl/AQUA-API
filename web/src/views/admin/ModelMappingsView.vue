@@ -116,7 +116,7 @@ function goEditChannel(channelId: number): void {
     </div>
 
     <!-- 概念说明：这段文字是本页存在的理由，缺了它站长仍然看不懂两个名字的区别 -->
-    <div class="mb-4 rounded-lg border border-ink-800 bg-ink-950/40 p-3.5">
+    <div class="mb-4 rounded-lg border border-ink-700 bg-ink-950/40 p-3.5">
       <p class="text-sm text-ink-200">一次请求里的两个模型名：</p>
       <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
         <span class="chip">用户 / SDK 请求</span>

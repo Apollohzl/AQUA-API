@@ -72,7 +72,7 @@ const pageText = computed(() =>
 </script>
 
 <template>
-  <div class="flex flex-wrap items-center justify-between gap-3 border-t border-ink-800 px-4 py-3">
+  <div class="flex flex-wrap items-center justify-between gap-3 border-t border-ink-700 px-4 py-3">
     <p class="text-xs tabular-nums text-ink-400">{{ rangeText }}</p>
 
     <div class="flex items-center gap-3">

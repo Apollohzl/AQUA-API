@@ -247,7 +247,7 @@ onMounted(loadStatus)
             </button>
           </form>
 
-          <p class="mt-4 border-t border-ink-800 pt-4 text-[11px] leading-relaxed text-ink-500">
+          <p class="mt-4 border-t border-ink-700 pt-4 text-[11px] leading-relaxed text-ink-500">
             安装完成后请立即用该账号登录后台，并在「系统设置」中确认站点域名与收录参数。
           </p>
         </div>
