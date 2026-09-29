@@ -726,8 +726,8 @@ function reloadSite(): void {
             </span>
             <h3 class="mt-4 text-sm font-semibold text-ink-50">源代码开放</h3>
             <p class="mt-2 text-xs leading-relaxed text-ink-300 sm:text-sm">
-              服务端代码以 AGPL-3.0 发布在 Gitee，可自行审计、二次开发与私有化部署；
-              品牌标识不在源代码许可授权范围内。
+              服务端代码以木兰宽松许可证（第 2 版）发布在 Gitee，可自行审计、二次开发与私有化部署；
+              名称与 Logo 等品牌资产不在开源协议授权范围内。
             </p>
             <a
               href="https://gitee.com/xiaosu4610/AQUA-API"

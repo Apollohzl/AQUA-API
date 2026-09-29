@@ -1,36 +1,45 @@
 AQUA-API
-Copyright (C) 2026 小涑 (xiaosu4610)
+Copyright (C) 2026 小涑 (xiaosu4610). All rights reserved.
 
-This program is free software: you can redistribute it and/or modify it under
-the terms of the GNU Affero General Public License as published by the Free
-Software Foundation, either version 3 of the License, or (at your option) any
-later version.
+本软件依据《木兰宽松许可证，第 2 版》（Mulan PSL v2）授权。
+许可证全文见仓库根目录的 LICENSE 文件，官方文本见
+http://license.coscl.org.cn/MulanPSL2
 
-This program is distributed in the hope that it will be useful, but WITHOUT ANY
-WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
-PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License along
-with this program. If not, see <https://www.gnu.org/licenses/>.
+您可在遵守该许可证条款的前提下，复制、使用、修改及分发本软件，
+包括商业用途。重新分发时（不论修改与否），您必须：
+  1. 向接收者提供 LICENSE 的副本；
+  2. 保留本软件中的版权、商标、专利及免责声明。
 
 -------------------------------------------------------------------------------
 
-Brand assets and trademark notice
+原创性与时间锚点（Originality record）
 
-The "AQUA-API" name, the project logo and favicon.ico are the property of the
-project owner and are NOT licensed under the GNU Affero General Public License.
+本项目的全部初始代码由 xiaosu4610 独立编写。版本历史即原创性证据链：
 
-No trademark, trade name or service-mark rights are granted by this license.
-This is an additional term permitted by section 7(e) of the GNU Affero General
-Public License. You may redistribute the source code, but you may not use the
-project's name or brand assets to endorse or promote a derived product without
-prior written permission from the project owner.
+  - 首次提交：2026-09-26 15:34:02 +0800（UTC+8），提交 73974fd
+    "chore: 初始化工程骨架与规范文档"
+  - 公开仓库：https://gitee.com/xiaosu4610/AQUA-API（主仓库）
+  - 镜像仓库：https://github.com/xiaosu4610/AQUA-API（由 Gitee 自动同步）
+
+Git 提交记录中的时间戳、作者信息与提交内容共同构成本项目的
+创作时间证据。任何第三方就本项目已公开发表的实现主张权利，
+应以本仓库的提交历史为准据。
 
 -------------------------------------------------------------------------------
 
-Source form of this program
+商标与品牌（Trademark and branding）
 
-This program is a network server application. Operators who run a modified
-version and let users interact with it over a network are required by section 13
-of the GNU Affero General Public License to offer those users the corresponding
-source code of the running version.
+"AQUA-API" 名称、项目 Logo 与 favicon.ico 为项目作者所有，
+不在木兰宽松许可证的授权范围内（该许可证第 3 条明确"无商标许可"）。
+
+未经书面许可，不得在商业产品、推广材料或服务名称中使用
+"AQUA-API" 及相关商标，亦不得暗示衍生产品与原作者存在官方关联。
+详见 TRADEMARK.md。
+
+-------------------------------------------------------------------------------
+
+免责与使用限制（Disclaimer and usage notice）
+
+本软件按"原样"提供，不附带任何明示或默示的担保。
+使用本项目须遵守适用法律与所接入上游服务的条款。
+详见 DISCLAIMER.md（使用者须知与免责声明）。

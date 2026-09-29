@@ -6,22 +6,24 @@
 
 ### One endpoint for every AI upstream you own
 
-**Self-hosted LLM API Gateway · AI Asset (Usage) Management**
+**Self-hosted LLM API Gateway · AI Usage Management**
 
-Official API keys · Cloud vendors · Resellers · Subscription accounts · Self-hosted models
+Official API keys · Cloud vendors · OpenAI-compatible services · Subscription accounts · Self-hosted models
 Unified protocols · Smart routing · Precise billing · A ready-to-use admin console
 
-## 🌐 Official website `https://aqua.ltzy.top`
+## 🌐 Official website `https://aqua.is3.cc`
 
 > If the domain ever changes, **this repository is the source of truth** (updated here first).
 
-[![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-Mulan%20PSL%20v2-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/NOTICE-Disclaimer-informational.svg)](DISCLAIMER.md)
+[![License](https://img.shields.io/badge/Trademark-statement-informational.svg)](TRADEMARK.md)
 [![Go](https://img.shields.io/badge/Go-1.27-00ADD8.svg?logo=go&logoColor=white)](https://go.dev)
 [![CGO](https://img.shields.io/badge/CGO-free-success.svg)](#why-aqua-api)
 [![Deploy](https://img.shields.io/badge/Deploy-single%20binary%20%2F%20Docker-informational.svg)](#-quick-start)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)](#-quick-start)
 
-[简体中文](README.md) ｜ [**English**](README.en.md) ｜ [🏠 Live demo](https://aqua.ltzy.top)
+[简体中文](README.md) ｜ [**English**](README.en.md) ｜ [🌐 Live demo](https://aqua.is3.cc)
 
 </div>
 
@@ -31,7 +33,7 @@ Unified protocols · Smart routing · Precise billing · A ready-to-use admin co
 
 | | Address |
 |---|---|
-| **Official website (live demo)** | **`https://aqua.ltzy.top`** |
+| **Official website (live demo)** | **`https://aqua.is3.cc`** |
 | **Primary repository (China)** | `https://gitee.com/xiaosu4610/AQUA-API` |
 | **Mirror (GitHub)** | `https://github.com/xiaosu4610/AQUA-API`（synced automatically from Gitee） |
 
@@ -42,11 +44,17 @@ is more reliable than bookmarking a domain.
 ### 🛡 Watch out for imposters
 
 - This project offers and authorises **no** "top-up agent", "managed hosting" or "official shared
-  account" services. The server code is fully open source (AGPL-3.0), so anyone can self-host it —
+  account" services. The server code is fully open source under the
+  [Mulan PSL v2](LICENSE) license, so anyone can self-host it —
   **being able to run it does not make a site official.**
 - Only the addresses above are official. Any other domain is unrelated to this project, even if the
   UI looks identical.
 - We will never DM you asking for passwords, payment credentials or verification codes.
+- By using this project you accept the [usage notice and disclaimer](DISCLAIMER.md);
+  the boundaries of the brand and trademarks are defined in the
+  [trademark statement](TRADEMARK.md).
+- To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md) first (Fork + Pull Request;
+  the `main` branch is protected).
 
 ### Link blocked or unreachable?
 
@@ -462,16 +470,35 @@ aqua-api.service       systemd unit for bare-metal deployment
 
 ---
 
+## Contributing
+
+- **The `main` branch is protected**; only maintainers push to it. External changes go through
+  **Fork + Pull Request**.
+- Create as many `feature/*` / `fix/*` branches as you like in your own fork;
+  open a PR to merge back into this repository (merged without squash, preserving your timeline).
+- Commit conventions, verification checklist and issue/PR templates:
+  [**CONTRIBUTING.md**](CONTRIBUTING.md).
+
+---
+
 ## License
 
-Source code is licensed under [**GNU AGPL-3.0**](LICENSE).
+Source code is licensed under the [**Mulan Public License, Version 2 (Mulan PSL v2)**](LICENSE)
+(Chinese text authoritative; official reference: http://license.coscl.org.cn/MulanPSL2).
 
-> **If you offer it as a network service**, AGPL section 13 requires you to make the
-> corresponding source available to your users. Private/internal use is unaffected, but keep
-> the copyright notices intact.
+> Under its terms you may freely copy, use, modify and redistribute this software,
+> **including commercially**, provided you retain the license text and the copyright,
+> trademark, patent and disclaimer notices. No trademark rights are granted.
 
-Brand assets (`favicon.ico`, the "AQUA-API" name and marks) are not covered by the source
-license — see [NOTICE](NOTICE).
+Companion documents:
+
+| File | Purpose |
+|---|---|
+| [LICENSE](LICENSE) | Full license text (Mulan PSL v2) |
+| [DISCLAIMER.md](DISCLAIMER.md) | Usage notice and disclaimer |
+| [TRADEMARK.md](TRADEMARK.md) | Brand and trademark statement |
+| [NOTICE](NOTICE) | Copyright, originality record and redistribution duties |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guide (Fork + PR workflow) |
 
 ---
 
@@ -479,6 +506,6 @@ license — see [NOTICE](NOTICE).
 
 **If this saved you an afternoon of reconciling invoices, a star is appreciated ⭐**
 
-[🏠 Live demo](https://aqua.ltzy.top) ｜ [🐛 Issues](https://gitee.com/xiaosu4610/AQUA-API/issues) ｜ [🌍 Gitee](https://gitee.com/xiaosu4610/AQUA-API) ｜ [📖 简体中文](README.md)
+[🌐 Live demo](https://aqua.is3.cc) ｜ [🐛 Issues](https://gitee.com/xiaosu4610/AQUA-API/issues) ｜ [🌍 Gitee](https://gitee.com/xiaosu4610/AQUA-API) ｜ [📖 简体中文](README.md)
 
 </div>
