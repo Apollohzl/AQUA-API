@@ -1361,7 +1361,7 @@ onMounted(() => {
            页头的按钮保留，两种习惯（自上而下改 / 自下而上改）都不用回滚页面。
            禁用原因直接写在左侧，而不是只给一个无法解释的灰按钮。 -->
       <div
-        class="sticky bottom-0 z-10 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink-700/70 bg-ink-900/95 px-5 py-3 shadow-panel"
+        class="sticky bottom-0 z-10 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink-700/60 bg-white/95 px-5 py-3 shadow-panel"
       >
         <p class="text-xs leading-relaxed text-ink-400">
           <template v-if="saveBlockedReason">

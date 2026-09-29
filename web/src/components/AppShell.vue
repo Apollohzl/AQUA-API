@@ -243,7 +243,7 @@ async function handleSignOut(): Promise<void> {
     <!-- 主内容区：ps-60 为逻辑内边距，RTL 下自动改到另一侧 -->
     <div class="lg:ps-60">
       <header
-        class="app-header sticky top-0 z-20 flex items-center gap-3 border-b border-ink-700 bg-ink-950/90 px-4 lg:px-8"
+        class="app-header sticky top-0 z-20 flex items-center gap-3 border-b border-ink-700 bg-white/90 px-4 lg:px-8"
       >
         <button
           type="button"

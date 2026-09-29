@@ -1,19 +1,20 @@
 <script setup lang="ts">
 /**
- * 落地页：「深水夜航」版（2026-09-29 全站视觉重构）。
+ * 落地页：「白昼工程」亮色版（2026-09-30 依站长反馈回炉重做）。
  *
  * 意图（Why）：
  *   这是对外展示的「门面」，访客在 10 秒内要能回答三个问题——
  *   「这是谁」「现在能用哪些模型」「我该怎么接」。
  *
- *   本次重写的三条设计主线：
- *     1) 背景不再用外链照片，改为【原创算法艺术】：CausticCanvas 用三组
- *        正弦干涉场实时画出"深水焦散光网"，页面从第一帧起就是活的；
- *     2) 文案全部事实化：不写"赋能/极致/领先"式广告语，只用
- *        「这是谁、有什么、怎么接」的陈述句，产品自己说话；
- *     3) 排版走"仪表 + 编辑"混合：Unbounded 几何字负责拉丁大字，
- *        中文标题回退思源宋体；数字一律等宽（tabular-nums），
- *        与焦散光、网格一起构成"水下仪器舱"的观感。
+ *   上一版被指"太花里胡哨、页面元素太少"，因此本次重写的三条主线：
+ *     1) 亮色干净：极浅冷白底 + 纯白卡片 + 细描边，装饰只保留
+ *        细网格与极淡光晕（纯 CSS，无 canvas 动画）；
+ *     2) 内容做厚：区块从 6 个扩到 11 个——hero 事实条 / 终端演示
+ *        + 三步 / 能力账本 / 适用场景 / 接入示例 / 技术规格表 /
+ *        模型墙 / 常见问题 / 开源与社区 / 尾部行动区。信息密度
+ *        上去了，访客能"往下读"，而不是一眼望到底；
+ *     3) 文案事实化：不写"赋能/极致"式广告语，区块里全是
+ *        「是什么、有什么、怎么接」的陈述句。
  *
  * 流转（Flow）：
  *   main.ts 预取站点信息 → 本页读取 stores/site（名称/描述/版本/模型列表）
@@ -22,14 +23,13 @@
  * 扩展（Extend）：
  *   新增展示区块：在 <main> 内按「先价值后细节」的顺序插入，并给区块加 v-reveal；
  *   新增接入语言示例：在 codeSamples 追加一项（会自动多出一个 Tab）；
- *   终端演示的剧本：改 terminalScript 数组即可，播放逻辑不用动。
+ *   终端演示剧本 / FAQ / 规格表：改对应数组即可，播放与渲染逻辑不用动。
  */
 import { computed, onBeforeUnmount, onMounted, ref, type Directive } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import AppIcon from '@/components/AppIcon.vue'
 import AnnouncementBanner from '@/components/AnnouncementBanner.vue'
-import CausticCanvas from '@/components/CausticCanvas.vue'
 import CopyButton from '@/components/CopyButton.vue'
 import SiteFooter from '@/components/SiteFooter.vue'
 import { type IconName } from '@/components/icons'
@@ -44,7 +44,7 @@ const baseUrl = computed(() => window.location.origin)
 /** 示例里优先用站点真实开放的模型，空则给一个通用占位（避免出现 undefined） */
 const sampleModel = computed(() => site.models[0] || 'AQUA-CALL/deepseek-v4-flash')
 
-/* ── 顶栏：滚动后从"透明叠在焦散场上"转为"面板底" ──────────
+/* ── 顶栏：滚动后从"透明叠在 hero 上"转为"白底" ──────────────
    只切背景与文字颜色，结构只有一份。 */
 const scrolled = ref(false)
 
@@ -58,14 +58,14 @@ onMounted(() => {
 })
 onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
 
-/** 顶栏按钮的两种皮肤：焦散场上（透明）用 invert 系列，面板底用常规系列 */
+/** 顶栏按钮的两种皮肤：hero 上（透明）用 invert 系列，白底用常规系列 */
 const navGhostClass = computed(() => (scrolled.value ? 'btn-ghost' : 'btn-ghost-invert'))
 const navPrimaryClass = computed(() => (scrolled.value ? 'btn-primary' : 'btn-invert'))
 
 const anchors = [
-  { href: '#terminal', label: '实时链路' },
+  { href: '#terminal', label: '快速接入' },
   { href: '#capabilities', label: '能力' },
-  { href: '#models', label: '模型' },
+  { href: '#faq', label: '常见问题' },
 ]
 
 /* ── 滚动进场指令（局部注册）──────────────────────────────
@@ -100,12 +100,13 @@ const vReveal: Directive<HTMLElement, number | undefined> = {
   },
 }
 
-/* ── 首屏事实条：数字而非形容词（数据全部来自站点信息接口）── */
+/* ── 首屏事实条：数字而非形容词（数据来自站点信息接口）────── */
 const heroStats = computed(() => {
   const items: { value: string; label: string }[] = []
   if (site.models.length) items.push({ value: String(site.models.length), label: '模型在线' })
   items.push({ value: '3', label: '协议族 OpenAI / Anthropic / Gemini' })
-  items.push({ value: '24×7', label: '自托管进程常驻' })
+  items.push({ value: '79', label: '上游渠道类型' })
+  items.push({ value: '1', label: '单二进制交付' })
   return items
 })
 
@@ -154,6 +155,35 @@ const capabilities: Capability[] = [
     desc: '零 CGO、前端内嵌，一条命令拉起完整网关；SQLite 落地，数据跟着目录走。',
     metric: '1 binary',
   },
+]
+
+/* ── 适用场景：三类人群各说一句实在话 ─────────────────────── */
+const scenarios = [
+  {
+    icon: 'home' as IconName,
+    title: '个人自建出口',
+    desc: '手里有官方 Key、订阅号或免费额度，散在各处不好管。收进一个入口后，客户端只认一个地址，额度与用量一目了然。',
+  },
+  {
+    icon: 'users' as IconName,
+    title: '团队统一管理',
+    desc: '给每个成员、每个项目发独立令牌，可限定模型与额度；谁的调用量异常、哪条渠道故障，后台直接可见。',
+  },
+  {
+    icon: 'book' as IconName,
+    title: '学习与实验',
+    desc: '本地 Ollama、各家免费模型、开放权重服务，统统接到同一套 OpenAI 兼容接口上做对比与实验。',
+  },
+]
+
+/* ── 技术规格表：工程信息，一表说清 ─────────────────────── */
+const specs = [
+  { label: '下游协议', value: 'OpenAI 兼容 / Anthropic / Gemini（含流式与工具调用）' },
+  { label: '上游类型', value: 'OpenAI 兼容、Azure OpenAI、Anthropic、Gemini 等 79 种渠道类型' },
+  { label: '计费方式', value: '按量（输入 / 输出 / 缓存分价）与按次两种口径，支持分组倍率' },
+  { label: '数据存储', value: 'SQLite 单文件，数据库迁移随启动自动执行' },
+  { label: '部署形态', value: '单二进制（零 CGO）或 Docker，前端已内嵌，升级替换文件即可' },
+  { label: '密钥安全', value: 'AES-256-GCM 加密落库，主密钥仅环境变量注入，日志不输出密钥' },
 ]
 
 /* ── 接入示例 ─────────────────────────────────────────── */
@@ -212,15 +242,40 @@ const consoleTarget = computed(() => (auth.isAdmin ? '/admin' : '/console'))
 /** 本页最多展示的模型数：上游动辄上百个，全铺开会把页面拉得极长 */
 const MODEL_PREVIEW_LIMIT = 24
 
+/* ── 常见问题：自问自答，答的是事实 ───────────────────────── */
+const faqs = [
+  {
+    q: '和直接调用官方接口有什么区别？',
+    a: '直接调用需要每个客户端分别配 Key、地址与额度；接到本网关后，客户端只认一个地址与令牌，路由、计费、日志与额度管控都在网关侧完成，换渠道不用改客户端。',
+  },
+  {
+    q: '我的数据存在哪里？',
+    a: 'SQLite 单文件数据库，随部署目录走，不上传任何外部服务；上游密钥加密落库，主密钥只从环境变量注入，后台界面也只能看到掩码。',
+  },
+  {
+    q: '忘记密码或用户名怎么办？',
+    a: '登录页提供两种自助通道：用绑定邮箱收验证码直接登录，或用验证码重置密码；重置成功后所有旧登录状态会自动失效。',
+  },
+  {
+    q: '支持哪些客户端？',
+    a: '任何 OpenAI 兼容客户端都可以（Cursor、Claude Code、Codex CLI、Cherry Studio、LobeChat、沉浸式翻译等）；Claude / Gemini 原生协议客户端也可以直连。',
+  },
+]
+
+/** FAQ 手风琴：同时只开一条，避免"全展开"把页面拉得太长 */
+const openFaq = ref(0)
+function toggleFaq(index: number): void {
+  openFaq.value = openFaq.value === index ? -1 : index
+}
+
 /* ── 实时链路终端：把"一次流式调用"演给访客看 ───────────────
  *
  * 为什么值得做：目标用户是开发者，"网关是什么"解释三句不如
- * 播一段真实形态的 SSE 流；它同时演示了基地址、鉴权头、
- * 模型名与返回结构，是"接入文档"的前置预览。
+ * 播一段真实形态的 SSE 流。它是浅色页面里唯一的深色块
+ * （编辑排版的"聚光灯"手法），也是本页唯一保留的动效。
  *
- * 实现：剧本 = 一段开场命令 + 若干"词元"，逐词打出，
- * 停顿随机抖动模拟网络节奏；播完静默两秒重新开始。
- * reduce-motion 时只播一遍（不循环、不打字，整段直接展示）。 */
+ * 实现：剧本逐词打出，停顿随机抖动模拟网络节奏；播完静默几秒
+ * 重新开始。reduce-motion 时整段直接静态展示。 */
 const terminalLines = ref<string[]>([])
 let terminalTimer: number | undefined
 
@@ -283,16 +338,16 @@ function reloadSite(): void {
     <!-- 站点公告横幅：落地页也要能看到运营通知（自包含组件，无公告时不渲染） -->
     <AnnouncementBanner />
 
-    <!-- ── 顶栏：叠在焦散场上，滚动后转面板底 ───────────────── -->
+    <!-- ── 顶栏：滚动后转白底 ───────────────────────────────── -->
     <header
       class="fixed inset-x-0 top-0 z-30 border-b transition-colors duration-300"
-      :class="scrolled ? 'border-ink-700/70 bg-ink-950/90' : 'border-transparent'"
+      :class="scrolled ? 'border-ink-700/70 bg-white/90' : 'border-transparent'"
     >
       <div class="mx-auto flex max-w-7xl items-center gap-4 px-5 py-3 lg:px-8">
         <RouterLink to="/" class="flex items-center gap-2.5">
           <img src="/favicon.ico" alt="" class="h-8 w-8 rounded-lg" />
           <span
-            class="font-display text-sm font-semibold tracking-tight"
+            class="text-sm font-semibold tracking-tight"
             :class="scrolled ? 'text-ink-50' : 'text-white'"
           >
             {{ site.siteName }}
@@ -324,38 +379,36 @@ function reloadSite(): void {
     </header>
 
     <main>
-      <!-- ── 首屏：深水焦散场 ──────────────────────────────────
-           背景是本页的"工艺"核心：三组正弦波干涉出光网（算法艺术，
-           非图片），叠加仪表网格与底部渐隐遮罩。 -->
-      <section class="relative isolate overflow-hidden bg-ink-950">
+      <!-- ── 首屏：浅色渐变 + 细网格 + 光晕 ──────────────────────
+           装饰只用 CSS（渐变 + 网格 + 一团品牌光），无任何 canvas 动画；
+           hero 底部渐隐到页面底色，避免"海报"与"正文"之间出现硬边。 -->
+      <section class="hero-viewport relative isolate overflow-hidden bg-[#04121f]">
         <div class="absolute inset-0 -z-10" aria-hidden="true">
-          <CausticCanvas :intensity="1" :speed="1" :hue="215" />
-          <div class="bg-grid absolute inset-0 opacity-60" />
-          <!-- 底部渐隐：把焦散场"沉"进页面底色，避免硬边 -->
-          <div
-            class="absolute inset-0"
-            style="background: linear-gradient(to top, #050d19 4%, rgba(5,13,25,0.4) 32%, rgba(5,13,25,0) 60%)"
-          />
+          <!-- 深色底承载白字标题（浅色站点的首屏对比度锚点），
+               底部渐隐回浅色页面底，中间过渡交给渐变层 -->
+          <div class="absolute inset-0 bg-[#04121f]" />
+          <div class="bg-grid absolute inset-0 opacity-[0.14]" />
+          <div class="absolute left-1/2 top-[-14rem] h-[30rem] w-[46rem] -translate-x-1/2 rounded-full bg-brand-500/20 blur-[120px]" />
+          <div class="absolute inset-0" style="background: linear-gradient(to top, #f7f9fc 12%, rgba(4,18,31,0) 46%)" />
         </div>
 
-        <div class="hero-viewport mx-auto flex max-w-7xl flex-col justify-center px-5 pb-16 pt-28 lg:px-8 lg:pb-24 lg:pt-32">
+        <div class="mx-auto flex max-w-7xl flex-col justify-center px-5 pb-24 pt-28 lg:px-8 lg:pb-32 lg:pt-32">
           <div class="max-w-3xl">
             <div class="hero-reveal flex flex-wrap items-center gap-3" style="--d: 0ms">
               <span class="hero-kicker text-brand-300">
-                <span class="dot animate-pulse-soft !bg-brand-400" aria-hidden="true" />
+                <span class="dot !bg-brand-400" aria-hidden="true" />
                 Self-hosted LLM Gateway
               </span>
               <span v-if="site.version" class="chip border-white/15 bg-white/5 text-white/75">v{{ site.version }}</span>
+              <span v-if="site.models.length" class="chip border-white/15 bg-white/5 text-white/75">
+                {{ site.models.length }} 个模型在线
+              </span>
             </div>
 
-            <!-- 品牌名：Unbounded 几何字，全站最大的一行字 -->
+            <!-- 品牌名：全站最大的一行字，衬线编辑感 -->
             <h1 class="hero-reveal hero-brand mt-7" style="--d: 60ms">{{ site.siteName }}</h1>
 
-            <!-- 副题用衬线（中文回退思源宋体），陈述而非口号 -->
-            <p
-              class="hero-reveal mt-5 font-display text-2xl font-medium leading-snug text-white/90 sm:text-3xl"
-              style="--d: 120ms"
-            >
+            <p class="hero-reveal mt-5 font-display text-2xl font-medium leading-snug text-white/90 sm:text-3xl" style="--d: 120ms">
               把每一次模型调用，都收进<span class="text-gradient-brand">同一个入口</span>。
             </p>
 
@@ -386,7 +439,7 @@ function reloadSite(): void {
               </template>
             </div>
 
-            <!-- 三级入口：一行文字链 -->
+            <!-- 三级入口：一行安静的文字链 -->
             <div class="hero-reveal mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm" style="--d: 260ms">
               <a href="#terminal" class="text-white/70 underline-offset-4 transition-colors hover:text-white hover:underline">
                 看一次流式调用
@@ -400,15 +453,15 @@ function reloadSite(): void {
             </div>
           </div>
 
-          <!-- 事实条：数字而非形容词，贴在 hero 底部像一行仪表读数 -->
+          <!-- 事实条：数字仪表，四项事实一眼可读 -->
           <dl
-            class="hero-reveal mt-14 flex flex-wrap items-end gap-x-12 gap-y-6 border-t border-white/10 pt-6"
+            class="hero-reveal mt-14 flex flex-wrap items-end gap-x-12 gap-y-6 border-t border-ink-700/70 pt-6"
             style="--d: 320ms"
             aria-label="站点数据"
           >
             <div v-for="stat in heroStats" :key="stat.label">
-              <dt class="text-xs text-white/50">{{ stat.label }}</dt>
-              <dd class="mt-1 font-display text-2xl font-semibold tabular-nums text-white sm:text-3xl">
+              <dt class="text-xs text-ink-300">{{ stat.label }}</dt>
+              <dd class="mt-1 font-display text-2xl font-semibold tabular-nums text-ink-50 sm:text-3xl">
                 {{ stat.value }}
               </dd>
             </div>
@@ -428,14 +481,12 @@ function reloadSite(): void {
         </div>
       </div>
 
-      <!-- ── 实时链路：终端演示 + 三步接入 ────────────────────────
-           左边"演给你看"，右边"教你怎么接"：开发者看一眼终端
-           就知道请求长什么样，三步清单回答"接下来做什么"。 -->
-      <section id="terminal" class="relative mx-auto max-w-7xl scroll-mt-24 px-5 py-20 lg:px-8 lg:py-24">
+      <!-- ── 实时链路：终端演示 + 三步接入 ──────────────────────── -->
+      <section id="terminal" class="mx-auto max-w-7xl scroll-mt-24 px-5 py-20 lg:px-8 lg:py-24">
         <div v-reveal class="max-w-2xl">
-          <p class="hero-kicker text-brand-700">Live Route</p>
+          <p class="hero-kicker text-brand-700">Quickstart</p>
           <h2 class="mt-3 font-display text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl">
-            一次流式调用，长这样
+            三步接上，一次流式调用长这样
           </h2>
           <p class="mt-3 text-sm leading-relaxed text-ink-300">
             基地址指向本网关，请求头带访问令牌，其余与官方接口一致。下面是真实协议形态的回放。
@@ -443,28 +494,25 @@ function reloadSite(): void {
         </div>
 
         <div class="mt-10 grid gap-6 lg:grid-cols-[1.25fr_1fr]">
-          <!-- 终端：深色块 + 顶部状态灯，逐行"生成" -->
+          <!-- 终端：浅色页面里唯一的深色块，视线的"聚光灯" -->
           <div v-reveal class="code-block shadow-pop">
             <div class="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
-              <span class="h-2.5 w-2.5 rounded-full bg-red-500/70" />
-              <span class="h-2.5 w-2.5 rounded-full bg-amber-500/70" />
-              <span class="h-2.5 w-2.5 rounded-full bg-emerald-500/70" />
+              <span class="h-2.5 w-2.5 rounded-full bg-red-400/70" />
+              <span class="h-2.5 w-2.5 rounded-full bg-amber-400/70" />
+              <span class="h-2.5 w-2.5 rounded-full bg-emerald-400/70" />
               <span class="ms-2 font-mono text-[11px] tracking-wider text-white/40">gateway — stream</span>
               <span class="ms-auto flex items-center gap-1.5 font-mono text-[11px] text-emerald-600">
-                <span class="dot !bg-emerald-500 animate-pulse-soft" aria-hidden="true" />
+                <span class="dot !bg-emerald-500" aria-hidden="true" />
                 online
               </span>
             </div>
-            <pre
-              class="min-h-[240px] font-mono text-[13px] leading-relaxed"
-              dir="ltr"
-            ><span v-for="(line, i) in terminalLines" :key="i" :class="i === 0 ? 'text-brand-300' : 'text-[#d5e2f2]'">{{ line }}{{ i === terminalLines.length - 1 ? '▌' : '\n' }}</span></pre>
+            <pre class="min-h-[240px] font-mono text-[13px] leading-relaxed" dir="ltr"><span v-for="(line, i) in terminalLines" :key="i" :class="i === 0 ? 'text-brand-300' : 'text-[#d5e2f2]'">{{ line }}{{ i === terminalLines.length - 1 ? '▌' : '\n' }}</span></pre>
           </div>
 
-          <!-- 三步接入：编号账本式，数字用 Unbounded -->
+          <!-- 三步接入：编号账本式 -->
           <ol v-reveal="80" class="space-y-5">
             <li class="flex gap-4">
-              <span class="font-display text-2xl font-semibold text-brand-500/80">01</span>
+              <span class="font-display text-2xl font-semibold text-brand-500">01</span>
               <div>
                 <p class="text-sm font-semibold text-ink-50">登录并创建访问令牌</p>
                 <p class="mt-1 text-xs leading-relaxed text-ink-300">
@@ -473,7 +521,7 @@ function reloadSite(): void {
               </div>
             </li>
             <li class="flex gap-4">
-              <span class="font-display text-2xl font-semibold text-brand-500/80">02</span>
+              <span class="font-display text-2xl font-semibold text-brand-500">02</span>
               <div>
                 <p class="text-sm font-semibold text-ink-50">把基地址指向本网关</p>
                 <p class="mt-1 break-all font-mono text-xs leading-relaxed text-ink-300">
@@ -482,7 +530,7 @@ function reloadSite(): void {
               </div>
             </li>
             <li class="flex gap-4">
-              <span class="font-display text-2xl font-semibold text-brand-500/80">03</span>
+              <span class="font-display text-2xl font-semibold text-brand-500">03</span>
               <div>
                 <p class="text-sm font-semibold text-ink-50">按模型名发起请求</p>
                 <p class="mt-1 text-xs leading-relaxed text-ink-300">
@@ -495,9 +543,7 @@ function reloadSite(): void {
         </div>
       </section>
 
-      <!-- ── 能力矩阵 ──────────────────────────────────────────
-           账本式：一行一个事实 + 右侧等宽小标记，不做"六张等大卡片"
-           的均质网格（那会把六件并列的事说得比实际更重要）。 -->
+      <!-- ── 能力矩阵：账本式清单 ──────────────────────────────── -->
       <section id="capabilities" class="mx-auto max-w-7xl scroll-mt-24 px-5 py-20 lg:px-8 lg:py-24">
         <div v-reveal class="max-w-2xl">
           <p class="hero-kicker text-brand-700">Capabilities</p>
@@ -506,7 +552,7 @@ function reloadSite(): void {
           </h2>
         </div>
 
-        <ul class="mt-10 divide-y divide-ink-700/60 border-y border-ink-700/60">
+        <ul class="mt-10 divide-y divide-ink-700/50 border-y border-ink-700/50">
           <li
             v-for="cap in capabilities"
             :key="cap.title"
@@ -514,7 +560,7 @@ function reloadSite(): void {
             class="group grid gap-3 py-6 transition-colors duration-200 hover:bg-brand-500/[0.04] sm:grid-cols-[auto_1fr_auto] sm:items-center sm:gap-6 sm:px-4"
           >
             <span
-              class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-ink-700 bg-ink-900 text-brand-300 transition-colors group-hover:border-brand-500/40 group-hover:text-brand-300"
+              class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-ink-700 bg-white text-brand-700 transition-colors group-hover:border-brand-500/40"
             >
               <AppIcon :name="cap.icon" :size="20" />
             </span>
@@ -522,22 +568,42 @@ function reloadSite(): void {
               <p class="text-sm font-semibold text-ink-50">{{ cap.title }}</p>
               <p class="mt-1 max-w-2xl text-xs leading-relaxed text-ink-300 sm:text-sm">{{ cap.desc }}</p>
             </div>
-            <span class="font-mono text-xs tabular-nums text-brand-700/80">{{ cap.metric }}</span>
+            <span class="font-mono text-xs tabular-nums text-brand-700/70">{{ cap.metric }}</span>
           </li>
         </ul>
+      </section>
+
+      <!-- ── 适用场景：三类人群各说一句实在话 ────────────────────── -->
+      <section class="app-ambient mx-auto max-w-7xl px-5 py-20 lg:px-8 lg:py-24">
+        <div v-reveal class="max-w-2xl">
+          <p class="hero-kicker text-brand-700">Scenarios</p>
+          <h2 class="mt-3 font-display text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl">
+            谁在用，用来做什么
+          </h2>
+        </div>
+
+        <div class="mt-10 grid gap-5 md:grid-cols-3">
+          <div v-for="(item, i) in scenarios" :key="item.title" v-reveal="i * 60" class="card card-pad">
+            <span class="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-500/10 text-brand-700">
+              <AppIcon :name="item.icon" :size="20" />
+            </span>
+            <h3 class="mt-4 text-sm font-semibold text-ink-50">{{ item.title }}</h3>
+            <p class="mt-2 text-xs leading-relaxed text-ink-300 sm:text-sm">{{ item.desc }}</p>
+          </div>
+        </div>
       </section>
 
       <!-- ── 接入示例：代码页签 ─────────────────────────────────── -->
       <section class="mx-auto max-w-7xl px-5 py-20 lg:px-8 lg:py-24">
         <div v-reveal class="max-w-2xl">
-          <p class="hero-kicker text-brand-700">Quickstart</p>
+          <p class="hero-kicker text-brand-700">Examples</p>
           <h2 class="mt-3 font-display text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl">
             复制即用
           </h2>
         </div>
 
         <div v-reveal class="card mt-8 overflow-hidden" dir="ltr">
-          <div class="flex items-center justify-between border-b border-ink-700/70 bg-ink-850/80 px-2 py-1.5">
+          <div class="flex items-center justify-between border-b border-ink-700/60 bg-ink-850/70 px-2 py-1.5">
             <div class="seg border-0 bg-transparent p-0">
               <button
                 v-for="sample in codeSamples"
@@ -556,9 +622,30 @@ function reloadSite(): void {
         </div>
 
         <p v-reveal class="mt-4 text-xs leading-relaxed text-ink-400">
-          任何 OpenAI 兼容客户端（Cursor、Codex CLI、Cherry Studio、LobeChat 等）选择「自定义 OpenAI 接口」，
+          任何 OpenAI 兼容客户端（Cursor、Codex CLI、Cherry Studio、LobeChat、沉浸式翻译等）选择「自定义 OpenAI 接口」，
           填入上面的基地址与令牌即可。
         </p>
+      </section>
+
+      <!-- ── 技术规格表：工程信息，一表说清 ──────────────────────── -->
+      <section class="mx-auto max-w-7xl px-5 py-20 lg:px-8 lg:py-24">
+        <div v-reveal class="max-w-2xl">
+          <p class="hero-kicker text-brand-700">Specifications</p>
+          <h2 class="mt-3 font-display text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl">
+            技术规格
+          </h2>
+        </div>
+
+        <div v-reveal class="table-wrap mt-8">
+          <table class="data-table">
+            <tbody>
+              <tr v-for="spec in specs" :key="spec.label">
+                <td class="w-[140px] whitespace-nowrap text-xs font-semibold text-ink-300">{{ spec.label }}</td>
+                <td class="text-sm text-ink-100">{{ spec.value }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <!-- ── 模型预览：等宽芯片墙 ──────────────────────────────── -->
@@ -579,7 +666,7 @@ function reloadSite(): void {
           <span
             v-for="name in site.models.slice(0, MODEL_PREVIEW_LIMIT)"
             :key="name"
-            class="chip border-ink-700 bg-ink-900/80 font-mono text-xs text-ink-200"
+            class="chip border-ink-700 bg-white font-mono text-xs text-ink-200"
           >
             {{ name }}
           </span>
@@ -593,10 +680,87 @@ function reloadSite(): void {
         </div>
       </section>
 
+      <!-- ── 常见问题：手风琴，答案全是事实 ──────────────────────── -->
+      <section id="faq" class="mx-auto max-w-4xl scroll-mt-24 px-5 py-20 lg:px-8 lg:py-24">
+        <div v-reveal class="text-center">
+          <p class="hero-kicker justify-center text-brand-700">FAQ</p>
+          <h2 class="mt-3 font-display text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl">
+            常见问题
+          </h2>
+        </div>
+
+        <div v-reveal class="mt-10 space-y-3">
+          <div
+            v-for="(item, i) in faqs"
+            :key="item.q"
+            class="card overflow-hidden"
+          >
+            <button
+              type="button"
+              class="flex w-full items-center justify-between gap-4 px-5 py-4 text-start"
+              :aria-expanded="openFaq === i"
+              @click="toggleFaq(i)"
+            >
+              <span class="text-sm font-semibold text-ink-50">{{ item.q }}</span>
+              <AppIcon
+                name="chevron-down"
+                :size="16"
+                class="shrink-0 text-ink-400 transition-transform duration-200"
+                :class="openFaq === i ? 'rotate-180' : ''"
+              />
+            </button>
+            <p v-show="openFaq === i" class="border-t border-ink-700/60 px-5 py-4 text-sm leading-relaxed text-ink-300">
+              {{ item.a }}
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 开源与社区 ────────────────────────────────────────── -->
+      <section class="mx-auto max-w-7xl px-5 py-20 lg:px-8 lg:py-24">
+        <div class="grid gap-5 md:grid-cols-2">
+          <!-- 开源仓库 -->
+          <div v-reveal class="card card-pad">
+            <span class="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-500/10 text-brand-700">
+              <AppIcon name="terminal" :size="20" />
+            </span>
+            <h3 class="mt-4 text-sm font-semibold text-ink-50">源代码开放</h3>
+            <p class="mt-2 text-xs leading-relaxed text-ink-300 sm:text-sm">
+              服务端代码以 AGPL-3.0 发布在 Gitee，可自行审计、二次开发与私有化部署；
+              品牌标识不在源代码许可授权范围内。
+            </p>
+            <a
+              href="https://gitee.com/xiaosu4610/AQUA-API"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn btn-secondary btn-sm mt-4"
+            >
+              Gitee 仓库
+              <AppIcon name="external" :size="13" />
+            </a>
+          </div>
+
+          <!-- 交流群 -->
+          <div v-reveal="60" class="card card-pad">
+            <span class="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-500/10 text-brand-700">
+              <AppIcon name="users" :size="20" />
+            </span>
+            <h3 class="mt-4 text-sm font-semibold text-ink-50">交流与反馈</h3>
+            <p class="mt-2 text-xs leading-relaxed text-ink-300 sm:text-sm">
+              使用问题、建议与漏洞报告都可以进群找我们；入群入口保持中性，不需要任何诱导或转发。
+            </p>
+            <RouterLink to="/join" class="btn btn-secondary btn-sm mt-4">
+              加入交流群
+              <AppIcon name="chevron-right" :size="13" />
+            </RouterLink>
+          </div>
+        </div>
+      </section>
+
       <!-- ── 尾部行动区：一句话 + 两个操作，克制收束 ─────────────── -->
-      <section class="hero-water relative mx-auto max-w-7xl px-5 pb-24 pt-8 lg:px-8">
-        <div v-reveal class="relative overflow-hidden rounded-2xl border border-ink-700/70 bg-ink-900/70 px-6 py-14 text-center sm:px-12">
-          <div class="bg-grid absolute inset-0 opacity-40" aria-hidden="true" />
+      <section class="mx-auto max-w-7xl px-5 pb-24 pt-4 lg:px-8">
+        <div v-reveal class="hero-water relative overflow-hidden rounded-2xl border border-ink-700/60 bg-white/85 px-6 py-14 text-center sm:px-12">
+          <div class="bg-grid absolute inset-0 opacity-50" aria-hidden="true" />
           <div class="relative">
             <h2 class="font-display text-2xl font-semibold tracking-tight text-ink-50 sm:text-3xl">
               拿到令牌，第一行代码就能跑。

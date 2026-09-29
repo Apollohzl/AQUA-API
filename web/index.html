@@ -4,8 +4,8 @@
   意图：给 Vue 应用一个挂载点，并声明品牌图标与基础 meta。
   流转：浏览器请求 / → 后端（go:embed）返回本文件 → 加载 /assets/*.js 启动应用。
   扩展：新增全局 meta（如统计脚本）请在此处追加，勿在前端代码里动态注入。
-  主题：站点采用「深水夜航」暗色主题（2026-09-29 全站换肤），
-        theme-color 取页面底色（深海墨蓝），移动端地址栏与页面融为一体。
+  主题：站点采用通透亮色主题（2026-09-30 依站长反馈回到亮色），
+        theme-color 取页面底色的浅冷白，移动端地址栏与页面融为一体。
 -->
 <html lang="zh-CN">
   <head>
@@ -14,10 +14,9 @@
          不加它，样式中所有安全区变量的值恒为 0，刘海屏上下会被系统 UI 遮挡。 -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="icon" href="/favicon.ico" />
-    <meta name="theme-color" content="#050d19" />
+    <meta name="theme-color" content="#f7f9fc" />
     <!--
-      自托管字体（Google Fonts）：Source Sans 3（正文）+ Source Serif 4（中文标题回退）
-      + Unbounded（拉丁品牌大字，几何未来主义，落地页 hero 与编号数字使用）。
+      自托管字体（Google Fonts）：Source Sans 3（正文）+ Source Serif 4（标题）。
       为什么用 preconnect + 两段式加载：字体 CSS 与字体文件分属两个域，
       先建立连接可省一次 DNS+TLS 往返；display=swap 保证字体加载期间
       文字先用回退字体渲染（不白屏、不阻塞首帧）。
@@ -28,7 +27,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=Unbounded:wght@500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap"
     />
     <!--
       基础 SEO 三件套：描述说清「是什么、给谁用」，keywords 覆盖主要检索词，
