@@ -11,35 +11,40 @@ import { fetchDashboard } from '@/api/admin'
 import type { DashboardStats } from '@/api/types'
 import { Card, Skeleton, StatCard } from '@/components/ui/Display'
 import { EChart } from '@/components/ui/EChart'
-import { CHART_PALETTE, AXIS_LABEL_STYLE, SPLIT_LINE_STYLE, TOOLTIP_STYLE } from '@/utils/chart'
+import { useTheme } from '@/lib/theme/theme-context'
+import { chartStyles } from '@/utils/chart'
 import { formatNumber } from '@/utils/format'
 
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
+  const { resolved } = useTheme()
 
   useEffect(() => {
     void fetchDashboard().then(setStats).catch(() => setStats(null))
   }, [])
 
+  // 图表配色随主题切换：ECharts 用 canvas，不认 CSS 变量，必须按 isDark 显式取色
+  const cs = useMemo(() => chartStyles(resolved === 'dark'), [resolved])
+
   const trendOption = useMemo(() => {
     const days = stats?.recent_days ?? []
     return {
-      tooltip: { trigger: 'axis', ...TOOLTIP_STYLE },
+      tooltip: { trigger: 'axis', ...cs.tooltip },
       grid: { left: 8, right: 8, top: 28, bottom: 8, containLabel: true },
-      legend: { top: 0, textStyle: { color: '#475569', fontSize: 11 } },
-      xAxis: { type: 'category', data: days.map((d) => d.date), axisLabel: AXIS_LABEL_STYLE },
-      yAxis: { type: 'value', axisLabel: AXIS_LABEL_STYLE, splitLine: SPLIT_LINE_STYLE },
+      legend: { top: 0, textStyle: { color: cs.axisLabel.color, fontSize: 11 } },
+      xAxis: { type: 'category', data: days.map((d) => d.date), axisLabel: cs.axisLabel },
+      yAxis: { type: 'value', axisLabel: cs.axisLabel, splitLine: cs.splitLine },
       series: [
-        { name: '请求数', type: 'bar', data: days.map((d) => d.requests), itemStyle: { color: CHART_PALETTE[0] }, barWidth: '50%' },
-        { name: 'Token', type: 'bar', data: days.map((d) => d.tokens), itemStyle: { color: CHART_PALETTE[1] }, barWidth: '50%' },
+        { name: '请求数', type: 'bar', data: days.map((d) => d.requests), itemStyle: { color: cs.palette[0] }, barWidth: '50%' },
+        { name: 'Token', type: 'bar', data: days.map((d) => d.tokens), itemStyle: { color: cs.palette[1] }, barWidth: '50%' },
       ],
     }
-  }, [stats])
+  }, [stats, cs])
 
   const topModelOption = useMemo(() => {
     const items = stats?.top_models?.slice(0, 8) ?? []
     return {
-      tooltip: { trigger: 'item', ...TOOLTIP_STYLE },
+      tooltip: { trigger: 'item', ...cs.tooltip },
       series: [
         {
           type: 'pie',
@@ -47,13 +52,13 @@ export default function AdminDashboardPage() {
           data: items.map((item, index) => ({
             name: item.model,
             value: item.requests,
-            itemStyle: { color: CHART_PALETTE[index % CHART_PALETTE.length] },
+            itemStyle: { color: cs.palette[index % cs.palette.length] },
           })),
-          label: { color: '#475569', fontSize: 11 },
+          label: { color: cs.axisLabel.color, fontSize: 11 },
         },
       ],
     }
-  }, [stats])
+  }, [stats, cs])
 
   const today = stats?.today
 

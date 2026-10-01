@@ -14,6 +14,7 @@ import { BrandLogo } from '@/components/BrandMark'
 import { useAuth } from '@/lib/auth/auth-context'
 
 import { LocaleSwitcher } from './LocaleSwitcher'
+import { ThemeToggle } from './ThemeToggle'
 
 interface NavLink {
   label: string
@@ -67,6 +68,7 @@ export function SiteHeader({ transparent = true }: { transparent?: boolean }) {
         </nav>
 
         <div className="flex items-center gap-1.5">
+          <ThemeToggle compact />
           <LocaleSwitcher compact />
           {isLoggedIn ? (
             <Link

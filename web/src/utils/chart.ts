@@ -1,54 +1,68 @@
 /**
- * 图表通用配色与样式常量。
+ * 图表通用配色与样式常量（主题感知）。
  *
  * 意图（Why）：
  *   仪表盘与门户共 4 处图表，若各自定义颜色会出现「同一指标在不同页颜色不同」的问题；
- *   集中定义保证「请求=青色、Token=紫色、额度=绿色」在全站一致，降低读图成本。
+ *   集中定义保证「请求=青、Token=靛、额度=绿」在全站一致，降低读图成本。
  *
- * 关于亮色主题下的取色（重要）：
- *   亮色背景上必须使用「中等偏深」的颜色。深色底选的浅色（如 #22d3ee）在
- *   白底上对比度只有 1.6:1，几乎看不清，因此整体下沉一个明度档，
- *   同时保持色相不变以维持"指标—颜色"记忆。
- *   （2026-09-30：站点已从暗色回到亮色，本文件同步恢复亮色取色。）
+ * 主题适配（重要）：
+ *   站点提供昼 / 夜两套主题，ECharts 的 canvas 不认 CSS 变量，
+ *   因此这里导出「按主题取样式」的函数：调用方传 isDark，得到该主题下可读的配色。
+ *   昼：坐标轴深灰、tooltip 白底深字；夜：坐标轴浅灰、tooltip 深底浅字。
  *
  * 流转（Flow）：
- *   views/* 构造 EChartsOption → 引用本文件的常量 → components/EChart.vue 渲染
+ *   页面 useTheme() → chartStyles(isDark) → 展开进 EChartsOption → EChart 渲染
  *
  * 扩展（Extend）：
- *   新增指标配色请在 CHART_PALETTE 追加，并同步 views 中的显式取色；
- *   颜色值需与 tailwind.config.js 的品牌色保持同一色系。
+ *   新增指标配色请在 palette 中追加，并同步页面里的显式取色。
  */
 
 /** 图表主色序列（顺序即默认取色顺序：青 → 靛 → 绿 → 琥珀 → 粉 → 蓝） */
 export const CHART_PALETTE = ['#0891b2', '#6366f1', '#059669', '#d97706', '#db2777', '#2563eb']
 
-/** 坐标轴标签样式：比正文弱一档，避免图表抢主体内容的视觉权重 */
-export const AXIS_LABEL_STYLE = { color: '#475569', fontSize: 11 } as const
+/** 夜间主题下的主色序列：整体提亮一档，保证暗底可读 */
+export const CHART_PALETTE_DARK = ['#22d3ee', '#818cf8', '#34d399', '#fbbf24', '#f472b6', '#60a5fa']
 
-/** 坐标轴线样式：亮色下线条需要比深色主题更实一些才看得见 */
-export const AXIS_LINE_STYLE = { lineStyle: { color: 'rgba(100,116,139,0.35)' } } as const
+export interface ChartStyles {
+  palette: string[]
+  axisLabel: { color: string; fontSize: number }
+  axisLine: { lineStyle: { color: string } }
+  splitLine: { lineStyle: { color: string; type: 'dashed' } }
+  tooltip: Record<string, unknown>
+}
 
-/** 网格分割线：虚线 + 低透明度，浅色底上不喧宾夺主 */
-export const SPLIT_LINE_STYLE = {
-  lineStyle: { color: 'rgba(100,116,139,0.22)', type: 'dashed' as const },
-} as const
-
-/**
- * 统一的 tooltip 外观（与 .card 的圆角/描边语言一致）。
- *
- * 亮色主题下用「白色浮层 + 深色文字」，与页面的通透质感卡片保持同一视觉语言；
- * 若沿用深色 tooltip，会在浅色页面里显得突兀且像一块"黑洞"。
- *
- * 注意：此处刻意不加 `as const` —— padding 若被推断为 readonly 元组，
- * 将无法赋值给 echarts 的 `number | number[]` 类型。
- */
-export const TOOLTIP_STYLE = {
-  backgroundColor: 'rgba(255,255,255,0.98)',
-  borderColor: 'rgba(224,232,242,1)',
-  borderWidth: 1,
-  padding: [8, 12],
-  textStyle: { color: '#1e293b', fontSize: 12 },
-  extraCssText: 'border-radius:10px;box-shadow:0 12px 32px -12px rgba(15,23,42,.25);',
+/** 按主题返回一整套图表样式；调用方只需把结果展开进 option */
+export function chartStyles(isDark: boolean): ChartStyles {
+  if (isDark) {
+    return {
+      palette: CHART_PALETTE_DARK,
+      axisLabel: { color: '#8b93a1', fontSize: 11 },
+      axisLine: { lineStyle: { color: 'rgba(148,163,184,0.28)' } },
+      splitLine: { lineStyle: { color: 'rgba(148,163,184,0.16)', type: 'dashed' } },
+      tooltip: {
+        backgroundColor: 'rgba(27,30,36,0.97)',
+        borderColor: 'rgba(58,64,72,1)',
+        borderWidth: 1,
+        padding: [8, 12],
+        textStyle: { color: '#e9e7e2', fontSize: 12 },
+        extraCssText: 'border-radius:10px;box-shadow:0 12px 32px -12px rgba(0,0,0,.6);',
+      },
+    }
+  }
+  return {
+    palette: CHART_PALETTE,
+    axisLabel: { color: '#475569', fontSize: 11 },
+    axisLine: { lineStyle: { color: 'rgba(100,116,139,0.35)' } },
+    splitLine: { lineStyle: { color: 'rgba(100,116,139,0.22)', type: 'dashed' } },
+    tooltip: {
+      backgroundColor: 'rgba(255,255,255,0.98)',
+      borderColor: 'rgba(224,232,242,1)',
+      borderWidth: 1,
+      padding: [8, 12],
+      textStyle: { color: '#1e293b', fontSize: 12 },
+      extraCssText: 'border-radius:10px;box-shadow:0 12px 32px -12px rgba(15,23,42,.25);',
+    },
+  }
 }
 
 /** 面积图渐变（用于折线下方的填充，让趋势更易读） */

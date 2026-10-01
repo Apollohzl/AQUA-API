@@ -16,11 +16,13 @@ import type { UsageStats } from '@/api/types'
 import { Card, Skeleton, StatCard } from '@/components/ui/Display'
 import { EChart } from '@/components/ui/EChart'
 import { useAuth } from '@/lib/auth/auth-context'
-import { CHART_PALETTE, AXIS_LABEL_STYLE, SPLIT_LINE_STYLE, TOOLTIP_STYLE } from '@/utils/chart'
+import { useTheme } from '@/lib/theme/theme-context'
+import { areaGradient, chartStyles } from '@/utils/chart'
 import { formatNumber } from '@/utils/format'
 
 export default function ConsoleOverviewPage() {
   const { refreshUser } = useAuth()
+  const { resolved } = useTheme()
   const [finance, setFinance] = useState<FinanceSummary | null>(null)
   const [usage, setUsage] = useState<UsageStats | null>(null)
   const [days, setDays] = useState(7)
@@ -45,30 +47,33 @@ export default function ConsoleOverviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 图表配色随主题切换：ECharts 用 canvas，不认 CSS 变量，必须按 isDark 显式取色
+  const cs = useMemo(() => chartStyles(resolved === 'dark'), [resolved])
+
   const trendOption = useMemo(() => {
     const series = usage?.series ?? []
     return {
-      tooltip: { trigger: 'axis', ...TOOLTIP_STYLE },
+      tooltip: { trigger: 'axis', ...cs.tooltip },
       grid: { left: 8, right: 8, top: 24, bottom: 8, containLabel: true },
-      xAxis: { type: 'category', data: series.map((item) => item.date), axisLabel: AXIS_LABEL_STYLE },
-      yAxis: { type: 'value', axisLabel: AXIS_LABEL_STYLE, splitLine: SPLIT_LINE_STYLE },
+      xAxis: { type: 'category', data: series.map((item) => item.date), axisLabel: cs.axisLabel },
+      yAxis: { type: 'value', axisLabel: cs.axisLabel, splitLine: cs.splitLine },
       series: [
         {
           name: '请求数',
           type: 'line',
           smooth: true,
           data: series.map((item) => item.requests),
-          itemStyle: { color: CHART_PALETTE[0] },
-          areaStyle: { color: 'rgba(8,145,178,0.12)' },
+          itemStyle: { color: cs.palette[0] },
+          areaStyle: { color: areaGradient(cs.palette[0]) },
         },
       ],
     }
-  }, [usage])
+  }, [usage, cs])
 
   const modelOption = useMemo(() => {
     const items = (usage?.by_model ?? []).slice(0, 8)
     return {
-      tooltip: { trigger: 'item', ...TOOLTIP_STYLE },
+      tooltip: { trigger: 'item', ...cs.tooltip },
       series: [
         {
           type: 'pie',
@@ -76,13 +81,13 @@ export default function ConsoleOverviewPage() {
           data: items.map((item, index) => ({
             name: item.model,
             value: item.tokens,
-            itemStyle: { color: CHART_PALETTE[index % CHART_PALETTE.length] },
+            itemStyle: { color: cs.palette[index % cs.palette.length] },
           })),
-          label: { color: '#475569', fontSize: 11 },
+          label: { color: cs.axisLabel.color, fontSize: 11 },
         },
       ],
     }
-  }, [usage])
+  }, [usage, cs])
 
   const unlimited = finance?.balance_quota === -1
 

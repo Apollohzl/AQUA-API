@@ -1,32 +1,44 @@
 /* AQUA-API 全局样式：Tailwind CSS v4（CSS-first 配置）与设计令牌。
  *
  * 意图（Why）：
- *   视觉工程学基线——亮色冷白底 + 白卡片 + 细描边 + 单一强调色（靛蓝→青），
- *   全站间距/圆角/描边/阴影都取自 @theme 令牌，保证「重复」与「对齐」。
+ *   视觉工程学基线，风格定位为「个人博客 · 半公益 · 即刻风」——
+ *   暖白纸感底 + 圆角卡片 + 极淡描边 + 单一品牌强调色，留白充足、装饰克制。
+ *   提供「昼 / 夜」两套令牌：默认跟随北京时间（UTC+8）自动切换，用户也可手动选择。
  *
  * 流转（Flow）：
- *   root layout → 本文件（@import "tailwindcss"）→ 组件类名（如 bg-surface text-ink border-line）
+ *   root layout 内联脚本（防闪烁，按 localStorage + 北京时间预设 html.dark）
+ *   → ThemeProvider（运行期按分钟校正）
+ *   → 本文件 @theme / html.dark 的令牌覆盖
+ *   → 组件类名（如 bg-surface text-ink border-line）自动随主题变化
  *
  * 扩展（Extend）：
- *   改色板：只改 @theme 中的 --color-* 变量；新增语义色在 @theme 追加后即可全站使用。
+ *   改色板：只改下方 @theme 的昼色与 html.dark 的夜色，两处同名变量同步即可。
+ *   新增语义色：在两个块里都加一条 --color-xxx，随后全站可用（如 bg-xxx）。
  */
 @import "tailwindcss";
 
+/* 允许用 class（html.dark）驱动 dark: 变体，而非只看系统偏好 */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
-  /* ── 色板：冷白亮色系 ─────────────────────────── */
-  --color-surface: #f6f7f9;      /* 页面底：极浅冷灰白 */
-  --color-card: #ffffff;         /* 卡片/面板底 */
-  --color-ink: #1a2233;          /* 主文字：深蓝黑 */
-  --color-ink-2: #4a5568;        /* 次文字 */
-  --color-ink-3: #8b95a7;        /* 弱文字/占位 */
-  --color-line: #e3e7ec;         /* 描边 */
-  --color-line-2: #d4dae2;       /* 强调描边 */
+  /* ── 昼·色板：暖白纸感（博客气）───────────────── */
+  --color-surface: #f7f6f2;      /* 页面底：暖白纸 */
+  --color-card: #fffefb;         /* 卡片/面板底：微暖白 */
+  --color-ink: #221f1a;          /* 主文字：墨褐黑 */
+  --color-ink-2: #56514a;        /* 次文字 */
+  --color-ink-3: #8f887d;        /* 弱文字/占位 */
+  --color-line: #e9e5dd;         /* 描边：极淡暖灰 */
+  --color-line-2: #dbd5ca;       /* 强调描边 */
   --color-brand: #2f6bff;        /* 品牌强调：靛蓝 */
   --color-brand-2: #0ea5a5;      /* 次级强调：青 */
   --color-ok: #16a34a;           /* 成功 */
   --color-warn: #d97706;         /* 警告 */
   --color-err: #dc2626;          /* 错误 */
   --color-info: #2563eb;         /* 信息 */
+  /* 代码块：昼为深墨底、夜为更深的墨底，两套主题下都保持「深底浅字」。
+     不能复用 ink/surface——那两个变量在暗色下会互换，导致代码块反相。 */
+  --color-code-bg: #23262d;
+  --color-code-fg: #e9e7e2;
 
   /* ── 排版：中文优先的字体栈 ───────────────────── */
   --font-sans: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", ui-sans-serif,
@@ -45,9 +57,33 @@
   --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* ── 夜·色板：同层覆盖同名变量，组件类名无需改动即整体换肤 ──
+   注意：必须与 @theme 里的变量名逐一对应；漏掉的变量会保留昼色（在暗底上不可读）。 */
+html.dark {
+  --color-surface: #14161a;
+  --color-card: #1b1e24;
+  --color-ink: #e9e7e2;
+  --color-ink-2: #a9a59d;
+  --color-ink-3: #726e67;
+  --color-line: #2a2e35;
+  --color-line-2: #3a4048;
+  --color-brand: #6b93ff;
+  --color-brand-2: #35c2c2;
+  --color-ok: #4ade80;
+  --color-warn: #fbbf24;
+  --color-err: #f87171;
+  --color-info: #60a5fa;
+  --color-code-bg: #0f1115;
+  --color-code-fg: #e9e7e2;
+  --shadow-pop: 0 8px 30px rgb(0 0 0 / 0.5);
+
+  color-scheme: dark;
+}
+
 /* 基础层：页面底、默认文字、RTL 支持 */
 html {
   scroll-behavior: smooth;
+  background-color: var(--color-surface);
 }
 body {
   background-color: var(--color-surface);
@@ -58,6 +94,20 @@ body {
 }
 [dir="rtl"] body {
   letter-spacing: 0;
+}
+
+/* 主题切换瞬间的平滑过渡：只在切换时短暂挂 .theme-anim，避免全局常驻 transition
+   拖慢 hover 等交互反馈。ThemeProvider 会在 700ms 后自行移除该类。 */
+.theme-anim,
+.theme-anim *,
+.theme-anim *::before,
+.theme-anim *::after {
+  transition:
+    background-color 0.6s var(--ease-out-soft),
+    border-color 0.6s var(--ease-out-soft),
+    color 0.6s var(--ease-out-soft),
+    fill 0.6s var(--ease-out-soft),
+    stroke 0.6s var(--ease-out-soft) !important;
 }
 
 /* 滚动进场（配合 useReveal）：默认不可见，进入视口后淡入上移 */
@@ -80,14 +130,23 @@ body {
     transform: none;
     transition: none;
   }
+  .theme-anim,
+  .theme-anim * {
+    transition: none !important;
+  }
 }
 
 /* 细网格背景（hero 与区块通用）：极淡线条，不抢内容 */
 .grid-bg {
   background-image:
-    linear-gradient(to right, rgb(26 34 51 / 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(26 34 51 / 0.03) 1px, transparent 1px);
+    linear-gradient(to right, rgb(34 31 26 / 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(34 31 26 / 0.03) 1px, transparent 1px);
   background-size: 32px 32px;
+}
+html.dark .grid-bg {
+  background-image:
+    linear-gradient(to right, rgb(233 231 226 / 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(233 231 226 / 0.035) 1px, transparent 1px);
 }
 
 /* 代码块基础皮肤 */
@@ -99,5 +158,5 @@ body {
 
 /* 选中文字跟随品牌色 */
 ::selection {
-  background: rgb(47 107 255 / 0.16);
+  background: color-mix(in oklab, var(--color-brand) 18%, transparent);
 }

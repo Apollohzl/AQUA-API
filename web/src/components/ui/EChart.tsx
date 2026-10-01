@@ -2,7 +2,8 @@
  *
  * 意图（Why）：
  *   统一图表初始化/销毁/resize 生命周期，页面只提供 option。
- *   主题取色来自 utils/chart.ts（亮色适配），保证全站图表一致。
+ *   取色来自 utils/chart.ts 的 chartStyles(isDark)，随昼夜主题切换；
+ *   页面在 option 变化时通过下方第二个 effect 以 notMerge 重绘，实现换肤。
  */
 'use client'
 

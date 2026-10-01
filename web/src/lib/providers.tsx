@@ -13,6 +13,7 @@ import { setUnauthorizedHandler } from '@/api/client'
 import { I18nProvider } from '@/i18n'
 import { AuthProvider, useAuth } from '@/lib/auth/auth-context'
 import { SiteProvider } from '@/lib/site/site-context'
+import { ThemeProvider } from '@/lib/theme/theme-context'
 import { ToastProvider } from '@/lib/toast/toast-context'
 
 /** 401 时清登录态并跳回登录页（后台页面则跳超管登录入口） */
@@ -39,14 +40,16 @@ function UnauthorizedGate({ children }: { children: ReactNode }) {
 
 export function Providers({ children }: { children: ReactNode }) {
   return (
-    <I18nProvider>
-      <ToastProvider>
-        <AuthProvider>
-          <SiteProvider>
-            <UnauthorizedGate>{children}</UnauthorizedGate>
-          </SiteProvider>
-        </AuthProvider>
-      </ToastProvider>
-    </I18nProvider>
+    <ThemeProvider>
+      <I18nProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <SiteProvider>
+              <UnauthorizedGate>{children}</UnauthorizedGate>
+            </SiteProvider>
+          </AuthProvider>
+        </ToastProvider>
+      </I18nProvider>
+    </ThemeProvider>
   )
 }

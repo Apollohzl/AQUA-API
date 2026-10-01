@@ -122,7 +122,9 @@ export function CodeBlock({ code, language, title }: CodeBlockProps) {
     }
   }
   return (
-    <div className="overflow-hidden rounded-lg border border-line bg-ink text-surface">
+    // 代码块用专用 code-bg/code-fg 令牌：两套主题下都保持深底浅字，
+    // 不复用 ink/surface（它们在暗色下会互换，导致代码块反相成浅底深字）。
+    <div className="overflow-hidden rounded-lg border border-line bg-code-bg text-code-fg">
       <div className="flex items-center justify-between border-b border-white/10 px-4 py-2 text-xs">
         <span className="text-white/60">{title || language || 'code'}</span>
         <button type="button" onClick={handleCopy} className="flex items-center gap-1 text-white/60 hover:text-white">

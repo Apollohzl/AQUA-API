@@ -16,6 +16,7 @@ import { useState } from 'react'
 import { BrandLogo } from '@/components/BrandMark'
 import { AppIcon, type IconName } from '@/components/AppIcon'
 import { LocaleSwitcher } from '@/components/site/LocaleSwitcher'
+import { ThemeToggle } from '@/components/site/ThemeToggle'
 import { useAuth } from '@/lib/auth/auth-context'
 
 export interface ShellNavItem {
@@ -132,6 +133,7 @@ export function AppShell({ groups, brand, children }: AppShellProps) {
           </button>
           <div className="hidden text-[13px] text-ink-3 lg:block">{brand}</div>
           <div className="flex items-center gap-2">
+            <ThemeToggle compact />
             <LocaleSwitcher compact />
             <div className="flex items-center gap-2 rounded-md border border-line bg-card px-2.5 py-1.5 text-[13px]">
               <span className="max-w-28 truncate text-ink-2">{displayName}</span>
