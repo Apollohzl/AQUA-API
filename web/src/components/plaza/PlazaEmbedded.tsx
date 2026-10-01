@@ -16,9 +16,11 @@ import { Badge, EmptyState, Skeleton } from '@/components/ui/Display'
 import { Modal } from '@/components/ui/Modal'
 import { Tabs } from '@/components/ui/Display'
 import { vendorLabel, vendorOf, vendorTone } from '@/utils/vendor'
-import { formatNumber } from '@/utils/format'
+import { formatYuanPerCall, formatYuanPerMillion } from '@/utils/money'
+import { useSite } from '@/lib/site/site-context'
 
 export function PlazaEmbedded() {
+  const { quotaPerYuan } = useSite()
   const [data, setData] = useState<ModelPlaza | null>(null)
   const [group, setGroup] = useState('all')
   const [keyword, setKeyword] = useState('')
@@ -90,7 +92,7 @@ export function PlazaEmbedded() {
                 {selected.prices.map((price) => (
                   <div key={price.group} className="flex items-center justify-between rounded-md border border-line bg-surface/50 px-3 py-2.5 text-sm">
                     <span className="font-medium text-ink-2">{price.group}</span>
-                    <span className="text-ink-2">{priceSummary(price)}</span>
+                    <span className="text-ink-2">{priceSummary(price, quotaPerYuan)}</span>
                   </div>
                 ))}
               </div>
@@ -104,15 +106,18 @@ export function PlazaEmbedded() {
   )
 }
 
-function priceSummary(price: PlazaPrice): string {
+/** 价格摘要：一律换算成人民币展示（内部仍以整数额度记账）。
+ *  quotaPerYuan 为 0（未取到比例）时 formatYuanFromQuota 会自动退回显示原始额度。 */
+function priceSummary(price: PlazaPrice, quotaPerYuan: number): string {
   if (price.is_free || price.billing_mode === 'free') return '免费'
   if (price.billing_mode === 'per_call') {
-    return price.per_call_price > 0 ? `${formatNumber(price.per_call_price)} 额度/次` : '按次'
+    return price.per_call_price > 0 ? formatYuanPerCall(price.per_call_price, quotaPerYuan) : '按次'
   }
-  return `输入 ${formatNumber(price.prompt_price)} · 输出 ${formatNumber(price.completion_price)} /1M`
+  return `输入 ${formatYuanPerMillion(price.prompt_price, quotaPerYuan)} · 输出 ${formatYuanPerMillion(price.completion_price, quotaPerYuan)}`
 }
 
 function ModelTile({ model, onClick }: { model: PlazaModel; onClick: () => void }) {
+  const { quotaPerYuan } = useSite()
   const vendor = vendorOf(model.model)
   const price = model.prices?.[0]
   return (
@@ -132,7 +137,7 @@ function ModelTile({ model, onClick }: { model: PlazaModel; onClick: () => void 
       </div>
       <div className="mt-3 flex items-center gap-2">
         {model.available ? <Badge tone="ok">可用</Badge> : <Badge tone="err">不可用</Badge>}
-        {price && <Badge tone={price.is_free ? 'info' : 'brand'}>{priceSummary(price)}</Badge>}
+        {price && <Badge tone={price.is_free ? 'info' : 'brand'}>{priceSummary(price, quotaPerYuan)}</Badge>}
       </div>
     </button>
   )

@@ -16,12 +16,15 @@ import type { UsageStats } from '@/api/types'
 import { Card, Skeleton, StatCard } from '@/components/ui/Display'
 import { EChart } from '@/components/ui/EChart'
 import { useAuth } from '@/lib/auth/auth-context'
+import { useSite } from '@/lib/site/site-context'
 import { useTheme } from '@/lib/theme/theme-context'
 import { areaGradient, chartStyles } from '@/utils/chart'
 import { formatNumber } from '@/utils/format'
+import { formatYuanFromQuota } from '@/utils/money'
 
 export default function ConsoleOverviewPage() {
   const { refreshUser } = useAuth()
+  const { quotaPerYuan } = useSite()
   const { resolved } = useTheme()
   const [finance, setFinance] = useState<FinanceSummary | null>(null)
   const [usage, setUsage] = useState<UsageStats | null>(null)
@@ -104,12 +107,12 @@ export default function ConsoleOverviewPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="当前余额"
-          value={finance ? (unlimited ? '不限额度' : formatNumber(finance.balance_quota)) : '—'}
-          hint={unlimited ? '额度不限制' : '站内计量单位'}
+          value={finance ? (unlimited ? '不限额度' : formatYuanFromQuota(finance.balance_quota, quotaPerYuan)) : '—'}
+          hint={unlimited ? '额度不限制' : '可用于调用与充值抵扣'}
         />
-        <StatCard label="累计消费" value={finance ? formatNumber(finance.used_quota) : '—'} hint="全部历史" />
-        <StatCard label="累计充值" value={finance ? formatNumber(finance.recharged_quota) : '—'} hint={`${finance?.recharge_count ?? 0} 笔订单`} />
-        <StatCard label="邀请返利" value={finance ? formatNumber(finance.reward_quota) : '—'} hint="注册奖 + 充值返利" />
+        <StatCard label="累计消费" value={finance ? formatYuanFromQuota(finance.used_quota, quotaPerYuan) : '—'} hint="全部历史" />
+        <StatCard label="累计充值" value={finance ? formatYuanFromQuota(finance.recharged_quota, quotaPerYuan) : '—'} hint={`${finance?.recharge_count ?? 0} 笔订单`} />
+        <StatCard label="邀请返利" value={finance ? formatYuanFromQuota(finance.reward_quota, quotaPerYuan) : '—'} hint="注册奖 + 充值返利" />
       </div>
 
       <div className="flex items-center justify-between">

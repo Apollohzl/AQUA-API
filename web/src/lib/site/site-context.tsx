@@ -18,6 +18,14 @@ interface SiteContextValue {
   loaded: boolean
   /** 站点名（未加载时回退默认值，不触发请求） */
   siteName: string
+  /**
+   * 额度 → 人民币的折算基数（1 元 = 多少额度）。
+   *
+   * 本站内部用整数「额度」记账（避免浮点误差），但对外一律以人民币示人，
+   * 因此各页面用 formatYuanFromQuota(quota, quotaPerYuan) 做展示边界上的换算。
+   * 0 表示未取到比例——此时格式化函数会退回显示原始额度，绝不假设比例。
+   */
+  quotaPerYuan: number
   /** 强制刷新（落地页「重试」按钮使用） */
   refresh: () => Promise<void>
 }
@@ -58,10 +66,11 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const siteName = status?.name || peekSiteName() || 'AQUA-API'
+  const quotaPerYuan = status?.quota_per_yuan ?? 0
 
   const value = useMemo(
-    () => ({ status, loaded, siteName, refresh }),
-    [status, loaded, siteName, refresh],
+    () => ({ status, loaded, siteName, quotaPerYuan, refresh }),
+    [status, loaded, siteName, quotaPerYuan, refresh],
   )
 
   return <SiteContext.Provider value={value}>{children}</SiteContext.Provider>
