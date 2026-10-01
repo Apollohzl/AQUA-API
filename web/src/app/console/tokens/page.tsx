@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { createMyToken, deleteMyToken, listMyGroups, listMyTokens, updateMyToken } from '@/api/portal'
-import type { AccessToken, CreateTokenPayload, CreateTokenResult } from '@/api/types'
+import type { AccessToken, CreateTokenPayload, CreateTokenResult, PortalGroup } from '@/api/types'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Display'
 import { DataTable, Pagination, type Column } from '@/components/ui/Table'
@@ -19,7 +19,7 @@ import { CopyButton } from '@/components/ui/Modal'
 import { useToast } from '@/lib/toast/toast-context'
 import { useSite } from '@/lib/site/site-context'
 import { formatDateTime } from '@/utils/format'
-import { formatYuanFromQuota, yuanToQuota } from '@/utils/money'
+import { formatDiscountLabel, formatYuanFromQuota, yuanToQuota } from '@/utils/money'
 
 const PAGE_SIZE = 20
 
@@ -32,7 +32,7 @@ export default function ConsoleTokensPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [created, setCreated] = useState<CreateTokenResult | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<AccessToken | null>(null)
-  const [groups, setGroups] = useState<{ name: string; label: string; unlocked: boolean }[]>([])
+  const [groups, setGroups] = useState<PortalGroup[]>([])
 
   const { toast, toastError } = useToast()
 
@@ -187,7 +187,7 @@ function CreateTokenModal({
   onCreated,
 }: {
   open: boolean
-  groups: { name: string; label: string; unlocked: boolean }[]
+  groups: PortalGroup[]
   onClose: () => void
   onCreated: (result: CreateTokenResult) => void
 }) {
@@ -246,6 +246,7 @@ function CreateTokenModal({
             {groups.map((g) => (
               <option key={g.name} value={g.name} disabled={!g.unlocked}>
                 {g.label}
+                {g.is_agent ? `（代理拿货 · ${formatDiscountLabel(g.ratio)}）` : ''}
                 {!g.unlocked ? '（未解锁）' : ''}
               </option>
             ))}

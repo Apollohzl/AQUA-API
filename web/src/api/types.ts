@@ -1363,6 +1363,8 @@ export interface PortalGroup {
   unlocked: boolean
   /** 当前用户的累计充值（分），用于显示"还差多少解锁" */
   paid_amount_cents: number
+  /** 这是当前用户自己的代理拿货档（由管理员指派）；前端据此单独标注 */
+  is_agent?: boolean
 }
 
 /** GET /api/user/groups 响应 */
