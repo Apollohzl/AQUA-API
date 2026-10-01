@@ -46,12 +46,12 @@ function HeroSection() {
           自托管 · 单文件部署 · 完全开源
         </div>
 
-        <h1 className="mx-auto mt-6 max-w-3xl text-4xl font-bold leading-tight tracking-tight text-ink sm:text-5xl">
-          自托管 LLM API 网关
-          <span className="text-brand">统一多协议上游</span>
+        <h1 className="mx-auto mt-6 max-w-3xl text-4xl font-bold leading-[1.18] tracking-tight text-ink sm:text-5xl">
+          <span className="block">自托管 LLM API 网关</span>
+          <span className="block text-brand">统一多协议上游</span>
         </h1>
 
-        <p className="mx-auto mt-5 max-w-2xl text-[15px] leading-relaxed text-ink-2 sm:text-base">
+        <p className="mx-auto mt-5 max-w-2xl text-balance text-[15px] leading-relaxed text-ink-2 sm:text-base">
           一个自部署的网关，把 OpenAI、Anthropic、Gemini 等数十种上游接入到统一的
           OpenAI 兼容接口。精细计费、全量日志、密钥池与失败重试开箱即用。
         </p>
@@ -345,7 +345,7 @@ function OpenSourceSection() {
     <section className="border-t border-line bg-card">
       <div className="mx-auto max-w-6xl px-4 py-16 text-center sm:px-6">
         <h2 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">开源 · 可验证</h2>
-        <p className="mx-auto mt-3 max-w-xl text-[15px] text-ink-2">
+        <p className="mx-auto mt-3 max-w-xl text-balance text-[15px] text-ink-2">
           源码公开，采用木兰宽松许可证第 2 版。你可以审计每一行代码，也可以提交 Pull Request 参与共建。
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
@@ -378,7 +378,7 @@ function CtaSection() {
     <section className="grid-bg border-t border-line">
       <div className="mx-auto max-w-6xl px-4 py-20 text-center sm:px-6">
         <h2 className="text-3xl font-bold tracking-tight text-ink">准备好开始了吗？</h2>
-        <p className="mx-auto mt-3 max-w-xl text-[15px] text-ink-2">
+        <p className="mx-auto mt-3 max-w-xl text-balance text-[15px] text-ink-2">
           {isLoggedIn ? '前往你的控制台，创建第一个访问令牌。' : '注册即用，马上就能接入第一个模型。'}
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
