@@ -486,6 +486,12 @@ type portalGroupDTO struct {
 	Unlocked bool `json:"unlocked"`
 	// PaidAmountCents 是当前用户的累计充值（分），前端据此显示"还差多少解锁"。
 	PaidAmountCents int64 `json:"paid_amount_cents"`
+	// IsAgent 标记"这是你自己的代理拿货档"。
+	//
+	// 该档同样是 admin_only（不对公众开放），只因该用户被管理员显式指派才对他可见；
+	// 前端据此把它单独标注（如「战略代理 · 6折」），而不是混进普通分组里，
+	// 避免代理误选普通档（那样就享不到折扣了）。
+	IsAgent bool `json:"is_agent"`
 }
 
 // handleMyGroups 处理 GET /api/user/groups（当前用户可选的分组）。
@@ -528,16 +534,22 @@ func (s *Server) handleMyGroups(c *gin.Context) {
 	}
 
 	items := make([]portalGroupDTO, 0, len(groups))
+	// 该用户被指派的代理拿货档（空串 = 普通用户）
+	ownAgentGroup := strings.TrimSpace(user.AgentGroup)
 	for _, group := range groups {
 		// 只下发"确实有启用渠道在服务"的分组：选到空分组后所有请求都会
 		// 503（无可用渠道），而用户从界面上完全看不出原因。
 		if !served[group.Name] {
 			continue
 		}
+		isOwnAgentGroup := ownAgentGroup != "" && group.Name == ownAgentGroup
 		// 仅后台可分发的分组（批发价）对普通用户直接不下发：
 		// 让它出现在下拉里再置灰，等于把"存在一个更便宜的分组"明示给所有人，
 		// 反而会引来"为什么我不能用"的追问；服务端的 403 是真正的闸门。
-		if group.RequiresAdminGrant() {
+		//
+		// 例外：这个人就是被指派到该分组的代理 —— 对他而言这不是秘密，
+		// 且必须让他选得到，否则他看得到折扣价却拿不到折扣（广场价与扣费矛盾）。
+		if group.RequiresAdminGrant() && !isOwnAgentGroup {
 			continue
 		}
 		items = append(items, portalGroupDTO{
@@ -546,8 +558,11 @@ func (s *Server) handleMyGroups(c *gin.Context) {
 			Ratio:                  group.Ratio,
 			Description:            group.Description,
 			UnlockMinRechargeCents: group.UnlockMinRechargeCents,
-			Unlocked:               paid >= group.UnlockMinRechargeCents,
-			PaidAmountCents:        paid,
+			// 代理档由管理员指派即视为已解锁：不再要求"累计充值达标"，
+			// 因为它的门槛本就是"被授权"，而不是"充够钱"。
+			Unlocked:        isOwnAgentGroup || paid >= group.UnlockMinRechargeCents,
+			PaidAmountCents: paid,
+			IsAgent:         isOwnAgentGroup,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items, "paid_amount_cents": paid})

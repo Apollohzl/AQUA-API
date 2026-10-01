@@ -336,7 +336,12 @@ func (s *Server) resolveTokenGroupName(c *gin.Context, raw string, ownerID uint6
 	// 仅后台可分发的分组（批发价）：判据是【发起请求的人】是否管理员，
 	// 而不是令牌归属者——后台代建令牌传的是目标用户 id，
 	// 按归属者判定会让代理令牌在后台也建不出来（功能等于废掉）。
-	if !s.checkGroupAdminGrant(c, group) {
+	//
+	// 例外：归属用户若已被管理员指派到该分组（users.agent_group == 分组名），
+	// 等价于"后台已经授权过这个人用这一档"，同样放行——
+	// 否则代理看得到自己的折扣价，却永远建不出能拿到该折扣的令牌，
+	// 广场价与实际扣费直接矛盾（这正是"代理拿不到折扣"的根因）。
+	if !s.checkGroupAdminGrant(c, group, ownerID) {
 		return "", false
 	}
 	return name, true
@@ -346,20 +351,33 @@ func (s *Server) resolveTokenGroupName(c *gin.Context, raw string, ownerID uint6
 //
 // 与 checkGroupUnlock 的分工（两者互不替代，也不叠加）：
 //   - checkGroupUnlock 看【令牌归属用户】的累计充值是否达标 —— 面向客户的资格门槛；
-//   - 本函数看【发起请求的人】是否管理员 —— 面向分发渠道的授权。
+//   - 本函数看【谁在授权使用】—— 面向分发渠道的授权。
 //
 // 为什么批发价分组需要单独一个维度：站长的原话是"代理只由后台创建，不要设充值门槛"
 // （门槛设高了会把小代理挡在门外）。而"分组是用户自选的"这条前提没变，
 // 所以必须有一道服务端闸门把"能自助拿到"这件事本身关掉。
 //
-// 管理员在后台"代客户建令牌"时，发起人是管理员 → 放行，令牌归到客户名下；
-// 客户自己建令牌时，发起人是他自己 → 403。这正是"只由后台分发"的准确语义。
-func (s *Server) checkGroupAdminGrant(c *gin.Context, group *model.ModelGroup) bool {
+// 放行的两种情况（都与"自助拿到"不相容，因此不破坏定价体系）：
+//  1) 发起人是管理员：后台"代客户建令牌"，令牌归到客户名下；
+//  2) 归属用户已被管理员显式指派到该分组（users.agent_group == group.Name）：
+//     指派动作本身就是后台授权，"这个人可以用这一档"已被管理员确认过。
+//
+// 注意判据是【归属用户自己的 agent_group】，不能放宽成"任意代理分组"：
+// 否则代理 A 就能把令牌挂到代理 B 的档位（可能是更低的折扣）上去。
+func (s *Server) checkGroupAdminGrant(c *gin.Context, group *model.ModelGroup, ownerID uint64) bool {
 	if !group.RequiresAdminGrant() {
 		return true
 	}
 	if actor, ok := middleware.CurrentUser(c); ok && actor.IsAdmin() {
 		return true
+	}
+	if ownerID != 0 && s.deps.Users != nil {
+		if owner, err := s.deps.Users.GetByID(c.Request.Context(), ownerID); err == nil &&
+			strings.TrimSpace(owner.AgentGroup) == group.Name {
+			return true
+		}
+		// 查询失败时不放行（fail-closed）：查不出身份就按普通用户处理。
+		// 与 checkGroupUnlock 同一取舍——放行的代价是任何人都可能借故障时机绕开定价。
 	}
 	oai.WriteError(c.Writer, http.StatusForbidden,
 		"该分组为定向开放，暂不支持自助选择；如需使用请联系管理员开通。",
