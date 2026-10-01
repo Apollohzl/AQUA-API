@@ -62,7 +62,14 @@ export default function ConsoleRechargePage() {
     try {
       const data = await fetchPaymentInfo()
       setInfo(data)
-      if (data.methods.length > 0) setMethod(data.methods[0].name)
+      const first = data.methods[0]
+      if (first) {
+        setMethod(first.name)
+        // 默认选中第一个子方式（如支付宝）：否则界面上没有任何选项高亮，
+        // 用户点「立即支付」时看不出到底走哪条通道（后端虽会兜底取第一个，
+        // 但界面必须与后端行为一致，不能让人靠猜）。
+        setSubMethod(first.sub_methods[0]?.name ?? '')
+      }
     } catch {
       /* 提示状态由下方展示 */
     }
