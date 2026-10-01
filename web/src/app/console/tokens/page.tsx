@@ -17,11 +17,14 @@ import { Modal, ConfirmDialog } from '@/components/ui/Modal'
 import { Badge, EmptyState } from '@/components/ui/Display'
 import { CopyButton } from '@/components/ui/Modal'
 import { useToast } from '@/lib/toast/toast-context'
-import { formatNumber, formatDateTime } from '@/utils/format'
+import { useSite } from '@/lib/site/site-context'
+import { formatDateTime } from '@/utils/format'
+import { formatYuanFromQuota } from '@/utils/money'
 
 const PAGE_SIZE = 20
 
 export default function ConsoleTokensPage() {
+  const { quotaPerYuan } = useSite()
   const [items, setItems] = useState<AccessToken[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -88,18 +91,18 @@ export default function ConsoleTokensPage() {
     },
     { title: '状态', render: (row) => (row.status === 1 ? <Badge tone="ok">启用</Badge> : <Badge tone="off">停用</Badge>) },
     {
-      title: '额度',
+      title: '剩余',
       align: 'right',
       render: (row) => (
         <span className="text-ink-2">
-          {row.unlimited_quota ? '不限' : formatNumber(row.remain_quota)}
+          {row.unlimited_quota ? '不限' : formatYuanFromQuota(row.remain_quota, quotaPerYuan)}
         </span>
       ),
     },
     {
       title: '已用',
       align: 'right',
-      render: (row) => <span className="text-ink-2">{formatNumber(row.used_quota)}</span>,
+      render: (row) => <span className="text-ink-2">{formatYuanFromQuota(row.used_quota, quotaPerYuan)}</span>,
     },
     { title: '到期', render: (row) => <span className="text-ink-2">{row.expires_at ? formatDateTime(row.expires_at) : '永不过期'}</span> },
     {

@@ -15,7 +15,9 @@ import { DataTable, Pagination, type Column } from '@/components/ui/Table'
 import { CopyButton } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Display'
 import { useToast } from '@/lib/toast/toast-context'
-import { formatNumber, formatDateTime } from '@/utils/format'
+import { useSite } from '@/lib/site/site-context'
+import { formatDateTime } from '@/utils/format'
+import { formatYuanFromQuota } from '@/utils/money'
 
 const PAGE_SIZE = 20
 
@@ -26,6 +28,7 @@ export default function ConsoleReferralPage() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const { toast, toastError } = useToast()
+  const { quotaPerYuan } = useSite()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -52,7 +55,7 @@ export default function ConsoleReferralPage() {
     try {
       const result = await checkin()
       setInfo((prev) => (prev ? { ...prev, checkin: result } : prev))
-      toast(result.daily_quota > 0 ? `签到成功，获得 ${formatNumber(result.daily_quota)} 额度` : '签到成功')
+      toast(result.daily_quota > 0 ? `签到成功，获得 ${formatYuanFromQuota(result.daily_quota, quotaPerYuan)}` : '签到成功')
     } catch (err) {
       toastError(err instanceof Error ? err.message : '签到失败')
     }
@@ -62,7 +65,7 @@ export default function ConsoleReferralPage() {
 
   const columns: Column<ReferralReward>[] = [
     { title: '类型', render: (row) => <Badge tone={row.kind === 'register' ? 'info' : 'brand'}>{row.kind_text}</Badge> },
-    { title: '额度', align: 'right', render: (row) => <span className="text-ink-2">+{formatNumber(row.quota)}</span> },
+    { title: '返利', align: 'right', render: (row) => <span className="text-ink-2">+{formatYuanFromQuota(row.quota, quotaPerYuan)}</span> },
     { title: '来源', render: (row) => <span className="text-ink-2">{row.invitee}</span> },
     { title: '时间', render: (row) => <span className="text-ink-2">{formatDateTime(row.created_at)}</span> },
   ]
@@ -84,7 +87,7 @@ export default function ConsoleReferralPage() {
                 <CopyButton text={inviteUrl} label="复制" />
               </div>
               <div className="text-[13px] text-ink-3">
-                已邀请 {info.invited_count} 人 · 注册奖 {formatNumber(info.register_bonus_quota)} 额度
+                已邀请 {info.invited_count} 人 · 注册奖 {formatYuanFromQuota(info.register_bonus_quota, quotaPerYuan)}
                 {info.recharge_ratio > 0 && ` · 充值返利 ${info.recharge_ratio}%`}
               </div>
             </div>
@@ -110,8 +113,8 @@ export default function ConsoleReferralPage() {
                   <div className="text-xs text-ink-3">累计天数</div>
                 </div>
                 <div>
-                  <div className="text-lg font-semibold text-ink">{formatNumber(info.checkin.total_quota)}</div>
-                  <div className="text-xs text-ink-3">累计额度</div>
+                  <div className="text-lg font-semibold text-ink">{formatYuanFromQuota(info.checkin.total_quota, quotaPerYuan)}</div>
+                  <div className="text-xs text-ink-3">累计返利</div>
                 </div>
               </div>
               {info.checkin.enabled && (
@@ -127,7 +130,7 @@ export default function ConsoleReferralPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="累计返利" value={info ? formatNumber(info.total_reward_quota) : '—'} />
+        <StatCard label="累计返利" value={info ? formatYuanFromQuota(info.total_reward_quota, quotaPerYuan) : '—'} />
       </div>
 
       <Card padding="none">
