@@ -9,7 +9,7 @@
  *   <head> 内联脚本（localStorage + 北京时间 → html.dark）
  *   → providers.tsx（theme/i18n/toast/auth/site）→ 各页面
  */
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 
 import { Providers } from '@/lib/providers'
 import { THEME_INIT_SCRIPT } from '@/lib/theme/theme-context'
@@ -19,11 +19,16 @@ import './globals.css'
 export const metadata: Metadata = {
   title: 'AQUA-API · 自托管 LLM API 网关',
   description: '自托管、可私有部署的 LLM API 网关：统一多协议上游、精细计费、全量日志与审计。',
-  viewport: 'width=device-width, initial-scale=1',
   robots: { index: true, follow: true },
   icons: {
     icon: '/favicon.ico',
   },
+}
+
+/** 视口独立导出：Next.js 16 起 viewport 不再接受放在 metadata（否则告警且不生效） */
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
