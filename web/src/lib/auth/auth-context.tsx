@@ -15,6 +15,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -128,8 +129,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // 401 全局回调挂接：由 providers.tsx 通过 client.ts 的 setUnauthorizedHandler 完成，
-  // 因此这里只需要保证 clearLocal 在每次渲染后指向最新闭包。
+  // 应用挂载时自动完成会话校正（等价旧 Vue 路由守卫的 bootstrap）：
+  // 有令牌 → 调 /auth/me 校验；无令牌 → 直接标记 ready。
+  useEffect(() => {
+    void bootstrap()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const value = useMemo(
     () => ({

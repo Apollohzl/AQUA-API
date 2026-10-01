@@ -13,7 +13,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { AppIcon } from '@/components/AppIcon'
 import { Button } from '@/components/ui/Button'
@@ -88,7 +88,16 @@ function HeroSection() {
 function TerminalSection() {
   const { status } = useSite()
   const sampleModel = status?.models?.[0] || 'AQUA-CALL/deepseek-v4-flash'
-  const curlCode = `curl ${typeof window !== 'undefined' ? window.location.origin : 'https://aqua.is3.cc'}/v1/chat/completions \\
+
+  // 站点根地址：SSG 阶段无 window（Node 环境），若直接读 window.location 会在
+  // 浏览器 hydration 时与 SSG HTML 不一致（React #412/#418）。因此先用常量占位，
+  // 挂载后再用真实 origin 覆盖——首帧保持一致，后续更新不触发 hydration 校验。
+  const [origin, setOrigin] = useState('https://aqua.is3.cc')
+  useEffect(() => {
+    if (typeof window !== 'undefined') setOrigin(window.location.origin)
+  }, [])
+
+  const curlCode = `curl ${origin}/v1/chat/completions \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer sk-你的令牌" \\
   -d '{

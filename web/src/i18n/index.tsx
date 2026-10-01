@@ -162,17 +162,23 @@ const I18nContext = createContext<I18nContextValue | null>(null)
 
 /** 全局 Provider：应用根节点挂载一次 */
 export function I18nProvider({ children }: { children: ReactNode }) {
+  // 首帧固定为模块级或兜底语言：SSG（Node 无 navigator）与浏览器若要在这里
+  // 读 navigator.languages 会得到不同结果，进而触发 React hydration 不一致
+  // （#412/#418）。语言检测延迟到挂载后执行——首帧保持一致，再静默切换到用户语言。
   const [locale, setLocaleState] = useState<LocaleCode>(() => {
-    // 首次进入用模块级值（已由客户端脚本初始化过则沿用）
-    const detected = currentLocale === FALLBACK_LOCALE ? detectLocale() : currentLocale
-    currentLocale = detected
-    return detected
+    currentLocale = FALLBACK_LOCALE
+    return FALLBACK_LOCALE
   })
 
-  // 挂载后把当前语言同步到 <html lang/dir>（SSG 阶段没有 document，必须在客户端处理）
+  // 挂载后：同步 <html lang/dir>（SSG 阶段没有 document），并检测用户语言
   useEffect(() => {
-    applyDocumentLocale(locale)
-  }, [locale])
+    const detected = detectLocale()
+    if (detected !== currentLocale) {
+      currentLocale = detected
+      setLocaleState(detected)
+    }
+    applyDocumentLocale(detected)
+  }, [])
 
   const changeLocale = useCallback((input: string | null | undefined) => {
     const code = setLocale(input)

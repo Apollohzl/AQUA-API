@@ -7,6 +7,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useEffect, useState } from 'react'
 
 import { AppIcon } from '@/components/AppIcon'
 import { useSite } from '@/lib/site/site-context'
@@ -44,6 +45,12 @@ const FOOTER_COLS: { title: string; links: { label: string; href: string; extern
 
 export function SiteFooter() {
   const { status, siteName } = useSite()
+  // 年份若在渲染期直接 new Date()，SSG（Node 时区）与浏览器可能差一天/一年，
+  // 触发 hydration 不一致（React #412/#418）。挂载后取一次即可。
+  const [year, setYear] = useState(2026)
+  useEffect(() => {
+    setYear(new Date().getFullYear())
+  }, [])
 
   return (
     <footer className="border-t border-line bg-card">
@@ -104,7 +111,7 @@ export function SiteFooter() {
       <div className="border-t border-line py-4">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 text-xs text-ink-3 sm:px-6">
           <span>
-            © {new Date().getFullYear()} {status?.operator_name || siteName}
+            © {year} {status?.operator_name || siteName}
           </span>
           <div className="flex flex-wrap gap-x-4">
             {status?.icp_license && (
