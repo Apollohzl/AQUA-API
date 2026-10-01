@@ -235,9 +235,9 @@ type ModelUsage struct {
 // 让站长不用翻调用日志就能看出该从渠道清单里清掉哪些失效模型。
 // 三个字段组合成一条唯一记录（model + status_code 去重）。
 type ModelFailureStat struct {
-	Model      string // 模型名
-	StatusCode int    // 失败状态码（>= 400）
-	Count      int64  // 该 (模型, 状态码) 组合的出现次数
+	Model      string `json:"model"`        // 模型名
+	StatusCode int    `json:"status_code"`  // 失败状态码（>= 400）
+	Count      int64  `json:"count"`        // 该 (模型, 状态码) 组合的出现次数
 }
 
 // UsageLogRepository 定义调用日志的持久化与聚合操作。
