@@ -16,8 +16,9 @@ import { Modal } from '@/components/ui/Modal'
 import { Tabs } from '@/components/ui/Display'
 import { SiteFooter } from '@/components/site/SiteFooter'
 import { SiteHeader } from '@/components/site/SiteHeader'
+import { useSite } from '@/lib/site/site-context'
 import { vendorLabel, vendorOf, vendorTone } from '@/utils/vendor'
-import { formatNumber } from '@/utils/format'
+import { formatYuanPerCall, formatYuanPerMillion } from '@/utils/money'
 
 export default function ModelPlazaPage() {
   const [data, setData] = useState<ModelPlaza | null>(null)
@@ -128,6 +129,7 @@ export default function ModelPlazaPage() {
 /* ── 模型卡片 ───────────────────────────────────────────── */
 
 function ModelCard({ model, onClick }: { model: PlazaModel; onClick: () => void }) {
+  const { quotaPerYuan } = useSite()
   const vendor = vendorOf(model.model)
   const price = model.prices?.[0]
   return (
@@ -147,28 +149,29 @@ function ModelCard({ model, onClick }: { model: PlazaModel; onClick: () => void 
       </div>
       <div className="mt-3 flex items-center gap-2">
         {model.available ? <Badge tone="ok">可用</Badge> : <Badge tone="err">不可用</Badge>}
-        {price?.is_free ? <Badge tone="info">免费</Badge> : <Badge tone="brand">{priceLabel(price)}</Badge>}
+        {price?.is_free ? <Badge tone="info">免费</Badge> : <Badge tone="brand">{priceLabel(price, quotaPerYuan)}</Badge>}
         {model.channel_count > 0 && <span className="ml-auto text-xs text-ink-3">{model.channel_count} 渠道</span>}
       </div>
     </button>
   )
 }
 
-/** 价格摘要：按计费方式给出一行文案 */
-function priceLabel(price: PlazaPrice | undefined): string {
+/** 价格摘要：按计费方式给出一行文案（一律换算成人民币展示） */
+function priceLabel(price: PlazaPrice | undefined, quotaPerYuan: number): string {
   if (!price) return '待定价'
   if (price.is_free) return '免费'
   if (price.billing_mode === 'per_call') {
-    return price.per_call_price > 0 ? `${formatNumber(price.per_call_price)} 额度/次` : '按次'
+    return price.per_call_price > 0 ? formatYuanPerCall(price.per_call_price, quotaPerYuan) : '按次'
   }
   if (price.billing_mode === 'free') return '免费'
   const prompt = price.prompt_price
-  return prompt > 0 ? `${formatNumber(prompt)} /1M 输入` : '按量'
+  return prompt > 0 ? `${formatYuanPerMillion(prompt, quotaPerYuan)} 输入` : '按量'
 }
 
 /* ── 详情弹层 ───────────────────────────────────────────── */
 
 function ModelDetailModal({ model, onClose }: { model: PlazaModel | null; onClose: () => void }) {
+  const { quotaPerYuan } = useSite()
   if (!model) return null
   return (
     <Modal open onClose={onClose} title={model.model} width={560}>
@@ -188,12 +191,12 @@ function ModelDetailModal({ model, onClose }: { model: PlazaModel | null; onClos
                   <Badge tone="info">免费</Badge>
                 ) : price.billing_mode === 'per_call' ? (
                   <span className="text-ink-2">
-                    {price.per_call_price > 0 ? `${formatNumber(price.per_call_price)} 额度/次` : '按次计费'}
+                    {price.per_call_price > 0 ? formatYuanPerCall(price.per_call_price, quotaPerYuan) : '按次计费'}
                   </span>
                 ) : (
                   <span className="text-ink-2">
-                    输入 {formatNumber(price.prompt_price)} · 输出 {formatNumber(price.completion_price)}
-                    <span className="text-xs text-ink-3"> /1M</span>
+                    输入 {formatYuanPerMillion(price.prompt_price, quotaPerYuan)} · 输出{' '}
+                    {formatYuanPerMillion(price.completion_price, quotaPerYuan)}
                   </span>
                 )}
               </div>
