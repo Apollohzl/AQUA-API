@@ -271,27 +271,35 @@ func (s *Server) invalidateSitemapCache() {
 	s.sitemapMu.Unlock()
 }
 
-// injectSEOMeta 把 SEO 元信息注入 SPA 的 index.html。
+// injectSEOMeta 把 SEO 元信息注入前端页面。
 //
-// 注入方式：用一对标记（<!--aqua:seo:start--> / <!--aqua:seo:end-->）包裹默认块，
-// 后端整块替换标记之间的内容，标记本身保留（便于下次再替换）。
-// 找不到标记时原样返回：老版本前端产物也能正常服务，不能因此报错或返回空页。
+// 注入方式（兼容两代前端产物）：
+//  1. 旧 Vite SPA：用一对标记（<!--aqua:seo:start--> / <!--aqua:seo:end-->）包裹默认块，
+//     后端整块替换标记之间的内容，标记本身保留（便于下次再替换）；
+//  2. Next.js 静态导出：页面由 Next 生成 <head>（含 title/meta），没有 aqua:seo 标记，
+//     此时退化到在 </head> 之前插入 SEO 块，保证站长在后台配置的收录信息仍能进页面。
+// 找不到标记且无法定位 </head> 时原样返回：老版本前端产物也能正常服务，不能因此报错或返回空页。
 func injectSEOMeta(page []byte, settings model.SiteSettings, baseURL, path string) []byte {
 	content := string(page)
+	block := buildSEOMetaBlock(settings, baseURL, path)
 
 	start := strings.Index(content, seoMetaStartMarker)
-	if start < 0 {
-		return page
+	if start >= 0 {
+		relEnd := strings.Index(content[start:], seoMetaEndMarker)
+		if relEnd >= 0 {
+			end := start + relEnd
+			replaced := content[:start+len(seoMetaStartMarker)] + "\n" + block + content[end:]
+			return []byte(replaced)
+		}
 	}
-	relEnd := strings.Index(content[start:], seoMetaEndMarker)
-	if relEnd < 0 {
-		return page
-	}
-	end := start + relEnd
 
-	block := buildSEOMetaBlock(settings, baseURL, path)
-	replaced := content[:start+len(seoMetaStartMarker)] + "\n" + block + content[end:]
-	return []byte(replaced)
+	// 无标记（Next 产物）：在 </head> 前插入
+	headEnd := strings.Index(content, "</head>")
+	if headEnd < 0 {
+		return page
+	}
+	inserted := content[:headEnd] + "\n" + block + "\n" + content[headEnd:]
+	return []byte(inserted)
 }
 
 // buildSEOMetaBlock 组装 SEO 块（meta 标签 + canonical 链接）。

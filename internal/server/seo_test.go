@@ -276,14 +276,36 @@ func TestInjectSEOMeta_标签齐全(t *testing.T) {
 	}
 }
 
-// TestInjectSEOMeta_缺失标记原样返回 验证老版本前端产物不会报错或空白。
-func TestInjectSEOMeta_缺失标记原样返回(t *testing.T) {
-	original := []byte("<html><head></head><body>no markers</body></html>")
+// TestInjectSEOMeta_无标记有head插入SEO 验证 Next 静态导出产物（无 aqua:seo 标记）时，
+// SEO 块被插入到 </head> 之前——保证站长后台配置的收录信息仍能进入页面。
+func TestInjectSEOMeta_无标记有head插入SEO(t *testing.T) {
+	page := []byte("<html><head><title>默认标题</title></head><body>no markers</body></html>")
+
+	out := string(injectSEOMeta(page, model.DefaultSiteSettings(), "https://aqua.example.com", "/"))
+
+	// Next 产物没有标记但有关闭的 </head>：应插入 SEO 块
+	if !strings.Contains(out, `<meta name="keywords"`) {
+		t.Fatalf("Next 产物应在 </head> 前插入 SEO 块\n%s", out)
+	}
+	if !strings.Contains(out, `<link rel="canonical"`) {
+		t.Fatalf("Next 产物应插入 canonical\n%s", out)
+	}
+	// 插入位置必须在 </head> 之前
+	headEnd := strings.Index(out, "</head>")
+	canonical := strings.Index(out, `<link rel="canonical"`)
+	if canonical > headEnd || canonical < 0 {
+		t.Fatalf("SEO 块应插入到 </head> 之前\n%s", out)
+	}
+}
+
+// TestInjectSEOMeta_无head且无标记原样返回 验证连 </head> 都没有的产物不做注入。
+func TestInjectSEOMeta_无head且无标记原样返回(t *testing.T) {
+	original := []byte("<html><body>no head close</body></html>")
 
 	out := injectSEOMeta(original, model.DefaultSiteSettings(), "https://aqua.example.com", "/")
 
 	if string(out) != string(original) {
-		t.Fatalf("缺失标记时应原样返回，实际: %s", out)
+		t.Fatalf("无标记且无 </head> 时应原样返回，实际: %s", out)
 	}
 }
 
@@ -376,5 +398,57 @@ func TestSPA回退注入SEO元信息(t *testing.T) {
 	// canonical 必须是"当前请求路径"，而不是写死的首页
 	if !strings.Contains(body, `href="https://aqua.example.com/pricing"`) {
 		t.Errorf("canonical 应指向当前路径 /pricing\n%s", body)
+	}
+}
+
+// TestNext产物_真实页面与SPA回退 验证 Next.js 静态导出产物（目录式多页）的伺服行为。
+//
+// 背景：迁移到 Next.js 后产物形态变化——每个路由是目录下的 index.html，
+// 静态资源在 /_next/，客户端导航还会请求 RSC 的 .txt 文件。
+// 旧"只回退 index.html"的逻辑会把真实页面也回退成首页，必须改为两级查找。
+func TestNext产物_真实页面与SPA回退(t *testing.T) {
+	web := fstest.MapFS{
+		// Next 目录式页面：/models → models/index.html
+		"web/dist/models/index.html": &fstest.MapFile{Data: []byte(
+			"<!DOCTYPE html><html><head><!--aqua:seo:start--><!--aqua:seo:end--></head><body>models page</body></html>")},
+		// 嵌套路由：/console/tokens → console/tokens/index.html
+		"web/dist/console/tokens/index.html": &fstest.MapFile{Data: []byte(
+			"<!DOCTYPE html><html><head><!--aqua:seo:start--><!--aqua:seo:end--></head><body>tokens page</body></html>")},
+		// 静态资源：/_next/static/chunks/app.js
+		"web/dist/_next/static/chunks/app.js": &fstest.MapFile{Data: []byte("console.log('next chunk')")},
+		// RSC 客户端导航文件：index.txt
+		"web/dist/index.txt": &fstest.MapFile{Data: []byte("flight payload")},
+		// SPA 回退入口
+		"web/dist/index.html": &fstest.MapFile{Data: []byte(
+			"<!DOCTYPE html><html><head><!--aqua:seo:start--><!--aqua:seo:end--></head><body>spa fallback</body></html>")},
+	}
+	srv, _ := newSEOServer(t, map[string]string{
+		model.SettingKeySEOSiteURL: "https://aqua.example.com",
+	}, web)
+
+	cases := []struct {
+		path       string
+		wantBody   string
+		wantCache  string
+		wantStatus int
+	}{
+		{"/models", "models page", "no-cache", http.StatusOK},
+		{"/console/tokens", "tokens page", "no-cache", http.StatusOK},
+		{"/_next/static/chunks/app.js", "next chunk", assetCacheControl, http.StatusOK},
+		{"/index.txt", "flight payload", assetCacheControl, http.StatusOK},
+		{"/unknown-route", "spa fallback", "no-cache", http.StatusOK},
+	}
+	for _, tc := range cases {
+		rec := getSEOResponse(srv, tc.path)
+		if rec.Code != tc.wantStatus {
+			t.Errorf("GET %s 状态码 = %d，期望 %d", tc.path, rec.Code, tc.wantStatus)
+			continue
+		}
+		if !strings.Contains(rec.Body.String(), tc.wantBody) {
+			t.Errorf("GET %s 未返回期望内容（%q），实际:\n%s", tc.path, tc.wantBody, rec.Body.String())
+		}
+		if got := rec.Header().Get("Cache-Control"); got != tc.wantCache {
+			t.Errorf("GET %s Cache-Control = %q，期望 %q", tc.path, got, tc.wantCache)
+		}
 	}
 }
