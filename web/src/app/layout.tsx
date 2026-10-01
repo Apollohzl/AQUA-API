@@ -21,6 +21,9 @@ export const metadata: Metadata = {
   description: '自托管、可私有部署的 LLM API 网关：统一多协议上游、精细计费、全量日志与审计。',
   viewport: 'width=device-width, initial-scale=1',
   robots: { index: true, follow: true },
+  icons: {
+    icon: '/favicon.ico',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
