@@ -1698,6 +1698,31 @@ type adminUserUpsertRequest struct {
 	Role     int    `json:"role"`
 	Status   int    `json:"status"`
 	Quota    *int64 `json:"quota"`
+	// AgentGroup 是代理分组名（空串 = 普通用户）。
+	//
+	// 用指针而非字符串：更新时"没传这个字段"必须与"传空串（取消代理资格）"
+	// 区分开——前者是别的客户端（如旧版后台）在改别的东西，不该顺手把代理资格抹掉。
+	AgentGroup *string `json:"agent_group"`
+}
+
+// validateAgentGroup 校验代理分组名是否可用。
+//
+// 空串合法（= 普通用户）。非空时必须能在分组表里查到，否则一律拒绝——
+// 分组名写错的话，用户会在广场上看不到任何模型，而界面上完全看不出原因，
+// 这种"静默失效"比直接报错难排查得多。
+func (s *Server) validateAgentGroup(ctx context.Context, name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", nil
+	}
+	if s.deps.Groups == nil {
+		return "", errors.New("分组模块未启用，无法设置代理分组")
+	}
+	group, err := s.deps.Groups.GetByName(ctx, name)
+	if err != nil || group == nil {
+		return "", fmt.Errorf("代理分组 %q 不存在", name)
+	}
+	return group.Name, nil
 }
 
 // handleListUsers 返回用户列表。
@@ -1760,15 +1785,26 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 		quota = *req.Quota
 	}
 
+	agentGroup := ""
+	if req.AgentGroup != nil {
+		validated, err := s.validateAgentGroup(c.Request.Context(), *req.AgentGroup)
+		if err != nil {
+			oai.WriteError(c.Writer, http.StatusBadRequest, err.Error(), oai.TypeInvalidRequest, "invalid_agent_group")
+			return
+		}
+		agentGroup = validated
+	}
+
 	user := &model.User{
 		Username:     strings.TrimSpace(req.Username),
 		PasswordHash: hash,
 		// 邮箱统一走 NormalizeEmail（去空白 + 转小写）：唯一索引是按原文匹配的，
 		// 若这里存入大小写不一的写法，就会绕过"一个邮箱只能绑定一个账号"的约束。
-		Email:  model.NormalizeEmail(req.Email),
-		Role:   model.UserRole(defaultIfZero(req.Role, int(model.UserRoleUser))),
-		Status: model.UserStatus(defaultIfZero(req.Status, int(model.UserStatusEnabled))),
-		Quota:  quota,
+		Email:      model.NormalizeEmail(req.Email),
+		Role:       model.UserRole(defaultIfZero(req.Role, int(model.UserRoleUser))),
+		Status:     model.UserStatus(defaultIfZero(req.Status, int(model.UserStatusEnabled))),
+		Quota:      quota,
+		AgentGroup: agentGroup,
 	}
 	if err := s.deps.Users.Create(c.Request.Context(), user); err != nil {
 		if errors.Is(err, model.ErrUsernameTaken) {
@@ -1836,6 +1872,15 @@ func (s *Server) handleUpdateUser(c *gin.Context) {
 	user.Status = newStatus
 	if req.Quota != nil {
 		user.Quota = *req.Quota
+	}
+	// 代理分组：传空串 = 取消代理资格（回到普通用户）；不传 = 保持不变。
+	if req.AgentGroup != nil {
+		validated, err := s.validateAgentGroup(ctx, *req.AgentGroup)
+		if err != nil {
+			oai.WriteError(c.Writer, http.StatusBadRequest, err.Error(), oai.TypeInvalidRequest, "invalid_agent_group")
+			return
+		}
+		user.AgentGroup = validated
 	}
 	// 口令留空表示不修改（避免管理员只想改额度却意外重置了用户密码）
 	if req.Password != "" {

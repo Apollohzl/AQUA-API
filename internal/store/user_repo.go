@@ -38,7 +38,7 @@ const (
 )
 
 // userColumns 集中定义查询列，顺序必须与 scanUser 的扫描顺序严格一致。
-const userColumns = `id, username, password_hash, email, role, status, quota, used_quota, invite_code, inviter_id, created_at, updated_at`
+const userColumns = `id, username, password_hash, email, role, status, quota, used_quota, invite_code, inviter_id, agent_group, created_at, updated_at`
 
 // maxInviteCodeAttempts 是注册时生成邀请码的最大重试次数。
 //
@@ -81,10 +81,10 @@ func (r *userRepository) Create(ctx context.Context, u *model.User) error {
 		}
 
 		res, err := r.db.ExecContext(ctx, `
-			INSERT INTO users (username, password_hash, email, role, status, quota, used_quota, invite_code, inviter_id, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			INSERT INTO users (username, password_hash, email, role, status, quota, used_quota, invite_code, inviter_id, agent_group, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			u.Username, u.PasswordHash, u.Email, int(u.Role), int(u.Status),
-			u.Quota, u.UsedQuota, u.InviteCode, u.InviterID, u.CreatedAt.Unix(), u.UpdatedAt.Unix(),
+			u.Quota, u.UsedQuota, u.InviteCode, u.InviterID, u.AgentGroup, u.CreatedAt.Unix(), u.UpdatedAt.Unix(),
 		)
 		if err != nil {
 			// 唯一索引冲突有三种来源，必须区分：用户名与邮箱重复是【业务错误】，直接上抛；
@@ -242,10 +242,10 @@ func (r *userRepository) Update(ctx context.Context, u *model.User) error {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE users SET
 			username = ?, password_hash = ?, email = ?, role = ?, status = ?,
-			quota = ?, used_quota = ?, updated_at = ?
+			quota = ?, used_quota = ?, agent_group = ?, updated_at = ?
 		WHERE id = ?`,
 		u.Username, u.PasswordHash, u.Email, int(u.Role), int(u.Status),
-		u.Quota, u.UsedQuota, u.UpdatedAt.Unix(), u.ID,
+		u.Quota, u.UsedQuota, u.AgentGroup, u.UpdatedAt.Unix(), u.ID,
 	)
 	if err != nil {
 		// 唯一索引冲突须区分用户名与邮箱：两者对使用者的可操作性不同
@@ -454,12 +454,13 @@ func scanUser(sc rowScanner) (*model.User, error) {
 		usedQuota    int64
 		inviteCode   string
 		inviterID    uint64
+		agentGroup   string
 		createdAt    int64
 		updatedAt    int64
 	)
 
 	if err := sc.Scan(&id, &username, &passwordHash, &email, &role, &status,
-		&quota, &usedQuota, &inviteCode, &inviterID, &createdAt, &updatedAt); err != nil {
+		&quota, &usedQuota, &inviteCode, &inviterID, &agentGroup, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
@@ -477,6 +478,7 @@ func scanUser(sc rowScanner) (*model.User, error) {
 		UsedQuota:    usedQuota,
 		InviteCode:   inviteCode,
 		InviterID:    inviterID,
+		AgentGroup:   agentGroup,
 		CreatedAt:    time.Unix(createdAt, 0),
 		UpdatedAt:    time.Unix(updatedAt, 0),
 	}, nil

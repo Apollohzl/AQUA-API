@@ -74,8 +74,13 @@ type userDTO struct {
 	Quota          int64  `json:"quota"`
 	UsedQuota      int64  `json:"used_quota"`
 	RemainingQuota int64  `json:"remaining_quota"`
-	CreatedAt      int64  `json:"created_at"`
-	UpdatedAt      int64  `json:"updated_at"`
+	// AgentGroup 是该用户的代理分组（空串 = 普通用户）。
+	//
+	// 下发给前端有两个用途：后台用户列表标出"谁是代理"，以及 /auth/me
+	// 让门户知道"我是不是代理"。它不是敏感信息（只是一个分组名）。
+	AgentGroup string `json:"agent_group"`
+	CreatedAt  int64  `json:"created_at"`
+	UpdatedAt  int64  `json:"updated_at"`
 }
 
 // toUserDTO 把用户模型转为对外 DTO。
@@ -94,6 +99,7 @@ func toUserDTO(u *model.User) userDTO {
 		Quota:          u.Quota,
 		UsedQuota:      u.UsedQuota,
 		RemainingQuota: u.RemainingQuota(),
+		AgentGroup:     u.AgentGroup,
 		CreatedAt:      unixOrZero(u.CreatedAt),
 		UpdatedAt:      unixOrZero(u.UpdatedAt),
 	}

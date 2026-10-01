@@ -140,8 +140,20 @@ type User struct {
 	// 刻意用 0 而非 NULL 表示"无"：与项目其余外键风格一致，
 	// 也让"是否被邀请"的判定无需处理 NULL 三态。
 	InviterID uint64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// AgentGroup 是该用户作为【代理】时查看模型广场所用的分组名；空串表示普通用户。
+	//
+	// 用途：代理在模型广场看到的应是"自己拿货的那套模型与价格"，
+	// 而不是公开分组的那套。非空时，广场只展示该分组下的模型，
+	// 并同时给出「原价（公共价）」与「代理价（该分组倍率折算后）」。
+	//
+	// 为什么存分组名而不是布尔/折扣值：折扣在系统里的唯一落地方式是
+	// 分组的计费倍率 ratio（billing.ApplyRatio = 基础额度 × ratio / 100），
+	// 存分组名即可直接复用这条既有链路，改折扣只改分组一处，不会两处打架。
+	//
+	// 详见迁移 0042_user_agent_group.sql。
+	AgentGroup string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // IsAdmin 判断是否为管理员。
