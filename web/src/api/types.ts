@@ -351,6 +351,8 @@ export interface Channel {
   name: string
   /** 渠道类型编号（契约仅示例了 1，具体枚举待与后端对齐） */
   type: number
+  /** 渠道类型标识（与 channeltype 目录 Key 对应，如 azure_openai / anthropic）；空串表示历史数据 */
+  type_key?: string
   base_url: string
   masked_key: string
   /** 空数组表示「支持全部模型」（M2 过渡约定） */
@@ -620,6 +622,8 @@ export interface FetchModelsResult {
 export interface ChannelPayload {
   name: string
   type: number
+  /** 渠道类型标识（与 channeltype 目录 Key 对应）；留空 = OpenAI 兼容 / 更新时不修改 */
+  type_key?: string
   base_url: string
   api_key?: string
   models: string[]

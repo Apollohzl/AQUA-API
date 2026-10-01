@@ -1,6 +1,12 @@
 # 依赖目录：体积大且可由 package-lock.json 完整还原，不入库
 node_modules/
 
+# Next.js 构建中间产物与静态导出目录（out 是 next build 的默认导出目录，
+# 产物最终由 scripts/sync-dist.mjs 复制到 dist/，两者都不入库）
+.next/
+out/
+tsconfig.tsbuildinfo
+
 # 构建产物：不入库
 #
 # 原因：

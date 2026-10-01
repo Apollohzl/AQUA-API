@@ -130,7 +130,7 @@ export async function downloadMaintenanceBackup(): Promise<void> {
   const token = getSessionToken()
   const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
-  const base = import.meta.env.VITE_API_BASE || '/api'
+  const base = process.env.NEXT_PUBLIC_API_BASE || '/api'
 
   const response = await fetch(`${base}/admin/maintenance/backup`, { headers })
   if (!response.ok) {

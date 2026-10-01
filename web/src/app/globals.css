@@ -1,0 +1,102 @@
+/* AQUA-API 全局样式：Tailwind CSS v4（CSS-first 配置）与设计令牌。
+ *
+ * 意图（Why）：
+ *   视觉工程学基线——亮色冷白底 + 白卡片 + 细描边 + 单一强调色（靛蓝→青），
+ *   全站间距/圆角/描边/阴影都取自 @theme 令牌，保证「重复」与「对齐」。
+ *
+ * 流转（Flow）：
+ *   root layout → 本文件（@import "tailwindcss"）→ 组件类名（如 bg-surface text-ink border-line）
+ *
+ * 扩展（Extend）：
+ *   改色板：只改 @theme 中的 --color-* 变量；新增语义色在 @theme 追加后即可全站使用。
+ */
+@import "tailwindcss";
+
+@theme {
+  /* ── 色板：冷白亮色系 ─────────────────────────── */
+  --color-surface: #f6f7f9;      /* 页面底：极浅冷灰白 */
+  --color-card: #ffffff;         /* 卡片/面板底 */
+  --color-ink: #1a2233;          /* 主文字：深蓝黑 */
+  --color-ink-2: #4a5568;        /* 次文字 */
+  --color-ink-3: #8b95a7;        /* 弱文字/占位 */
+  --color-line: #e3e7ec;         /* 描边 */
+  --color-line-2: #d4dae2;       /* 强调描边 */
+  --color-brand: #2f6bff;        /* 品牌强调：靛蓝 */
+  --color-brand-2: #0ea5a5;      /* 次级强调：青 */
+  --color-ok: #16a34a;           /* 成功 */
+  --color-warn: #d97706;         /* 警告 */
+  --color-err: #dc2626;          /* 错误 */
+  --color-info: #2563eb;         /* 信息 */
+
+  /* ── 排版：中文优先的字体栈 ───────────────────── */
+  --font-sans: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", ui-sans-serif,
+    system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Consolas, "Courier New", monospace;
+
+  /* ── 间距/圆角/阴影基线（8px 栅格）────────────── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-card: 0 1px 2px rgb(26 34 51 / 0.04), 0 4px 16px rgb(26 34 51 / 0.05);
+  --shadow-pop: 0 8px 30px rgb(26 34 51 / 0.12);
+
+  /* ── 动效基线 ────────────────────────────────── */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 基础层：页面底、默认文字、RTL 支持 */
+html {
+  scroll-behavior: smooth;
+}
+body {
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+[dir="rtl"] body {
+  letter-spacing: 0;
+}
+
+/* 滚动进场（配合 useReveal）：默认不可见，进入视口后淡入上移 */
+.reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.5s var(--ease-out-soft), transform 0.5s var(--ease-out-soft);
+  transition-delay: var(--rd, 0ms);
+}
+.reveal-in {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* 细网格背景（hero 与区块通用）：极淡线条，不抢内容 */
+.grid-bg {
+  background-image:
+    linear-gradient(to right, rgb(26 34 51 / 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(26 34 51 / 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* 代码块基础皮肤 */
+.code-block {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* 选中文字跟随品牌色 */
+::selection {
+  background: rgb(47 107 255 / 0.16);
+}

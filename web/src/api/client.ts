@@ -24,7 +24,7 @@ import { getLocale } from '@/i18n'
 import type { ApiErrorBody } from './types'
 
 /** API 前缀：契约约定管理/门户接口前缀为 /api */
-const API_PREFIX = import.meta.env.VITE_API_BASE || '/api'
+const API_PREFIX = process.env.NEXT_PUBLIC_API_BASE || '/api'
 
 /** 会话令牌与用户快照在 localStorage 中的键名（刷新页面后仍保持登录态） */
 const TOKEN_KEY = 'aqua.session_token'
@@ -145,7 +145,7 @@ export function clearSession(): void {
 type UnauthorizedHandler = () => void
 let unauthorizedHandler: UnauthorizedHandler | null = null
 
-export function setUnauthorizedHandler(handler: UnauthorizedHandler): void {
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
   unauthorizedHandler = handler
 }
 
