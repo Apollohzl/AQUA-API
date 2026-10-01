@@ -2,8 +2,12 @@
  *
  * 意图（Why）：
  *   用户要「技术站」，因此把原来的卡片网格改成**表格**——一行一个模型，
- *   列固定为「模型 / 厂商 / 分组 / 价格 / 渠道」，扫视与比价都更快，也更像工程清单。
- *   仍按厂商分区（表内分组行），保留「有什么、什么价」的 10 秒可读性。
+ *   列固定为「模型 / 分组 / 价格 / 渠道」，扫视与比价都更快，也更像工程清单。
+ *
+ *   代理视图：被指派了代理分组的账号登录后，看到的是【自己那一档】的模型与价格，
+ *   并额外给出「原价划线 + 橙色折扣块」的对照——原价是他对外报价的锚，
+ *   折后价是他自己的拿货成本，两者并排才能一眼算出毛利。
+ *   普通用户/匿名访客看到的仍是公开模型与公开价，完全看不出批发档的存在。
  *
  * 流转（Flow）：
  *   SiteHeader → 分组筛选(Tabs) + 搜索 → 表格（按厂商分区）→ 行点击 → 详情弹层 → SiteFooter
@@ -13,14 +17,14 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 
 import { fetchModelPlaza } from '@/api/site'
-import type { ModelPlaza, PlazaModel, PlazaPrice } from '@/api/types'
+import type { ModelPlaza, PlazaModel, PlazaPrice, PlazaViewer } from '@/api/types'
 import { AppIcon } from '@/components/AppIcon'
 import { Badge, EmptyState, Skeleton, Tabs } from '@/components/ui/Display'
 import { Modal } from '@/components/ui/Modal'
 import { SiteFooter } from '@/components/site/SiteFooter'
 import { SiteHeader } from '@/components/site/SiteHeader'
 import { useSite } from '@/lib/site/site-context'
-import { formatYuanPerCall, formatYuanPerMillion } from '@/utils/money'
+import { formatDiscountLabel, formatYuanPerCall, formatYuanPerMillion } from '@/utils/money'
 import { vendorLabel, vendorOf, vendorTone } from '@/utils/vendor'
 
 export default function ModelPlazaPage() {
@@ -41,6 +45,8 @@ export default function ModelPlazaPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  const viewer = data?.viewer
 
   /** 按厂商分区，便于在长表里按相似性定位 */
   const grouped = useMemo(() => {
@@ -73,7 +79,9 @@ export default function ModelPlazaPage() {
               <span className="text-brand">/</span> models
             </div>
             <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-ink">模型与价格</h1>
-            <p className="mt-1 text-[13px] text-ink-3">当前可用模型与分组价格，实时来自站点信息。</p>
+            <p className="mt-1 text-[13px] text-ink-3">
+              {viewer ? '你看到的为代理拿货档的模型与折扣价。' : '当前可用模型与分组价格，实时来自站点信息。'}
+            </p>
           </div>
           <div className="flex max-w-xs flex-1 items-center gap-2 rounded-md border border-line-2 bg-card px-3 focus-within:border-brand">
             <AppIcon name="search" size={15} className="text-ink-3" />
@@ -86,9 +94,14 @@ export default function ModelPlazaPage() {
           </div>
         </div>
 
-        <div className="mt-6">
-          <Tabs items={tabs as { value: string; label: string; count?: number }[]} value={group} onChange={(v) => setGroup(v)} />
-        </div>
+        {viewer && <AgentBanner viewer={viewer} />}
+
+        {/* 代理视图只涉及单一档位，分组筛选没有意义，直接隐藏避免误导 */}
+        {!viewer && (
+          <div className="mt-6">
+            <Tabs items={tabs as { value: string; label: string; count?: number }[]} value={group} onChange={(v) => setGroup(v)} />
+          </div>
+        )}
 
         {!data ? (
           <div className="mt-6 overflow-hidden rounded-lg border border-line">
@@ -98,7 +111,10 @@ export default function ModelPlazaPage() {
           </div>
         ) : data.items.length === 0 ? (
           <div className="mt-6 rounded-lg border border-line bg-card">
-            <EmptyState title="没有匹配的模型" description="换一个关键词或分组试试" />
+            <EmptyState
+              title="没有匹配的模型"
+              description={viewer ? '当前代理档尚未配置模型价格，请联系管理员。' : '换一个关键词或分组试试'}
+            />
           </div>
         ) : (
           <div className="mt-6 overflow-hidden rounded-lg border border-line">
@@ -127,7 +143,7 @@ export default function ModelPlazaPage() {
                       </td>
                     </tr>
                     {models.map((model) => (
-                      <ModelRow key={model.model} model={model} onOpen={() => setSelected(model)} />
+                      <ModelRow key={model.model} model={model} viewer={viewer} onOpen={() => setSelected(model)} />
                     ))}
                   </Fragment>
                 ))}
@@ -141,14 +157,29 @@ export default function ModelPlazaPage() {
 
       <SiteFooter />
 
-      <ModelDetailModal model={selected} onClose={() => setSelected(null)} />
+      <ModelDetailModal model={selected} viewer={viewer} onClose={() => setSelected(null)} />
     </>
+  )
+}
+
+/* ── 代理身份横幅：说明"你正在以什么身份看这份清单" ───────── */
+
+function AgentBanner({ viewer }: { viewer: PlazaViewer }) {
+  return (
+    <div className="mt-6 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-warn/30 bg-warn/8 px-4 py-3">
+      <Badge tone="warn">{viewer.label}</Badge>
+      <span className="text-[13px] font-medium text-ink">代理拿货价</span>
+      <span className="font-mono text-[12px] text-ink-2">
+        基础价 × {viewer.ratio}% = {discountLabel(viewer.ratio)}
+      </span>
+      <span className="text-[12px] text-ink-3">下方价格已按你的拿货折扣结算，与原价并排展示。</span>
+    </div>
   )
 }
 
 /* ── 表格行 ─────────────────────────────────────────────── */
 
-function ModelRow({ model, onOpen }: { model: PlazaModel; onOpen: () => void }) {
+function ModelRow({ model, viewer, onOpen }: { model: PlazaModel; viewer?: PlazaViewer; onOpen: () => void }) {
   const { quotaPerYuan } = useSite()
   const price = model.prices?.[0]
   return (
@@ -160,9 +191,43 @@ function ModelRow({ model, onOpen }: { model: PlazaModel; onOpen: () => void }) 
         </div>
       </td>
       <td className="hidden px-4 py-2.5 font-mono text-ink-3 sm:table-cell">{model.groups?.join(' / ') || '—'}</td>
-      <td className="px-4 py-2.5 text-right text-ink-2">{priceLabel(price, quotaPerYuan)}</td>
+      <td className="px-4 py-2.5 text-right">
+        {viewer ? (
+          <AgentPriceCell price={price} listPrice={model.list_price} ratio={viewer.ratio} quotaPerYuan={quotaPerYuan} />
+        ) : (
+          <span className="text-ink-2">{priceLabel(price, quotaPerYuan)}</span>
+        )}
+      </td>
       <td className="hidden px-4 py-2.5 text-right font-mono text-ink-3 md:table-cell">{model.channel_count}</td>
     </tr>
+  )
+}
+
+/** 代理价单元格：原价划线 + 橙色折扣块（价格与折扣同框，一眼看清拿货成本） */
+function AgentPriceCell({
+  price,
+  listPrice,
+  ratio,
+  quotaPerYuan,
+}: {
+  price: PlazaPrice | undefined
+  listPrice: PlazaPrice | undefined
+  ratio: number
+  quotaPerYuan: number
+}) {
+  if (!price) return <span className="text-ink-3">待定价</span>
+  return (
+    <span className="inline-flex items-center justify-end gap-2 align-middle">
+      {listPrice && (
+        <span className="text-[12px] text-ink-3 line-through decoration-ink-3/70">
+          {priceLabel(listPrice, quotaPerYuan)}
+        </span>
+      )}
+      <span className="inline-flex items-center gap-1.5 rounded border border-warn/40 bg-warn/15 px-2 py-0.5 font-mono text-[12px] font-medium text-warn">
+        {priceLabel(price, quotaPerYuan)}
+        <span className="opacity-70">· {discountLabel(ratio)}</span>
+      </span>
+    </span>
   )
 }
 
@@ -177,14 +242,26 @@ function priceLabel(price: PlazaPrice | undefined, quotaPerYuan: number): string
   return prompt > 0 ? `${formatYuanPerMillion(prompt, quotaPerYuan)} 输入` : '按量'
 }
 
+/** 倍率（百分比）→ 折扣文案：60 → 6折、95 → 9.5折、100 → 原价 */
+const discountLabel = formatDiscountLabel
+
 /* ── 详情弹层 ───────────────────────────────────────────── */
 
-function ModelDetailModal({ model, onClose }: { model: PlazaModel | null; onClose: () => void }) {
+function ModelDetailModal({
+  model,
+  viewer,
+  onClose,
+}: {
+  model: PlazaModel | null
+  viewer?: PlazaViewer
+  onClose: () => void
+}) {
   const { quotaPerYuan } = useSite()
   if (!model) return null
   return (
     <Modal open onClose={onClose} title={model.model} width={560}>
       <div className="flex items-center gap-2">
+        {viewer && <Badge tone="warn">{viewer.label}</Badge>}
         {model.available ? <Badge tone="ok">可用</Badge> : <Badge tone="err">不可用</Badge>}
         <Badge tone="off">{model.channel_count} 个启用渠道</Badge>
         <Badge tone="info">{model.groups.length} 个分组</Badge>
@@ -196,7 +273,7 @@ function ModelDetailModal({ model, onClose }: { model: PlazaModel | null; onClos
             <thead className="bg-surface">
               <tr className="font-mono text-[11px] uppercase tracking-wider text-ink-3">
                 <th className="px-3 py-2 font-normal">分组</th>
-                <th className="px-3 py-2 text-right font-normal">价格</th>
+                <th className="px-3 py-2 text-right font-normal">{viewer ? '原价 / 代理价' : '价格'}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
@@ -204,7 +281,14 @@ function ModelDetailModal({ model, onClose }: { model: PlazaModel | null; onClos
                 <tr key={price.group}>
                   <td className="px-3 py-2 font-mono text-ink-2">{price.group}</td>
                   <td className="px-3 py-2 text-right text-ink-2">
-                    {price.is_free || price.billing_mode === 'free' ? (
+                    {viewer ? (
+                      <AgentPriceCell
+                        price={price}
+                        listPrice={model.list_price}
+                        ratio={viewer.ratio}
+                        quotaPerYuan={quotaPerYuan}
+                      />
+                    ) : price.is_free || price.billing_mode === 'free' ? (
                       <Badge tone="info">免费</Badge>
                     ) : price.billing_mode === 'per_call' ? (
                       price.per_call_price > 0 ? formatYuanPerCall(price.per_call_price, quotaPerYuan) : '按次计费'

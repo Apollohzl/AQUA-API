@@ -31,7 +31,7 @@ import { SiteFooter } from '@/components/site/SiteFooter'
 import { SiteHeader } from '@/components/site/SiteHeader'
 import { useAuth } from '@/lib/auth/auth-context'
 import { useSite } from '@/lib/site/site-context'
-import { formatYuanPerCall, formatYuanPerMillion } from '@/utils/money'
+import { formatDiscountLabel, formatYuanPerCall, formatYuanPerMillion } from '@/utils/money'
 
 const REPO_URL = 'https://gitee.com/xiaosu4610/AQUA-API'
 
@@ -269,6 +269,7 @@ function ModelPreview() {
   }, [])
 
   const rows: PlazaModel[] = plaza?.items?.slice(0, 8) ?? []
+  const viewer = plaza?.viewer
 
   return (
     <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-16">
@@ -276,7 +277,7 @@ function ModelPreview() {
         anchorId="models"
         index="03"
         title="模型与价格"
-        desc="实时来自站点信息，价格按分组展示，不做修饰。"
+        desc={viewer ? '当前为你的代理拿货档：划线为原价，橙色为你的折后价。' : '实时来自站点信息，价格按分组展示，不做修饰。'}
       />
       <div className="mt-8 overflow-hidden rounded-lg border border-line">
         <table className="w-full text-left text-[13px]">
@@ -302,7 +303,23 @@ function ModelPreview() {
                     <td className="hidden px-4 py-2.5 font-mono text-ink-3 sm:table-cell">
                       {m.groups?.join(' / ') || '—'}
                     </td>
-                    <td className="px-4 py-2.5 text-right text-ink-2">{priceLabel(m.prices?.[0], quotaPerYuan)}</td>
+                    <td className="px-4 py-2.5 text-right text-ink-2">
+                      {viewer ? (
+                        <span className="inline-flex items-center justify-end gap-2">
+                          {m.list_price && (
+                            <span className="text-[12px] text-ink-3 line-through decoration-ink-3/70">
+                              {priceLabel(m.list_price, quotaPerYuan)}
+                            </span>
+                          )}
+                          <span className="inline-flex items-center gap-1.5 rounded border border-warn/40 bg-warn/15 px-2 py-0.5 font-mono text-[12px] font-medium text-warn">
+                            {priceLabel(m.prices?.[0], quotaPerYuan)}
+                            <span className="opacity-70">· {formatDiscountLabel(viewer.ratio)}</span>
+                          </span>
+                        </span>
+                      ) : (
+                        priceLabel(m.prices?.[0], quotaPerYuan)
+                      )}
+                    </td>
                   </tr>
                 ))}
           </tbody>

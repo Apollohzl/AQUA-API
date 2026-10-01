@@ -89,6 +89,8 @@ export interface AuthUser {
   status?: number
   used_quota?: number
   created_at?: number
+  /** 代理分组名（空/缺省 = 普通用户） */
+  agent_group?: string
 }
 
 /** POST /api/auth/login、/api/auth/register 响应 */
@@ -803,6 +805,8 @@ export interface AdminUser {
   status: number
   quota: number
   used_quota: number
+  /** 代理分组名（空/缺省 = 普通用户）；决定该账号在模型广场看到的模型与价格 */
+  agent_group?: string
   created_at?: number
   updated_at?: number
 }
@@ -814,6 +818,8 @@ export interface CreateUserPayload {
   role: number
   quota?: number
   status?: number
+  /** 代理分组名（空串 = 普通用户） */
+  agent_group?: string
 }
 
 /** 更新用户（含调整额度）：只提交需要变更的字段 */
@@ -822,6 +828,12 @@ export interface UpdateUserPayload {
   role?: number
   status?: number
   quota?: number
+  /**
+   * 代理分组名：传空串 = 取消代理资格；不传 = 保持不变。
+   *
+   * 后端的区分依据是"字段是否存在"（指针语义），因此这里用可选属性表达。
+   */
+  agent_group?: string
   /** 契约未定义：是否允许管理员重置密码，待确认后再启用 */
   password?: string
 }
@@ -1294,6 +1306,13 @@ export interface PlazaModel {
   /** 支持该模型的启用渠道数量 */
   channel_count: number
   prices: PlazaPrice[]
+  /**
+   * 原价（未打折）。仅【代理视图】下发，用于渲染「划线原价」。
+   *
+   * 与 prices[0]（代理价）取自同一条价格规则：代理价 = 原价 × 分组倍率 ÷ 100。
+   * 普通用户视图不下发该字段。
+   */
+  list_price?: PlazaPrice
 }
 
 /** 模型广场的分组视图 */
@@ -1305,11 +1324,23 @@ export interface PlazaGroup {
   model_count: number
 }
 
+/** 广场查看者身份（仅代理登录后下发） */
+export interface PlazaViewer {
+  /** 查看者所属的代理分组名 */
+  agent_group: string
+  /** 分组展示名（如「战略代理」） */
+  label: string
+  /** 分组计费倍率（百分比，60 = 拿货 6 折） */
+  ratio: number
+}
+
 /** GET /api/models 响应 */
 export interface ModelPlaza {
   items: PlazaModel[]
   groups: PlazaGroup[]
   total: number
+  /** 代理视图标识：存在即表示"这次是代理在看广场" */
+  viewer?: PlazaViewer
 }
 
 /* ─────────────────── 门户可选分组（GET /api/user/groups） ─────────────────── */

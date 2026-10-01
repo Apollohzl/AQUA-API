@@ -77,6 +77,19 @@ export function formatYuanPerMillion(pricePerMillionQuota: number | null | undef
   return `${formatYuanFromQuota(pricePerMillionQuota, quotaPerYuan)}/M`
 }
 
+/**
+ * 分组倍率（百分比）→ 折扣文案：60 → "6折"、95 → "9.5折"、100 及以上 → "原价"。
+ *
+ * 代理视图用它把「拿货多少折」直接写给人看——ratio 是内部刻度，
+ * 让站长/代理自己对 60 换算成"6 折"既不直观也容易算错。
+ */
+export function formatDiscountLabel(ratio: number | null | undefined): string {
+  const r = Number(ratio ?? 0)
+  if (!Number.isFinite(r) || r <= 0 || r >= 100) return '原价'
+  const zhe = r / 10
+  return `${Number.isInteger(zhe) ? zhe : zhe.toFixed(1)}折`
+}
+
 /** 数字千分位（内部用，避免与 i18n 循环依赖） */
 function formatNumberSafe(value: number | null | undefined): string {
   const v = Number(value ?? 0)

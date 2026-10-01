@@ -82,6 +82,16 @@ export default function AdminUsersPage() {
       ),
     },
     {
+      // 代理标记：一眼看出哪些账号在按批发档看模型广场
+      title: '代理',
+      render: (row) =>
+        row.agent_group ? (
+          <Badge tone="warn">{row.agent_group}</Badge>
+        ) : (
+          <span className="text-ink-3">—</span>
+        ),
+    },
+    {
       title: '余额',
       align: 'right',
       render: (row) => <span className="text-ink-2">{formatYuanFromQuota(row.quota, quotaPerYuan)}</span>,
@@ -182,6 +192,8 @@ function UserFormModal({
   const [status, setStatus] = useState(STATUS_ENABLED)
   // 额度以人民币录入（元），提交时换算成契约额度
   const [quota, setQuota] = useState('')
+  // 代理分组名：非空即该账号在模型广场按此分组的模型与折扣价展示
+  const [agentGroup, setAgentGroup] = useState('')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -192,6 +204,7 @@ function UserFormModal({
     setRole(user?.role ?? 1)
     setStatus(user?.status ?? STATUS_ENABLED)
     setQuota(user ? userQuotaInput(user.quota, quotaPerYuan) : '')
+    setAgentGroup(user?.agent_group ?? '')
   }, [open, user, quotaPerYuan])
 
   async function handleSubmit() {
@@ -210,6 +223,8 @@ function UserFormModal({
           email: email.trim() || undefined,
           role,
           status,
+          // 恒提交（含空串）：空串 = 取消代理资格，这是后台表单的明确意图
+          agent_group: agentGroup.trim(),
         }
         // 额度输入留空视为不修改（避免编辑时误把额度清零）；
         // 输入为人民币，提交时换算成契约额度
@@ -230,6 +245,7 @@ function UserFormModal({
           role,
         }
         if (email.trim()) payload.email = email.trim()
+        if (agentGroup.trim()) payload.agent_group = agentGroup.trim()
         await createUser(payload)
         toast('用户已创建')
       }
@@ -279,6 +295,13 @@ function UserFormModal({
             </Field>
           </>
         )}
+
+        <Field
+          label="代理分组"
+          help="填分组标识（如 agent）后，该账号在模型广场只看到该分组下的模型与代理折扣价；留空 = 普通用户"
+        >
+          <Input value={agentGroup} onChange={(e) => setAgentGroup(e.target.value)} placeholder="留空 = 普通用户" />
+        </Field>
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose}>
