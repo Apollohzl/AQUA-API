@@ -63,6 +63,7 @@ export type IconName =
   | 'sun'
   | 'moon'
   | 'monitor'
+  | 'droplet'
 
 /** 图标路径表：24×24 视口下的描边路径（原创几何线条，无第三方图标依赖） */
 export const ICON_PATHS: Record<IconName, string[]> = {
@@ -208,5 +209,9 @@ export const ICON_PATHS: Record<IconName, string[]> = {
     'M3.6 5.4h16.8v10.2H3.6z',
     'M9 19.4h6',
     'M12 15.6v3.8',
+  ],
+  // 深蓝：水滴（"深海"意象，与日、月并列时一眼可辨）
+  droplet: [
+    'M12 3.4c3.2 3.9 5.4 6.9 5.4 9.6a5.4 5.4 0 0 1-10.8 0c0-2.7 2.2-5.7 5.4-9.6Z',
   ],
 }
