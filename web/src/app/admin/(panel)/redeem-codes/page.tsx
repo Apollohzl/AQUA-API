@@ -18,7 +18,9 @@ import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Form'
 import { Modal, ConfirmDialog } from '@/components/ui/Modal'
 import { useToast } from '@/lib/toast/toast-context'
-import { formatExpiry, formatNumber } from '@/utils/format'
+import { useSite } from '@/lib/site/site-context'
+import { formatExpiry } from '@/utils/format'
+import { formatYuanFromQuota, yuanToQuota } from '@/utils/money'
 
 const PAGE_SIZE = 20
 
@@ -36,6 +38,7 @@ function RedeemStatusBadge({ code }: { code: RedeemCode }) {
 }
 
 export default function AdminRedeemCodesPage() {
+  const { quotaPerYuan } = useSite()
   const [items, setItems] = useState<RedeemCode[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -114,9 +117,9 @@ export default function AdminRedeemCodesPage() {
   const columns: Column<RedeemCode>[] = [
     { title: '兑换码', render: (row) => <code className="font-mono text-[13px] font-medium text-ink">{row.code}</code> },
     {
-      title: '额度',
+      title: '面额',
       align: 'right',
-      render: (row) => <span className="text-ink-2">{formatNumber(row.quota)}</span>,
+      render: (row) => <span className="text-ink-2">{formatYuanFromQuota(row.quota, quotaPerYuan)}</span>,
     },
     { title: '状态', render: (row) => <RedeemStatusBadge code={row} /> },
     {
@@ -255,8 +258,9 @@ function RedeemGenerateModal({
   onSaved: () => void
 }) {
   const { toast, toastError } = useToast()
+  const { quotaPerYuan } = useSite()
   const [count, setCount] = useState('10')
-  const [quota, setQuota] = useState('1000')
+  const [quota, setQuota] = useState('10') // 人民币（元）：每张面额
   const [expiresDays, setExpiresDays] = useState('0')
   const [remark, setRemark] = useState('')
   const [batchNo, setBatchNo] = useState('')
@@ -266,7 +270,7 @@ function RedeemGenerateModal({
   useEffect(() => {
     if (!open) return
     setCount('10')
-    setQuota('1000')
+    setQuota('10')
     setExpiresDays('0')
     setRemark('')
     setBatchNo('')
@@ -281,14 +285,14 @@ function RedeemGenerateModal({
     }
     const q = Number(quota)
     if (!Number.isFinite(q) || q < 0) {
-      toastError('请填写正确的额度')
+      toastError('请填写正确的面额（元）')
       return
     }
     setLoading(true)
     try {
       const data = await createRedeemCodes({
         count: n,
-        quota: q,
+        quota: yuanToQuota(q, quotaPerYuan) ?? 0, // 人民币 → 额度（内部整数记账）
         expires_days: Number(expiresDays || 0),
         remark: remark.trim() || undefined,
         batch_no: batchNo.trim() || undefined,
@@ -333,8 +337,8 @@ function RedeemGenerateModal({
           <Input value={count} onChange={(e) => setCount(e.target.value)} type="number" placeholder="10" />
         </Field>
 
-        <Field label="每张额度" required help="用户兑换后获得的额度">
-          <Input value={quota} onChange={(e) => setQuota(e.target.value)} type="number" placeholder="1000" />
+        <Field label="每张面额（¥）" required help="用户兑换后获得的人民币面额，如 10 表示 10 元">
+          <Input value={quota} onChange={(e) => setQuota(e.target.value)} type="number" placeholder="10" />
         </Field>
 
         <Field label="有效期（天）" help="0 表示永不过期">

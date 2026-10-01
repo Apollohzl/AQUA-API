@@ -24,6 +24,8 @@ import { Badge, Card, SkeletonRows, Tabs } from '@/components/ui/Display'
 import { Button } from '@/components/ui/Button'
 import { Field, Input, Switch, Textarea } from '@/components/ui/Form'
 import { useToast } from '@/lib/toast/toast-context'
+import { useSite } from '@/lib/site/site-context'
+import { quotaToYuanInput, yuanToQuota } from '@/utils/money'
 
 type TabKey = 'site' | 'seo' | 'payment' | 'compliance'
 
@@ -60,6 +62,7 @@ function stringifyParams(params: Record<string, string> | undefined): string {
 
 export default function AdminSettingsPage() {
   const { toast, toastError } = useToast()
+  const { quotaPerYuan } = useSite()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -117,7 +120,13 @@ export default function AdminSettingsPage() {
         setSiteDescription(s.site_description ?? '')
         setRegistrationEnabled(s.registration_enabled ?? true)
         setRequireEmailCode(s.registration_require_email_code ?? false)
-        setDefaultUserQuota(s.default_user_quota === undefined || s.default_user_quota === null ? '' : String(s.default_user_quota))
+        setDefaultUserQuota(
+          s.default_user_quota === undefined || s.default_user_quota === null
+            ? ''
+            : s.default_user_quota < 0
+              ? '-1' // 不限额度：-1 保持原语义，不做人民币换算
+              : quotaToYuanInput(s.default_user_quota, quotaPerYuan),
+        )
         setDefaultGroup(s.default_group ?? '')
 
         setSeo(s.seo ?? null)
@@ -174,7 +183,12 @@ export default function AdminSettingsPage() {
         site_description: siteDescription.trim(),
         registration_enabled: registrationEnabled,
         registration_require_email_code: requireEmailCode,
-        default_user_quota: defaultUserQuota.trim() === '' ? 0 : Number(defaultUserQuota),
+        default_user_quota:
+          defaultUserQuota.trim() === ''
+            ? 0
+            : defaultUserQuota.trim() === '-1'
+              ? -1 // 不限额度：-1 保持原语义，不做人民币换算
+              : (yuanToQuota(Number(defaultUserQuota), quotaPerYuan) ?? 0), // 人民币 → 额度
         default_group: defaultGroup.trim(),
         seo: seo
           ? {
@@ -313,7 +327,7 @@ export default function AdminSettingsPage() {
             <span>注册必须邮箱验证码<span className="ml-1 text-xs text-ink-3">（需邮件通道就绪）</span></span>
             <Switch checked={requireEmailCode} onChange={setRequireEmailCode} label="注册必须邮箱验证码" />
           </label>
-          <Field label="新用户默认额度" help="-1 表示不限额度">
+          <Field label="新用户默认余额（¥）" help="-1 表示不限额度；否则填人民币金额，如 5 表示 5 元">
             <Input value={defaultUserQuota} onChange={(e) => setDefaultUserQuota(e.target.value)} type="number" placeholder="-1" />
           </Field>
           <Field label="默认分组">

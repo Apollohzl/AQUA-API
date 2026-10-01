@@ -13,11 +13,21 @@ import { Field, Input, Select, Switch } from '@/components/ui/Form'
 import { Modal, ConfirmDialog } from '@/components/ui/Modal'
 import { useToast } from '@/lib/toast/toast-context'
 import { roleLabel } from '@/utils/display'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatDateTime } from '@/utils/format'
+import { quotaToYuanInput, yuanToQuota, formatYuanFromQuota } from '@/utils/money'
+import { useSite } from '@/lib/site/site-context'
 
 const PAGE_SIZE = 20
 
+/** 用户额度 → 输入框回填值：-1 表示不限（契约），其余换算为人民币 */
+function userQuotaInput(quota: number | null | undefined, quotaPerYuan: number): string {
+  const q = Number(quota ?? 0)
+  if (q < 0) return '-1'
+  return quotaToYuanInput(q, quotaPerYuan)
+}
+
 export default function AdminUsersPage() {
+  const { quotaPerYuan } = useSite()
   const [items, setItems] = useState<AdminUser[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -72,14 +82,14 @@ export default function AdminUsersPage() {
       ),
     },
     {
-      title: '额度',
+      title: '余额',
       align: 'right',
-      render: (row) => <span className="text-ink-2">{formatNumber(row.quota)}</span>,
+      render: (row) => <span className="text-ink-2">{formatYuanFromQuota(row.quota, quotaPerYuan)}</span>,
     },
     {
       title: '已用',
       align: 'right',
-      render: (row) => <span className="text-ink-2">{formatNumber(row.used_quota)}</span>,
+      render: (row) => <span className="text-ink-2">{formatYuanFromQuota(row.used_quota, quotaPerYuan)}</span>,
     },
     {
       title: '注册时间',
@@ -164,11 +174,13 @@ function UserFormModal({
   onSaved: () => void
 }) {
   const { toast, toastError } = useToast()
+  const { quotaPerYuan } = useSite()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [email, setEmail] = useState('')
   const [role, setRole] = useState(1)
   const [status, setStatus] = useState(STATUS_ENABLED)
+  // 额度以人民币录入（元），提交时换算成契约额度
   const [quota, setQuota] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -179,8 +191,8 @@ function UserFormModal({
     setEmail(user?.email ?? '')
     setRole(user?.role ?? 1)
     setStatus(user?.status ?? STATUS_ENABLED)
-    setQuota(user ? String(user.quota) : '')
-  }, [open, user])
+    setQuota(user ? userQuotaInput(user.quota, quotaPerYuan) : '')
+  }, [open, user, quotaPerYuan])
 
   async function handleSubmit() {
     if (!username.trim()) {
@@ -199,14 +211,15 @@ function UserFormModal({
           role,
           status,
         }
-        // 额度输入留空视为不修改（避免编辑时误把额度清零）
+        // 额度输入留空视为不修改（避免编辑时误把额度清零）；
+        // 输入为人民币，提交时换算成契约额度
         if (quota.trim() !== '') {
           const value = Number(quota)
           if (!Number.isFinite(value)) {
             toastError('额度需为数字')
             return
           }
-          payload.quota = value
+          payload.quota = yuanToQuota(value, quotaPerYuan) ?? Math.round(value)
         }
         await updateUser(user.id, payload)
         toast('用户已更新')
@@ -261,7 +274,7 @@ function UserFormModal({
               </div>
             </Field>
 
-            <Field label="额度" help="用户当前的可用额度；停用后不影响该数值">
+            <Field label="余额（¥）" help="用户当前的可用余额（元）；-1 = 不限；留空表示不修改">
               <Input value={quota} onChange={(e) => setQuota(e.target.value)} type="number" placeholder="留空表示不修改" />
             </Field>
           </>

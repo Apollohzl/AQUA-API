@@ -24,7 +24,9 @@ import { Button } from '@/components/ui/Button'
 import { Field, Input, Select } from '@/components/ui/Form'
 import { DataTable, Pagination, type Column } from '@/components/ui/Table'
 import { useToast } from '@/lib/toast/toast-context'
+import { useSite } from '@/lib/site/site-context'
 import { formatDateTime, formatLatency, formatNumber } from '@/utils/format'
+import { formatYuanFromQuota } from '@/utils/money'
 
 const PAGE_SIZE = 20
 
@@ -43,6 +45,7 @@ function statusTone(code: number | undefined): 'ok' | 'warn' | 'err' | 'off' {
 }
 
 export default function AdminLogsPage() {
+  const { quotaPerYuan } = useSite()
   const [items, setItems] = useState<UsageLog[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -148,9 +151,9 @@ export default function AdminLogsPage() {
       render: (row) => <span className="text-[13px] tabular-nums text-ink-2">{formatNumber(row.total_tokens)}</span>,
     },
     {
-      title: '额度',
+      title: '费用',
       align: 'right',
-      render: (row) => <span className="text-[13px] tabular-nums text-ink-2">{formatNumber(row.quota)}</span>,
+      render: (row) => <span className="text-[13px] tabular-nums text-ink-2">{formatYuanFromQuota(row.quota, quotaPerYuan)}</span>,
     },
     {
       title: '耗时',

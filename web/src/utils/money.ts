@@ -28,6 +28,22 @@ export function quotaToYuan(quota: number | null | undefined, quotaPerYuan: numb
   return q / quotaPerYuan
 }
 
+/** 人民币（元）→ 额度（四舍五入到整数）。供价格/额度【录入】时从人民币换算回契约字段。
+ *  非法比例或非正数金额返回 null（调用方负责提示，避免把空输入静默当 0）。 */
+export function yuanToQuota(yuan: number | null | undefined, quotaPerYuan: number): number | null {
+  const y = Number(yuan ?? 0)
+  if (!Number.isFinite(y) || !Number.isFinite(quotaPerYuan) || quotaPerYuan <= 0 || y < 0) return null
+  return Math.round(y * quotaPerYuan)
+}
+
+/** 额度 → 人民币数值字符串（不带 ¥，供输入框回填 / 编辑场景）。比例缺失时退回额度原文。 */
+export function quotaToYuanInput(quota: number | null | undefined, quotaPerYuan: number): string {
+  const yuan = quotaToYuan(quota, quotaPerYuan)
+  if (yuan === null) return String(Number(quota ?? 0))
+  // 用最大 6 位小数保留录入精度（如 0.002），同时去掉浮点尾巴（如 0.0100000000001）
+  return yuan.toFixed(6).replace(/\.?0+$/, '')
+}
+
 /**
  * 额度 → 人民币字符串（带 ¥ 与千分位）。
  *

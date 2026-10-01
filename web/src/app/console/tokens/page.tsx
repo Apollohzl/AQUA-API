@@ -19,7 +19,7 @@ import { CopyButton } from '@/components/ui/Modal'
 import { useToast } from '@/lib/toast/toast-context'
 import { useSite } from '@/lib/site/site-context'
 import { formatDateTime } from '@/utils/format'
-import { formatYuanFromQuota } from '@/utils/money'
+import { formatYuanFromQuota, yuanToQuota } from '@/utils/money'
 
 const PAGE_SIZE = 20
 
@@ -192,15 +192,22 @@ function CreateTokenModal({
   onCreated: (result: CreateTokenResult) => void
 }) {
   const { toastError } = useToast()
+  const { quotaPerYuan } = useSite()
   const [name, setName] = useState('')
   const [group, setGroup] = useState('')
   const [unlimited, setUnlimited] = useState(false)
+  const [quotaYuan, setQuotaYuan] = useState('10') // 令牌独立预算（人民币，元）
   const [expiresInDays, setExpiresInDays] = useState(0)
   const [loading, setLoading] = useState(false)
 
   async function handleSubmit() {
     if (!name.trim()) {
       toastError('请填写令牌名称')
+      return
+    }
+    const q = Number(quotaYuan)
+    if (!unlimited && (!Number.isFinite(q) || q < 0)) {
+      toastError('请填写正确的令牌预算（元）')
       return
     }
     setLoading(true)
@@ -210,7 +217,7 @@ function CreateTokenModal({
         expires_in_days: expiresInDays,
         models: [],
         unlimited_quota: unlimited,
-        remain_quota: unlimited ? 0 : 1_000_000,
+        remain_quota: unlimited ? 0 : (yuanToQuota(q, quotaPerYuan) ?? 0), // 人民币 → 额度（内部整数记账）
         group_name: group || undefined,
       }
       const result = await createMyToken(payload)
@@ -218,6 +225,7 @@ function CreateTokenModal({
       setName('')
       setGroup('')
       setUnlimited(false)
+      setQuotaYuan('10')
       setExpiresInDays(0)
     } catch (err) {
       toastError(err instanceof Error ? err.message : '创建失败')
@@ -246,9 +254,19 @@ function CreateTokenModal({
         <Field label="有效期" help="0 表示永不过期">
           <Input type="number" min={0} value={expiresInDays} onChange={(e) => setExpiresInDays(Number(e.target.value))} />
         </Field>
+        <Field label="令牌预算（¥）" help={unlimited ? '不限预算时无需填写' : '该令牌可消耗的余额上限，超出后该令牌将停止响应'}>
+          <Input
+            type="number"
+            min={0}
+            value={quotaYuan}
+            onChange={(e) => setQuotaYuan(e.target.value)}
+            placeholder="10"
+            disabled={unlimited}
+          />
+        </Field>
         <label className="flex items-center gap-2 text-[13px] text-ink-2">
           <input type="checkbox" checked={unlimited} onChange={(e) => setUnlimited(e.target.checked)} className="h-4 w-4 accent-brand" />
-          不限额度
+          不限预算
         </label>
       </div>
       <div className="mt-5 flex justify-end gap-2">

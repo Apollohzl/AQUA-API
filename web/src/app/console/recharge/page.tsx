@@ -83,7 +83,7 @@ export default function ConsoleRechargePage() {
       <div>
         <h1 className="text-xl font-bold text-ink">账户充值</h1>
         <p className="mt-0.5 text-[13px] text-ink-3">
-          1 元 = {info.exchange_rate} 额度 · 单笔 {info.min_cents / 100} 元起
+          充值后余额即时到账 · 单笔 {info.min_cents / 100} 元起
         </p>
       </div>
 

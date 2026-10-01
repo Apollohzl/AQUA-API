@@ -14,11 +14,14 @@ import { Badge, Card } from '@/components/ui/Display'
 import { DataTable, Pagination, type Column } from '@/components/ui/Table'
 import { Input, Select } from '@/components/ui/Form'
 import { Button } from '@/components/ui/Button'
+import { useSite } from '@/lib/site/site-context'
 import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatYuanFromQuota } from '@/utils/money'
 
 const PAGE_SIZE = 20
 
 export default function ConsoleLogsPage() {
+  const { quotaPerYuan } = useSite()
   const [items, setItems] = useState<UsageLog[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -67,7 +70,7 @@ export default function ConsoleLogsPage() {
         ),
     },
     { title: 'Token', align: 'right', render: (row) => <span className="text-ink-2">{formatNumber(row.total_tokens)}</span> },
-    { title: '用量', align: 'right', render: (row) => <span className="text-ink-2">{formatNumber(row.quota)}</span> },
+    { title: '用量', align: 'right', render: (row) => <span className="text-ink-2">{formatYuanFromQuota(row.quota, quotaPerYuan)}</span> },
     { title: '耗时', align: 'right', render: (row) => <span className="text-ink-2">{row.latency_ms}ms</span> },
     {
       title: '错误',

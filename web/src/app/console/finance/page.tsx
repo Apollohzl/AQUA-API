@@ -14,12 +14,15 @@ import type { ReferralInfo } from '@/api/referral'
 import { Badge, Card, StatCard } from '@/components/ui/Display'
 import { DataTable, Pagination, type Column } from '@/components/ui/Table'
 import { useAuth } from '@/lib/auth/auth-context'
-import { formatNumber, formatDateTime } from '@/utils/format'
+import { useSite } from '@/lib/site/site-context'
+import { formatDateTime } from '@/utils/format'
+import { formatYuanFromQuota } from '@/utils/money'
 
 const PAGE_SIZE = 20
 
 export default function ConsoleFinancePage() {
   const { refreshUser } = useAuth()
+  const { quotaPerYuan } = useSite()
   const [finance, setFinance] = useState<FinanceSummary | null>(null)
   const [referral, setReferral] = useState<ReferralInfo | null>(null)
   const [orders, setOrders] = useState<PaymentOrder[]>([])
@@ -77,10 +80,10 @@ export default function ConsoleFinancePage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="当前余额" value={finance ? (unlimited ? '不限' : formatNumber(finance.balance_quota)) : '—'} />
-        <StatCard label="累计消费" value={finance ? formatNumber(finance.used_quota) : '—'} />
-        <StatCard label="累计充值" value={finance ? formatNumber(finance.recharged_quota) : '—'} hint={`${finance?.recharge_count ?? 0} 笔`} />
-        <StatCard label="邀请返利" value={referral ? formatNumber(referral.total_reward_quota) : '—'} hint={referral ? `${referral.invited_count} 人` : undefined} />
+        <StatCard label="当前余额" value={finance ? (unlimited ? '不限' : formatYuanFromQuota(finance.balance_quota, quotaPerYuan)) : '—'} />
+        <StatCard label="累计消费" value={finance ? formatYuanFromQuota(finance.used_quota, quotaPerYuan) : '—'} />
+        <StatCard label="累计充值" value={finance ? formatYuanFromQuota(finance.recharged_quota, quotaPerYuan) : '—'} hint={`${finance?.recharge_count ?? 0} 笔`} />
+        <StatCard label="邀请返利" value={referral ? formatYuanFromQuota(referral.total_reward_quota, quotaPerYuan) : '—'} hint={referral ? `${referral.invited_count} 人` : undefined} />
       </div>
 
       <Card padding="none">

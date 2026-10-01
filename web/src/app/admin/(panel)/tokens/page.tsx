@@ -12,11 +12,14 @@ import { Button } from '@/components/ui/Button'
 import { Field, Input, Switch } from '@/components/ui/Form'
 import { Modal, ConfirmDialog, CopyButton } from '@/components/ui/Modal'
 import { useToast } from '@/lib/toast/toast-context'
-import { formatExpiry, formatNumber, formatQuota, parseModelList } from '@/utils/format'
+import { useSite } from '@/lib/site/site-context'
+import { formatExpiry, parseModelList } from '@/utils/format'
+import { formatYuanFromQuota, quotaToYuanInput, yuanToQuota } from '@/utils/money'
 
 const PAGE_SIZE = 20
 
 export default function AdminTokensPage() {
+  const { quotaPerYuan } = useSite()
   const [items, setItems] = useState<AccessToken[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -67,14 +70,18 @@ export default function AdminTokensPage() {
       ),
     },
     {
-      title: '额度',
+      title: '剩余',
       align: 'right',
-      render: (row) => <span className="text-ink-2">{formatQuota(row.remain_quota, row.unlimited_quota)}</span>,
+      render: (row) => (
+        <span className="text-ink-2">
+          {row.unlimited_quota ? '不限' : formatYuanFromQuota(row.remain_quota, quotaPerYuan)}
+        </span>
+      ),
     },
     {
       title: '已用',
       align: 'right',
-      render: (row) => <span className="text-ink-2">{formatNumber(row.used_quota)}</span>,
+      render: (row) => <span className="text-ink-2">{formatYuanFromQuota(row.used_quota, quotaPerYuan)}</span>,
     },
     {
       title: '到期',
@@ -160,6 +167,7 @@ function TokenFormModal({
   onClose: () => void
 }) {
   const { toast, toastError } = useToast()
+  const { quotaPerYuan } = useSite()
   // 新建字段
   const [name, setName] = useState('')
   const [expiresInDays, setExpiresInDays] = useState('0')
@@ -180,7 +188,7 @@ function TokenFormModal({
     setModelsText('')
     setUserId('')
     setUnlimited(token?.unlimited_quota ?? false)
-    setRemainQuota(token ? String(token.remain_quota) : '')
+    setRemainQuota(token ? quotaToYuanInput(token.remain_quota, quotaPerYuan) : '')
     setStatus(token?.status ?? STATUS_ENABLED)
     setCreatedKey('')
   }, [open, token])
@@ -201,7 +209,7 @@ function TokenFormModal({
         const payload: AdminUpdateTokenPayload = {
           status,
           unlimited_quota: unlimited,
-          remain_quota: Number(remainQuota || 0),
+          remain_quota: yuanToQuota(Number(remainQuota || 0), quotaPerYuan) ?? 0, // 人民币 → 额度
         }
         await updateToken(token.id, payload)
         toast('令牌已更新')
@@ -212,7 +220,7 @@ function TokenFormModal({
           expires_in_days: Number(expiresInDays || 0),
           models: parseModelList(modelsText),
           unlimited_quota: unlimited,
-          remain_quota: unlimited ? 0 : Number(remainQuota || 0),
+          remain_quota: unlimited ? 0 : (yuanToQuota(Number(remainQuota || 0), quotaPerYuan) ?? 0),
           user_id: Number(userId.trim()),
         }
         const result = await createTokenForUser(payload)
@@ -286,12 +294,12 @@ function TokenFormModal({
             </div>
           </Field>
 
-          <Field label="可用额度" help={unlimited ? '不限额度时无需填写' : '该令牌可消耗的额度上限'}>
+          <Field label="可用余额（¥）" help={unlimited ? '不限额度时无需填写' : '该令牌可消耗的余额上限（人民币）'}>
             <Input
               value={remainQuota}
               onChange={(e) => setRemainQuota(e.target.value)}
               type="number"
-              placeholder="0"
+              placeholder="0.00"
               disabled={unlimited}
             />
           </Field>

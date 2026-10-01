@@ -19,7 +19,6 @@ import { useAuth } from '@/lib/auth/auth-context'
 import { useSite } from '@/lib/site/site-context'
 import { useTheme } from '@/lib/theme/theme-context'
 import { areaGradient, chartStyles } from '@/utils/chart'
-import { formatNumber } from '@/utils/format'
 import { formatYuanFromQuota } from '@/utils/money'
 
 export default function ConsoleOverviewPage() {
@@ -107,8 +106,8 @@ export default function ConsoleOverviewPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="当前余额"
-          value={finance ? (unlimited ? '不限额度' : formatYuanFromQuota(finance.balance_quota, quotaPerYuan)) : '—'}
-          hint={unlimited ? '额度不限制' : '可用于调用与充值抵扣'}
+          value={finance ? (unlimited ? '不限' : formatYuanFromQuota(finance.balance_quota, quotaPerYuan)) : '—'}
+          hint={unlimited ? '余额不限制' : '可用于调用与充值抵扣'}
         />
         <StatCard label="累计消费" value={finance ? formatYuanFromQuota(finance.used_quota, quotaPerYuan) : '—'} hint="全部历史" />
         <StatCard label="累计充值" value={finance ? formatYuanFromQuota(finance.recharged_quota, quotaPerYuan) : '—'} hint={`${finance?.recharge_count ?? 0} 笔订单`} />
@@ -145,6 +144,7 @@ export default function ConsoleOverviewPage() {
 
 function TrialBanner() {
   const [trial, setTrial] = useState<{ active: boolean; remaining: number } | null>(null)
+  const { quotaPerYuan } = useSite()
   useEffect(() => {
     void fetchMyTrial().then(setTrial).catch(() => setTrial(null))
   }, [])
@@ -152,7 +152,7 @@ function TrialBanner() {
   return (
     <div className="flex items-center gap-2 rounded-lg border border-brand/20 bg-brand/5 px-4 py-2.5 text-[13px] text-ink-2">
       <span className="h-1.5 w-1.5 rounded-full bg-brand" />
-      限时试用额度剩余 {formatNumber(trial.remaining)}，到期自动失效。
+      限时试用余额剩余 {formatYuanFromQuota(trial.remaining, quotaPerYuan)}，到期自动失效。
     </div>
   )
 }

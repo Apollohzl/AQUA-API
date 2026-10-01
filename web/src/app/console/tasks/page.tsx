@@ -109,7 +109,7 @@ export default function ConsoleTasksPage() {
       <ConfirmDialog
         open={Boolean(cancelTarget)}
         title="取消任务"
-        message="确认取消该任务？将退还对应额度。"
+        message="确认取消该任务？将退还对应费用。"
         danger
         confirmText="取消任务"
         onConfirm={handleCancel}

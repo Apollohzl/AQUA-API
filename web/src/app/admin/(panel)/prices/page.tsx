@@ -24,7 +24,8 @@ import { Button } from '@/components/ui/Button'
 import { Field, Input, Select, Switch, Textarea } from '@/components/ui/Form'
 import { Modal, ConfirmDialog } from '@/components/ui/Modal'
 import { useToast } from '@/lib/toast/toast-context'
-import { formatNumber } from '@/utils/format'
+import { useSite } from '@/lib/site/site-context'
+import { formatYuanPerCall, formatYuanPerMillion, quotaToYuanInput, yuanToQuota } from '@/utils/money'
 
 /** 生效计费方式 → 徽标配色与文案（free 免费 / token 按量 / per_call 按次） */
 function billingTone(mode: ModelPrice['effective_billing_mode']): 'ok' | 'info' | 'brand' {
@@ -40,6 +41,7 @@ const BILLING_LABEL: Record<string, string> = {
 }
 
 export default function AdminPricesPage() {
+  const { quotaPerYuan } = useSite()
   const [items, setItems] = useState<ModelPrice[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -92,10 +94,10 @@ export default function AdminPricesPage() {
       title: '计费方式',
       render: (row) => <Badge tone={billingTone(row.effective_billing_mode)}>{BILLING_LABEL[row.effective_billing_mode] ?? row.effective_billing_mode}</Badge>,
     },
-    { title: '输入价', align: 'right', render: (row) => <span className="text-ink-2">{formatNumber(row.prompt_price)}</span> },
-    { title: '缓存价', align: 'right', render: (row) => <span className="text-ink-2">{formatNumber(row.cache_price)}</span> },
-    { title: '输出价', align: 'right', render: (row) => <span className="text-ink-2">{formatNumber(row.completion_price)}</span> },
-    { title: '按次价', align: 'right', render: (row) => <span className="text-ink-2">{formatNumber(row.per_call_price)}</span> },
+    { title: '输入价', align: 'right', render: (row) => <span className="text-ink-2">{formatYuanPerMillion(row.prompt_price, quotaPerYuan)}</span> },
+    { title: '缓存价', align: 'right', render: (row) => <span className="text-ink-2">{formatYuanPerMillion(row.cache_price, quotaPerYuan)}</span> },
+    { title: '输出价', align: 'right', render: (row) => <span className="text-ink-2">{formatYuanPerMillion(row.completion_price, quotaPerYuan)}</span> },
+    { title: '按次价', align: 'right', render: (row) => <span className="text-ink-2">{formatYuanPerCall(row.per_call_price, quotaPerYuan)}</span> },
     {
       title: '状态',
       render: (row) => (row.enabled ? <Badge tone="ok">启用</Badge> : <Badge tone="off">停用</Badge>),
@@ -186,10 +188,13 @@ function PriceFormModal({
   onSaved: () => void
 }) {
   const { toast, toastError } = useToast()
+  const { quotaPerYuan } = useSite()
   const [model, setModel] = useState('')
   const [groupName, setGroupName] = useState('')
   const [billingMode, setBillingMode] = useState<BillingMode | ''>('')
   const [enabled, setEnabled] = useState(true)
+  // 以下四个价格字段一律以【人民币】录入与展示（元 / 1M token，按次为 元/次），
+  // 提交时经 yuanToQuota 换算成契约的整数额度。比例缺失时原样提交（由后端照常处理）。
   const [promptPrice, setPromptPrice] = useState('0')
   const [cachePrice, setCachePrice] = useState('0')
   const [completionPrice, setCompletionPrice] = useState('0')
@@ -203,18 +208,24 @@ function PriceFormModal({
     setGroupName(price?.group ?? '')
     setBillingMode(price?.billing_mode ?? '')
     setEnabled(price?.enabled ?? true)
-    setPromptPrice(String(price?.prompt_price ?? 0))
-    setCachePrice(String(price?.cache_price ?? 0))
-    setCompletionPrice(String(price?.completion_price ?? 0))
-    setPerCallPrice(String(price?.per_call_price ?? 0))
+    setPromptPrice(quotaToYuanInput(price?.prompt_price, quotaPerYuan))
+    setCachePrice(quotaToYuanInput(price?.cache_price, quotaPerYuan))
+    setCompletionPrice(quotaToYuanInput(price?.completion_price, quotaPerYuan))
+    setPerCallPrice(quotaToYuanInput(price?.per_call_price, quotaPerYuan))
     setRemark(price?.remark ?? '')
-  }, [open, price])
+  }, [open, price, quotaPerYuan])
 
-  /** 输入框 → 非负数字；空串按 0 处理 */
-  function parsePrice(raw: string): number | null {
+  /** 人民币输入 → 非负数字；空串按 0 处理 */
+  function parseYuan(raw: string): number | null {
     if (raw.trim() === '') return 0
     const value = Number(raw)
     return Number.isFinite(value) && value >= 0 ? value : null
+  }
+
+  /** 人民币输入 → 契约额度；比例缺失时原样当作额度（历史兼容） */
+  function toQuota(yuan: number | null): number {
+    if (yuan === null) return 0
+    return yuanToQuota(yuan, quotaPerYuan) ?? Math.round(yuan)
   }
 
   async function handleSubmit() {
@@ -222,10 +233,10 @@ function PriceFormModal({
       toastError('请填写模型名')
       return
     }
-    const prompt = parsePrice(promptPrice)
-    const cache = parsePrice(cachePrice)
-    const completion = parsePrice(completionPrice)
-    const perCall = parsePrice(perCallPrice)
+    const prompt = parseYuan(promptPrice)
+    const cache = parseYuan(cachePrice)
+    const completion = parseYuan(completionPrice)
+    const perCall = parseYuan(perCallPrice)
     if (prompt === null || cache === null || completion === null || perCall === null) {
       toastError('价格必须是 ≥0 的数字')
       return
@@ -237,10 +248,10 @@ function PriceFormModal({
         group: groupName.trim(),
         billing_mode: billingMode,
         enabled,
-        prompt_price: prompt,
-        cache_price: cache,
-        completion_price: completion,
-        per_call_price: perCall,
+        prompt_price: toQuota(prompt),
+        cache_price: toQuota(cache),
+        completion_price: toQuota(completion),
+        per_call_price: toQuota(perCall),
         remark: remark.trim(),
       }
       if (price) {
@@ -281,17 +292,17 @@ function PriceFormModal({
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <Field label="输入价" help="每 1M 输入 token 的额度">
-            <Input value={promptPrice} onChange={(e) => setPromptPrice(e.target.value)} type="number" min={0} step="0.01" placeholder="0" />
+          <Field label="输入价（¥）" help="每 1M 输入 token 的价格（元）">
+            <Input value={promptPrice} onChange={(e) => setPromptPrice(e.target.value)} type="number" min={0} step="0.000001" placeholder="0" />
           </Field>
-          <Field label="缓存价" help="每 1M 命中缓存的输入 token 额度；0 = 按输入价">
-            <Input value={cachePrice} onChange={(e) => setCachePrice(e.target.value)} type="number" min={0} step="0.01" placeholder="0" />
+          <Field label="缓存价（¥）" help="每 1M 命中缓存的输入 token 价格（元）；0 = 按输入价">
+            <Input value={cachePrice} onChange={(e) => setCachePrice(e.target.value)} type="number" min={0} step="0.000001" placeholder="0" />
           </Field>
-          <Field label="输出价" help="每 1M 输出 token 的额度">
-            <Input value={completionPrice} onChange={(e) => setCompletionPrice(e.target.value)} type="number" min={0} step="0.01" placeholder="0" />
+          <Field label="输出价（¥）" help="每 1M 输出 token 的价格（元）">
+            <Input value={completionPrice} onChange={(e) => setCompletionPrice(e.target.value)} type="number" min={0} step="0.000001" placeholder="0" />
           </Field>
-          <Field label="按次价" help="每次调用的额度（异步任务/图像等按次计费）">
-            <Input value={perCallPrice} onChange={(e) => setPerCallPrice(e.target.value)} type="number" min={0} step="0.01" placeholder="0" />
+          <Field label="按次价（¥）" help="每次调用的价格（元，异步任务/图像等按次计费）">
+            <Input value={perCallPrice} onChange={(e) => setPerCallPrice(e.target.value)} type="number" min={0} step="0.000001" placeholder="0" />
           </Field>
         </div>
 
