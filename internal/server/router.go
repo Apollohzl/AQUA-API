@@ -89,7 +89,10 @@ func (s *Server) registerRoutes() {
 
 	// 模型广场（无需登录）：站点能力清单，是使用者了解"本站能做什么"的入口。
 	// 只暴露模型名、分组、价格与可用状态，不暴露渠道名与上游地址。
-	api.GET("/models", s.handleModelPlaza)
+	//
+	// 叠加「可选登录」：已登录的代理看自己拿货分组的模型与代理价（原价划线对照），
+	// 未登录或不带会话则完全按公开结果返回，与从前逐字一致。
+	api.GET("/models", middleware.SessionAuthOptional(s.deps.Sessions, s.deps.Users), s.handleModelPlaza)
 
 	// 站点公告（无需登录）：前台横幅据此展示当前生效的公告。
 	api.GET("/announcements", s.handlePublicListAnnouncements)

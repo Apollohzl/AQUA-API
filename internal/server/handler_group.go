@@ -616,8 +616,28 @@ type plazaModelDTO struct {
 	Available bool `json:"available"`
 	// Prices 是按分组给出的价格（同一模型在不同分组可不同价）。
 	Prices []plazaPriceDTO `json:"prices"`
+	// ListPrice 仅【代理视图】下发：同一模型的原价（未打折），供前端渲染「划线原价」。
+	//
+	// 与 Prices[0]（代理价）取自同一条价格规则，因此两者天然同源：
+	// 原价 = 规则原值（倍率按 100 计），代理价 = 规则原值 × 分组倍率 ÷ 100。
+	// 这样即便日后调整折扣，划线价与折后价也不会各说各话。
+	ListPrice *plazaPriceDTO `json:"list_price,omitempty"`
 	// ChannelCount 是支持该模型的启用渠道数量，作为"供给充足度"的直观指标。
 	ChannelCount int `json:"channel_count"`
+}
+
+// plazaViewerDTO 描述"当前查看者以什么身份看广场"。
+//
+// 只有被指派了代理分组的登录用户才会拿到它；其余情况不下发（omitempty），
+// 前端据此决定是否渲染"代理价 / 原价划线"的对照视图。
+type plazaViewerDTO struct {
+	// AgentGroup 是查看者所属的代理分组名。
+	AgentGroup string `json:"agent_group"`
+	// Label 是该分组的展示名（如「战略代理」）。
+	Label string `json:"label"`
+	// Ratio 是该分组的计费倍率（百分比，100 = 不打折）。
+	// 60 即「拿货 6 折」，前端据此显示折扣文案。
+	Ratio int64 `json:"ratio"`
 }
 
 // plazaPriceDTO 是模型在某分组下的价格。
@@ -662,6 +682,10 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 		return
 	}
 
+	// 查看者身份：被指派了代理分组的登录用户，按"自己拿货的那一档"看广场。
+	// 未登录 / 非代理一律为 nil，后续全部走原有公开逻辑（行为逐字不变）。
+	viewer := s.resolvePlazaViewer(ctx, c)
+
 	// 只统计启用渠道：被禁用的渠道不代表"现在能调"
 	enabled := model.ChannelStatusEnabled
 	channels, err := s.deps.Channels.List(ctx, model.ChannelQuery{Status: &enabled, Limit: 500})
@@ -673,7 +697,13 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 	groups, groupLabels, groupRatios := s.plazaGroups(ctx)
 	// 批发价分组（仅后台分发）对公开广场完全不可见，包括模型归属信息
 	hiddenGroups := s.adminOnlyGroupNames(ctx)
-	if hiddenGroups[strings.TrimSpace(c.Query("group"))] {
+	// 例外：代理看自己的分组必须放行——对这个人而言批发价不是秘密。
+	if viewer != nil {
+		delete(hiddenGroups, viewer.AgentGroup)
+	}
+
+	groupFilter := strings.TrimSpace(c.Query("group"))
+	if hiddenGroups[groupFilter] {
 		// 显式按批发价分组查询时直接返回空，而不是"查不到但按价格回退放行"——
 		// 价格表里确实有该分组的规则，回退逻辑会把模型放出来，等于绕过了隐藏。
 		c.JSON(http.StatusOK, gin.H{
@@ -692,11 +722,18 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 	}
 
 	keyword := strings.ToLower(strings.TrimSpace(c.Query("keyword")))
-	groupFilter := strings.TrimSpace(c.Query("group"))
+	// 代理视图锁死在自己的分组上：即使有人在 URL 上手动塞 ?group=xxx，
+	// 也不能让他看到别档的模型与价格（广场是公开接口，参数不可信）。
+	if viewer != nil {
+		groupFilter = viewer.AgentGroup
+	}
 
 	// 汇总模型 → 分组集合、渠道数
 	modelGroups := make(map[string]map[string]struct{})
 	modelChannelCount := make(map[string]int)
+	// 模型在【各分组】下的启用渠道数：代理视图据此判断"这档现在真的能调"，
+	// 而不是拿全站渠道数糊弄（某模型可能只挂在别的分组上）。
+	modelGroupChannelCount := make(map[string]map[string]int)
 	for _, channel := range channels {
 		for _, modelName := range channel.Models {
 			name := strings.TrimSpace(modelName)
@@ -714,6 +751,10 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 					continue // 批发价分组不对外暴露（连归属关系也不给）
 				}
 				modelGroups[name][groupName] = struct{}{}
+				if modelGroupChannelCount[name] == nil {
+					modelGroupChannelCount[name] = make(map[string]int)
+				}
+				modelGroupChannelCount[name][groupName]++
 			}
 			modelChannelCount[name]++
 		}
@@ -736,6 +777,17 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 			continue
 		}
 
+		// 代理视图：模型必须在本代理分组下有价格规则，才出现在代理的清单里。
+		// 这正是"不同分组看到的模型不一样"的落点——管理员用该分组的价格行
+		// 决定这一档卖哪些模型，而不是靠另建一张白名单表。
+		var agentPrice, listPrice *plazaPriceDTO
+		if viewer != nil {
+			agentPrice, listPrice = plazaAgentPricePair(prices, modelName, viewer.AgentGroup, viewer.Ratio)
+			if agentPrice == nil {
+				continue
+			}
+		}
+
 		groupsOfModel := make([]string, 0, len(groupSet))
 		for name := range groupSet {
 			groupsOfModel = append(groupsOfModel, name)
@@ -751,13 +803,23 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 			}
 		}
 
-		items = append(items, plazaModelDTO{
+		item := plazaModelDTO{
 			Model:        modelName,
 			Groups:       groupsOfModel,
 			Available:    modelChannelCount[modelName] > 0,
 			Prices:       plazaPricesFor(prices, modelName, groupRatios, hiddenGroups),
 			ChannelCount: modelChannelCount[modelName],
-		})
+		}
+		if viewer != nil {
+			// 代理视图只给"本档代理价 + 划线原价"两样东西：
+			// 列出其它公开分组的价只会让人比价困惑，也不该暴露他档折扣。
+			item.Prices = []plazaPriceDTO{*agentPrice}
+			item.ListPrice = listPrice
+			item.Groups = []string{viewer.AgentGroup}
+			item.Available = modelGroupChannelCount[modelName][viewer.AgentGroup] > 0
+			item.ChannelCount = modelGroupChannelCount[modelName][viewer.AgentGroup]
+		}
+		items = append(items, item)
 	}
 
 	// 排序：可用的在前，其次按模型名升序（顺序稳定，便于前端分页与用户查找）
@@ -771,6 +833,9 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 	// 分组视图：只列出有模型的分组（空分组展示出来只会造成困惑）
 	groupViews := make([]plazaGroupDTO, 0, len(groups))
 	for _, name := range groups {
+		if viewer != nil && name != viewer.AgentGroup {
+			continue // 代理视图只保留他所属的那一档
+		}
 		count := 0
 		for _, item := range items {
 			if len(item.Groups) == 0 {
@@ -795,11 +860,90 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	resp := gin.H{
 		"items":  items,
 		"groups": groupViews,
 		"total":  len(items),
-	})
+	}
+	if viewer != nil {
+		resp["viewer"] = viewer
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// resolvePlazaViewer 解析"当前查看者是不是代理、属于哪一档"。
+//
+// 返回 nil 表示按普通（公开）视图处理——未登录、未被指派代理分组、
+// 或所指派的分组已不存在/已停用，都归入这一类。刻意不返回错误：
+// 广场是公开接口，代理信息读不出来时应当降级为公开结果，而不是把请求打成 5xx。
+func (s *Server) resolvePlazaViewer(ctx context.Context, c *gin.Context) *plazaViewerDTO {
+	user, ok := middleware.CurrentUser(c)
+	if !ok || user == nil || s.deps.Groups == nil {
+		return nil
+	}
+	name := strings.TrimSpace(user.AgentGroup)
+	if name == "" {
+		return nil
+	}
+	group, err := s.deps.Groups.GetByName(ctx, name)
+	if err != nil || group == nil || !group.Enabled {
+		return nil
+	}
+	return &plazaViewerDTO{AgentGroup: group.Name, Label: group.Label(), Ratio: group.Ratio}
+}
+
+// plazaAgentPricePair 返回代理视图下的两档价格：代理价与原价。
+//
+// 两者取自【同一条价格规则】，因此天然同源，不会出现"划线价与折后价各说各话"：
+//   - 原价   = 规则原值（倍率按 100 计）
+//   - 代理价 = 规则原值 × 分组倍率 ÷ 100（与计费链路 applyRatio 同一口径）
+//
+// 该分组下没有匹配到规则时返回 (nil, nil)，调用方据此把模型排除出代理清单。
+//
+// 为什么把折后金额直接算进 DTO，而不是只给 ratio 让前端自己乘：
+//   现有前端的价格格式化函数不感知倍率（公开视图展示的就是规则原值），
+//   若此处也给原值，代理视图就会显示成"没打折"，与"拿货 6 折"直接矛盾。
+func plazaAgentPricePair(prices []*model.ModelPrice, modelName, group string, ratio int64) (*plazaPriceDTO, *plazaPriceDTO) {
+	rows := make([]*model.ModelPrice, 0, 4)
+	for _, price := range prices {
+		if price.Group == group {
+			rows = append(rows, price)
+		}
+	}
+	matched := model.MatchModelPrice(rows, modelName)
+	if matched == nil {
+		return nil, nil
+	}
+
+	list := &plazaPriceDTO{
+		Group:           group,
+		PromptPrice:     matched.PromptPrice,
+		CachePrice:      matched.CachePrice,
+		CompletionPrice: matched.CompletionPrice,
+		PerCallPrice:    matched.PerCallPrice,
+		BillingMode:     matched.EffectiveBillingMode(),
+		IsFree:          matched.IsFree(),
+		Ratio:           100,
+	}
+	agent := &plazaPriceDTO{
+		Group:           group,
+		PromptPrice:     scaleByRatio(matched.PromptPrice, ratio),
+		CachePrice:      scaleByRatio(matched.CachePrice, ratio),
+		CompletionPrice: scaleByRatio(matched.CompletionPrice, ratio),
+		PerCallPrice:    scaleByRatio(matched.PerCallPrice, ratio),
+		BillingMode:     matched.EffectiveBillingMode(),
+		IsFree:          matched.IsFree(),
+		Ratio:           100,
+	}
+	return agent, list
+}
+
+// scaleByRatio 按分组倍率折算金额（百分比整数，100 = 不折算），与计费链路同口径。
+func scaleByRatio(base, ratio int64) int64 {
+	if ratio <= 0 || ratio == 100 {
+		return base
+	}
+	return base * ratio / 100
 }
 
 // plazaGroups 返回分组名列表、展示名映射与倍率映射。

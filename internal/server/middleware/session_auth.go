@@ -60,10 +60,40 @@ func CurrentUser(c *gin.Context) (*model.User, bool) {
 // 校验顺序经过刻意设计：先验会话有效性（廉价），再载入用户（昂贵），
 // 避免为无效会话付出额外的数据库查询。
 func SessionAuth(sessions model.SessionRepository, users model.UserRepository) gin.HandlerFunc {
+	return sessionAuth(sessions, users, true)
+}
+
+// SessionAuthOptional 返回「可选登录」中间件。
+//
+// 用途：公开接口在【已登录】时要能给出个性化结果（模型广场据查看者的代理分组
+// 返回对应模型与价格），而在【未登录 / 会话无效】时必须照常返回公开结果——
+// 因此不能像 SessionAuth 那样直接 401。
+//
+// 与 SessionAuth 共用同一段解析逻辑，唯一差别是失败时是否中断请求：
+// 「会话怎样才算有效」只有一处实现，不会出现两套判定随时间长歪。
+//
+// 安全约定：本中间件【不构成任何鉴权】——它只负责「能认出就认出」，
+// 需要"必须登录"的路由仍须挂 SessionAuth。
+func SessionAuthOptional(sessions model.SessionRepository, users model.UserRepository) gin.HandlerFunc {
+	return sessionAuth(sessions, users, false)
+}
+
+// sessionAuth 是两种会话中间件的共同实现。
+//
+// required 为 false 时，任何校验失败都只是「本次按匿名处理」：不写响应、
+// 不中断链路，直接返回让 gin 继续走后续处理器。
+func sessionAuth(sessions model.SessionRepository, users model.UserRepository, required bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		fail := func(status int, key, typ, code string) {
+			if !required {
+				return
+			}
+			abortWithErrorKey(c, status, key, typ, code)
+		}
+
 		rawToken := extractAPIKey(c.Request)
 		if rawToken == "" {
-			abortWithErrorKey(c, http.StatusUnauthorized,
+			fail(http.StatusUnauthorized,
 				"auth.credentials_missing", oai.TypeAuthentication, oai.CodeMissingAPIKey)
 			return
 		}
@@ -72,11 +102,11 @@ func SessionAuth(sessions model.SessionRepository, users model.UserRepository) g
 		session, err := sessions.GetByTokenHash(c.Request.Context(), crypto.SHA256Hex(rawToken))
 		if err != nil {
 			if errors.Is(err, model.ErrSessionNotFound) {
-				abortWithErrorKey(c, http.StatusUnauthorized,
+				fail(http.StatusUnauthorized,
 					"auth.session_invalid", oai.TypeAuthentication, oai.CodeInvalidAPIKey)
 				return
 			}
-			abortWithError(c, http.StatusInternalServerError,
+			fail(http.StatusInternalServerError,
 				"网关内部错误", oai.TypeServer, oai.CodeInternal)
 			return
 		}
@@ -86,7 +116,7 @@ func SessionAuth(sessions model.SessionRepository, users model.UserRepository) g
 		if session.IsExpired(time.Now()) {
 			// 顺手清理这条过期会话，避免无效数据长期堆积
 			_ = sessions.DeleteByTokenHash(c.Request.Context(), session.TokenHash)
-			abortWithErrorKey(c, http.StatusUnauthorized,
+			fail(http.StatusUnauthorized,
 				"auth.session_expired", oai.TypeAuthentication, oai.CodeTokenExpired)
 			return
 		}
@@ -96,11 +126,11 @@ func SessionAuth(sessions model.SessionRepository, users model.UserRepository) g
 			if errors.Is(err, model.ErrUserNotFound) {
 				// 用户已被删除，但其会话仍在：清理掉并拒绝
 				_ = sessions.DeleteByUserID(c.Request.Context(), session.UserID)
-				abortWithErrorKey(c, http.StatusUnauthorized,
+				fail(http.StatusUnauthorized,
 					"auth.account_missing", oai.TypeAuthentication, oai.CodeInvalidAPIKey)
 				return
 			}
-			abortWithError(c, http.StatusInternalServerError,
+			fail(http.StatusInternalServerError,
 				"网关内部错误", oai.TypeServer, oai.CodeInternal)
 			return
 		}
@@ -109,7 +139,7 @@ func SessionAuth(sessions model.SessionRepository, users model.UserRepository) g
 		// 若只靠登录时校验，已登录的会话仍可长期访问，禁用形同虚设。
 		if !user.IsActive() {
 			_ = sessions.DeleteByUserID(c.Request.Context(), user.ID)
-			abortWithErrorKey(c, http.StatusForbidden,
+			fail(http.StatusForbidden,
 				"auth.account_disabled", oai.TypePermission, oai.CodeTokenDisabled)
 			return
 		}
