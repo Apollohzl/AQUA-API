@@ -79,6 +79,22 @@ func (r *Relay) ServeChatCompletions(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// ── 步骤 2.5：基础参数边界校验（2026-09-30 新增）─────────────
+	// 线上数据：按次专线的 400 里，"temperature 越界"占比最高
+	// （上游严格要求 [0, 2) 半开区间，传 2.0 必被拒）。
+	// 在入口统一校验，把这类可预期的用户错误变成明确中文提示，
+	// 而不是透传一条上游的英文 400。
+	if err := oai.ValidateChatParameters(body); err != nil {
+		if errors.Is(err, oai.ErrTemperatureOutOfRange) {
+			oai.WriteError(w, http.StatusBadRequest, err.Error(),
+				oai.TypeInvalidRequest, "temperature_out_of_range")
+			return
+		}
+		oai.WriteError(w, http.StatusBadRequest, "请求体不是合法的 JSON",
+			oai.TypeInvalidRequest, oai.CodeInvalidJSON)
+		return
+	}
+
 	// ── 步骤 3~6：转发（含失败换渠道重试）───────────────────────
 	// 语料共建：命中采集清单时，把"请求原文 + 返回正文副本"的缓冲挂到请求上下文上。
 	//
@@ -246,6 +262,18 @@ func (r *Relay) forwardWithFallback(w http.ResponseWriter, req *http.Request, mo
 		//
 		// 注意：这种情况也记一条日志——"配置漏了模型"是常见事故，
 		// 若不留痕，站长只能看到用户报错却查不到原因。
+		//
+		// 区分两种情形（2026-09-30 新增，源于线上 503 刷屏事故）：
+		//   · 模型在【其他分组】有渠道、只在当前分组没有 → 配置了"分组可见性"
+		//     但没有给该分组接渠道（典型：收费模型对免费分组可见却路由不到），
+		//     应明确告诉使用者"这个分组没有开通该模型"，而不是笼统的"无可用渠道"；
+		//   · 模型在全站任何分组都没有渠道 → 才是真正的"无可用渠道"。
+		// 前者属于可见性配置错误，后者属于容量问题，处置动作完全不同。
+		anyChannel := r.channelCountForModel(req.Context(), modelName)
+		message := "当前没有可用的上游渠道能处理该模型"
+		if anyChannel > 0 {
+			message = "当前分组未开通该模型（模型在其他分组可用），请检查令牌分组或联系管理员"
+		}
 		r.recordUsage(req.Context(), usageEntry{
 			UserID:     identityFromRequest(req.Context()).UserID,
 			TokenID:    identityFromRequest(req.Context()).TokenID,
@@ -256,8 +284,7 @@ func (r *Relay) forwardWithFallback(w http.ResponseWriter, req *http.Request, mo
 			ErrorText:  "无可用渠道（分组=" + group + "）",
 		})
 		writeAdaptedError(w, adapter, http.StatusServiceUnavailable,
-			"当前没有可用的上游渠道能处理该模型",
-			oai.TypeServer, oai.CodeNoAvailableChannel)
+			message, oai.TypeServer, oai.CodeNoAvailableChannel)
 		return
 	}
 

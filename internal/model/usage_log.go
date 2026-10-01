@@ -229,6 +229,17 @@ type ModelUsage struct {
 	Tokens   int64  // token 数
 }
 
+// ModelFailureStat 是"某个渠道上、某个模型、某个失败状态码"的计数。
+//
+// 用途：后台渠道详情页据此标记"这个模型最近一直 403/404"，
+// 让站长不用翻调用日志就能看出该从渠道清单里清掉哪些失效模型。
+// 三个字段组合成一条唯一记录（model + status_code 去重）。
+type ModelFailureStat struct {
+	Model      string // 模型名
+	StatusCode int    // 失败状态码（>= 400）
+	Count      int64  // 该 (模型, 状态码) 组合的出现次数
+}
+
 // UsageLogRepository 定义调用日志的持久化与聚合操作。
 type UsageLogRepository interface {
 	// Create 写入一条调用日志。
@@ -260,6 +271,13 @@ type UsageLogRepository interface {
 	//   - 只统计 channel_key_id > 0 的行：单密钥模式与历史数据无法归属到具体凭据；
 	//   - 统计范围为【全部历史】（余额是累计量，不能只看某个时间窗）。
 	SumUsageByChannelKey(ctx context.Context, channelID uint64) ([]*ChannelKeyUsage, error)
+
+	// ModelFailureStats 返回某渠道近 since 时间内的失败请求统计（按模型 × 状态码）。
+	//
+	// 用途：渠道详情页的"失效模型体检"——404/410 意味着该模型在上游已不存在，
+	// 403 意味着凭据对该模型无授权，站长据此清理渠道模型清单。
+	// 只统计 status_code >= 400 的行，且 model 非空。
+	ModelFailureStats(ctx context.Context, channelID uint64, since time.Time) ([]ModelFailureStat, error)
 }
 
 // ChannelKeyUsage 是一把密钥在某个模型上的用量汇总（密钥余额核算的输入）。

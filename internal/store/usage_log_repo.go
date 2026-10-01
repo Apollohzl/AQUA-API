@@ -293,6 +293,40 @@ func (r *usageLogRepository) TopModels(ctx context.Context, q model.UsageLogQuer
 	return result, nil
 }
 
+// ModelFailureStats 返回某渠道在指定时间窗内的失败请求统计（按模型 × 状态码）。
+//
+// 用途与 SQL 约定（与接口注释口径一致）：
+//   - 只统计 status_code >= 400 的行：成功的、以及不算失败的 3xx 不参与；
+//   - 排除空模型名：解析失败的请求没有模型可归属，参与统计只会制造噪音；
+//   - (model, status_code) 两列分组：同一模型"404 与 403"是两种不同的处置方向
+//     （模型已下线 vs 凭据无授权），必须分开成行，合并会模糊处置动作。
+func (r *usageLogRepository) ModelFailureStats(ctx context.Context, channelID uint64, since time.Time) ([]model.ModelFailureStat, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT model, status_code, COUNT(1)
+		FROM usage_logs
+		WHERE channel_id = ? AND created_at >= ? AND status_code >= 400 AND model != ''
+		GROUP BY model, status_code
+		ORDER BY COUNT(1) DESC, model ASC`,
+		channelID, since.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("store: 查询模型失败统计失败: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make([]model.ModelFailureStat, 0, 16)
+	for rows.Next() {
+		var stat model.ModelFailureStat
+		if err := rows.Scan(&stat.Model, &stat.StatusCode, &stat.Count); err != nil {
+			return nil, fmt.Errorf("store: 读取模型失败统计失败: %w", err)
+		}
+		result = append(result, stat)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: 遍历模型失败统计失败: %w", err)
+	}
+	return result, nil
+}
+
 // SumUsageByChannelKey 按 (密钥, 模型) 汇总某渠道的用量，用于密钥余额核算。
 //
 // SQL 层面的三个约束与 model.UsageLogRepository 的接口注释一一对应：

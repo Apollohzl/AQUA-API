@@ -152,6 +152,14 @@ type channelDTO struct {
 	// KeyPool 是密钥池概览（渠道可挂多把上游密钥并轮询使用）。
 	// 零值表示该渠道没有配置密钥池，走"单密钥"模式。
 	KeyPool keyPoolDTO `json:"key_pool"`
+
+	// ModelFailures 是该渠道近 24 小时的模型失败统计（按模型 × 状态码）。
+	//
+	// 仅渠道【详情】接口填充；列表接口保持空数组（避免为每个渠道多跑一次聚合查询）。
+	// 用途：站长一眼看出哪些模型已在上游失效（404/410）或无授权（403），
+	// 从而决定从渠道模型清单里清理——这是"调用报错"最直接的体检数据。
+	// 空数组表示该渠道近 24h 无失败请求。
+	ModelFailures []model.ModelFailureStat `json:"model_failures"`
 }
 
 // keyPoolDTO 是密钥池的概览统计。
@@ -363,6 +371,9 @@ func toChannelDTO(ch *model.Channel) channelDTO {
 		LastTestOK:       ch.LastTestOK,
 		CreatedAt:        unixOrZero(ch.CreatedAt),
 		UpdatedAt:        unixOrZero(ch.UpdatedAt),
+		// 失败统计：列表接口恒为空数组（详情接口由处理器另行填充）。
+		// 用非 nil 保证 JSON 输出 [] 而非 null，前端可直接读取。
+		ModelFailures: make([]model.ModelFailureStat, 0),
 	}
 }
 

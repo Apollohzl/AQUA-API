@@ -195,3 +195,73 @@ func TestChatCompletionsPath(t *testing.T) {
 		t.Errorf("ChatCompletionsPath = %q，与预期不符", ChatCompletionsPath)
 	}
 }
+
+// TestValidateChatParameters 验证对话参数边界校验（当前仅 temperature）。
+//
+// 背景：按次专线类上游（如 Kabuai）严格要求 temperature ∈ [0, 2)，
+// 显式传 2.0 会被上游以 400 拒绝。网关在入口统一校验，
+// 把"用户参数越界"变成明确的 400，而不是让用户看到一个来自上游的原文错误。
+// 关键词是【显式】：未传 temperature 时各上游有默认值，网关不做假设。
+func TestValidateChatParameters(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantErr error
+	}{
+		{
+			name:    "正常范围",
+			body:    `{"model":"m","messages":[],"temperature":0.7}`,
+			wantErr: nil,
+		},
+		{
+			name:    "下边界 0 合法",
+			body:    `{"model":"m","temperature":0}`,
+			wantErr: nil,
+		},
+		{
+			name:    "上边界 2.0 越界（上游要求半开区间）",
+			body:    `{"model":"m","temperature":2.0}`,
+			wantErr: ErrTemperatureOutOfRange,
+		},
+		{
+			name:    "超过 2 越界",
+			body:    `{"model":"m","temperature":2.5}`,
+			wantErr: ErrTemperatureOutOfRange,
+		},
+		{
+			name:    "负值越界",
+			body:    `{"model":"m","temperature":-0.5}`,
+			wantErr: ErrTemperatureOutOfRange,
+		},
+		{
+			name:    "未传 temperature 不拦截",
+			body:    `{"model":"m","messages":[]}`,
+			wantErr: nil,
+		},
+		{
+			name:    "温度为零值+非零字段共存正常",
+			body:    `{"model":"m","temperature":0.5,"top_p":1}`,
+			wantErr: nil,
+		},
+		{
+			name:    "非法 JSON",
+			body:    `{ not json`,
+			wantErr: ErrInvalidJSON,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateChatParameters([]byte(tc.body))
+			if tc.wantErr == nil {
+				if err != nil {
+					t.Fatalf("不应报错，实际: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("错误 = %v，期望 %v", err, tc.wantErr)
+			}
+		})
+	}
+}

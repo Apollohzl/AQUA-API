@@ -18,6 +18,7 @@ package store
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -230,6 +231,70 @@ func TestTopModels_ExcludesEmptyModel(t *testing.T) {
 	}
 	if items[0].Model != "claude-3" {
 		t.Errorf("排行首项 = %q，期望 claude-3", items[0].Model)
+	}
+}
+
+// TestModelFailureStats_按模型与状态码聚合 验证渠道详情页的"失效模型体检"。
+//
+// 三个关键约束都要锁住：
+//  1. 只统计 status_code >= 400（成功的、3xx 不算失败）；
+//  2. 排除空模型名（解析失败的请求无可归属）；
+//  3. (model, status_code) 分开成行——同一个模型"403 无授权"与"404 已下线"
+//     是两种处置方向，合并会模糊站长的清理决策。
+func TestModelFailureStats_按模型与状态码聚合(t *testing.T) {
+	repo := newTestLogRepo(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	// 渠道 1：模型 m1 大量 403（凭据无授权）、m1 少量 404（已下线）、m2 偶发 500
+	// 渠道 2：m1 的 403（跨渠道隔离，不应混入渠道 1 的统计）
+	entries := []*model.UsageLog{
+		{ChannelID: 1, Model: "m1", StatusCode: 403, CreatedAt: now.Add(-1 * time.Hour)},
+		{ChannelID: 1, Model: "m1", StatusCode: 403, CreatedAt: now.Add(-2 * time.Hour)},
+		{ChannelID: 1, Model: "m1", StatusCode: 403, CreatedAt: now.Add(-3 * time.Hour)},
+		{ChannelID: 1, Model: "m1", StatusCode: 404, CreatedAt: now.Add(-1 * time.Hour)},
+		{ChannelID: 1, Model: "m2", StatusCode: 500, CreatedAt: now.Add(-1 * time.Hour)},
+		{ChannelID: 1, Model: "m1", StatusCode: 200, CreatedAt: now.Add(-1 * time.Hour)},
+		{ChannelID: 1, Model: "", StatusCode: 403, CreatedAt: now.Add(-1 * time.Hour)},
+		{ChannelID: 2, Model: "m1", StatusCode: 403, CreatedAt: now.Add(-1 * time.Hour)},
+		{ChannelID: 1, Model: "m1", StatusCode: 403, CreatedAt: now.Add(-30 * time.Hour)}, // 窗口外
+	}
+	for _, entry := range entries {
+		if err := repo.Create(ctx, entry); err != nil {
+			t.Fatalf("写入日志失败: %v", err)
+		}
+	}
+
+	stats, err := repo.ModelFailureStats(ctx, 1, now.Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("ModelFailureStats 失败: %v", err)
+	}
+
+	// 期望命中：m1/403=3、m1/404=1、m2/500=1（窗口外与渠道 2 不计；200 与空模型不计）
+	got := map[string]int64{}
+	for _, stat := range stats {
+		got[stat.Model+"/"+strconv.Itoa(stat.StatusCode)] = stat.Count
+	}
+	if len(stats) != 3 {
+		t.Fatalf("统计行数 = %d，期望 3（m1/403、m1/404、m2/500），实际 %+v", len(stats), stats)
+	}
+	if got["m1/403"] != 3 {
+		t.Errorf("m1/403 计数 = %d，期望 3", got["m1/403"])
+	}
+	if got["m1/404"] != 1 {
+		t.Errorf("m1/404 计数 = %d，期望 1", got["m1/404"])
+	}
+	if got["m2/500"] != 1 {
+		t.Errorf("m2/500 计数 = %d，期望 1", got["m2/500"])
+	}
+
+	// 无失败渠道返回空数组而非 nil（前端可直接渲染）
+	empty, err := repo.ModelFailureStats(ctx, 3, now.Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("空渠道查询失败: %v", err)
+	}
+	if empty == nil || len(empty) != 0 {
+		t.Errorf("无失败数据应返回空数组，实际 %#v", empty)
 	}
 }
 

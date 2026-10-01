@@ -242,3 +242,47 @@ func PeekStream(body []byte) bool {
 	}
 	return probe.Stream
 }
+
+// maxTemperature 是所有对话模型共享的 temperature 上限（不含）。
+//
+// 依据：OpenAI 兼容协议规定 temperature 取值范围 [0, 2]，
+// 但按次专线等部分上游（如 Kabuai）严格要求 [0, 2) 半开区间，
+// 传 2.0 会被上游以 400 拒绝。网关在入口统一校验，
+// 把"用户参数越界"这一常见 400 变成明确的中文提示，而不是透传上游原文。
+// 使用半开区间（>= 2.0 即拦截）：float64 中 2.0 与 2 相等，
+// 若用严格大于会漏掉 JSON 里显式写的 2.0，与"拦截 2.0"的意图相悖。
+const maxTemperature = 2.0
+
+// temperatureProbe 只承载 temperature 字段（与 PeekModel 同样的"只关心所需字段"策略）。
+type temperatureProbe struct {
+	// 用指针区分"未传"与"显式传 0"：未传时不做校验（各模型有各自的默认值）。
+	Temperature *float64 `json:"temperature"`
+}
+
+// ValidateChatParameters 校验对话请求体的基础参数边界（当前仅 temperature）。
+//
+// 返回值：
+//   - ErrInvalidJSON：请求体不是合法 JSON；
+//   - ErrTemperatureOutOfRange（包装在错误链中）：temperature 越界。
+//
+// 只在字段【显式出现】时校验：未传 temperature 的请求不做限制，
+// 因为默认值由各上游决定，网关不应替它们假设。
+// 解析失败（JSON 非法）时返回 ErrInvalidJSON——此时请求本身不合法。
+func ValidateChatParameters(body []byte) error {
+	var probe temperatureProbe
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return ErrInvalidJSON
+	}
+	if probe.Temperature == nil {
+		return nil
+	}
+	t := *probe.Temperature
+	if t < 0 || t >= maxTemperature {
+		return fmt.Errorf("%w: temperature 超出允许范围 [0, %.1f)，当前 %.2f",
+			ErrTemperatureOutOfRange, maxTemperature, t)
+	}
+	return nil
+}
+
+// ErrTemperatureOutOfRange 由 ValidateChatParameters 在 temperature 越界时包装返回。
+var ErrTemperatureOutOfRange = errors.New("oai: temperature 越界")

@@ -323,7 +323,23 @@ func (s *Server) handleGetChannel(c *gin.Context) {
 		s.respondInternalError(c, "查询渠道失败")
 		return
 	}
-	c.JSON(http.StatusOK, toChannelDTO(channel))
+
+	dto := toChannelDTO(channel)
+
+	// 近 24 小时模型失败统计（"失效模型体检"）。
+	//
+	// 用途：让站长在渠道详情页直接看到哪些模型最近持续 403/404/410——
+	// 403 意味着凭据对该模型无授权，404/410 意味着模型在上游已下线，
+	// 这两类模型都该从渠道模型清单里清理。列表接口不跑该查询，
+	// 避免几十个渠道各自多一次聚合 SQL（详情页才有必要）。
+	if s.deps.UsageLogs != nil {
+		if failures, err := s.deps.UsageLogs.ModelFailureStats(c.Request.Context(), id, time.Now().Add(-24*time.Hour)); err == nil {
+			dto.ModelFailures = failures
+		}
+		// 查询失败不回显错误：失败统计是体检信息，缺它不应阻断详情页打开。
+	}
+
+	c.JSON(http.StatusOK, dto)
 }
 
 // handleCreateChannel 新建渠道。
@@ -1325,11 +1341,7 @@ func resolveChannelGroups(groups []string, single string) (list []string, primar
 //  6. 测活【不】修改凭据的失败计数与冷却状态——它是只读探测，不能因为一次
 //     后台点击就把正在服务的密钥打进冷却。
 func (s *Server) probeChannel(ctx context.Context, channel *model.Channel) channelTestResponse {
-	probeModel := ""
-	if len(channel.Models) > 0 {
-		probeModel = strings.TrimSpace(channel.Models[0])
-	}
-	if probeModel == "" {
+	if len(channel.Models) == 0 {
 		// 未声明模型时无法构造有效请求：明确告知管理员先补模型列表，
 		// 而不是随便挑一个模型去撞（那会产生"测活失败但渠道其实正常"的误导）。
 		return channelTestResponse{
@@ -1341,7 +1353,7 @@ func (s *Server) probeChannel(ctx context.Context, channel *model.Channel) chann
 
 	// ── 选本次探测使用的凭据（池优先，与转发链路的取用顺序一致）──────────
 	apiKey, cred, credErr := s.pickProbeCredential(ctx, channel)
-	result := channelTestResponse{Model: probeModel, KeyMasked: cred.masked, KeySource: cred.source}
+	result := channelTestResponse{KeyMasked: cred.masked, KeySource: cred.source}
 	result.PoolTotal = cred.poolTotal
 	result.PoolAvailable = cred.poolAvailable
 	result.PoolCooling = cred.poolCooling
@@ -1362,40 +1374,84 @@ func (s *Server) probeChannel(ctx context.Context, channel *model.Channel) chann
 	probeCtx, cancel := context.WithTimeout(ctx, relay.UpstreamTimeout)
 	defer cancel()
 
-	probe := s.deps.Relay.ProbeChannel(probeCtx, channel, apiKey, probeModel)
-	result.LatencyMS = probe.LatencyMS
-	result.StatusCode = probe.StatusCode
-	result.UpstreamBody = probe.Body
-	result.UpstreamModel = probe.UpstreamModel
-
-	// 结论里同时交代"用了哪把凭据"与"上游实际收到的模型名"：
-	// 这两条信息决定了 404/401 这类失败到底该改映射、改模型名还是改密钥。
-	note := keySourceText(cred)
-	if probe.UpstreamModel != "" && probe.UpstreamModel != probeModel {
-		mapping := fmt.Sprintf("模型映射：%s → %s", probeModel, probe.UpstreamModel)
-		if note != "" {
-			mapping += "　" + note
+	// ── 逐个探测直到命中一个可用模型（2026-09-30 修复线上测活误报）─────
+	//
+	// 此前只测 Models[0]，一旦清单里第一个模型在上游已不存在（404/410 EOL），
+	// 渠道就会一直显示"测活失败"，即使其余 20+ 个模型全部正常——
+	// 线上实测：NVIDIA 渠道第一个模型 starcoder2-15b 已下架，
+	// 渠道因此常年 last_test_ok=0，掩盖了真实可用性。
+	//
+	// 新策略：按清单顺序逐个探测，命中 2xx 立即判定成功；
+	// 全部失败时取第一个失败的详情回传（管理员可据此清理失效模型）。
+	var (
+		probe          relay.ProbeResult
+		firstFailure   relay.ProbeResult
+		skipped        []string
+		probedModels   []string
+		skippedUnknown []string
+	)
+	for _, raw := range channel.Models {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
 		}
-		note = mapping
-	}
-
-	if probe.Err != nil {
-		// 区分"超时"与"连不上"：两者的处置方式完全不同——
-		// 超时往往只是上游慢（尤其 NVIDIA），换个时间或换个模型可能就正常；
-		// 连不上才是地址/网络配错。混在一起报会让管理员改错地方。
-		if probe.TimedOut() {
-			result.Message = fmt.Sprintf("等待上游响应超过 %d 秒仍未返回。"+
-				"这不代表渠道不可用（部分平台排队时间很长），建议换一个模型再测，"+
-				"或直接交给实际调用验证。", int(relay.UpstreamTimeout.Seconds()))
+		if len(skippedUnknown) > 0 {
+			skipped = append(skipped, name)
+			continue
+		}
+		probe = s.deps.Relay.ProbeChannel(probeCtx, channel, apiKey, name)
+		probedModels = append(probedModels, name)
+		if probe.StatusCode >= 200 && probe.StatusCode < 300 {
+			// 命中可用模型：测活成功，附带本次实际探测到的模型名
+			result.Model = name
+			result.LatencyMS = probe.LatencyMS
+			result.StatusCode = probe.StatusCode
+			result.UpstreamBody = probe.Body
+			result.UpstreamModel = probe.UpstreamModel
+			note := keySourceText(cred)
+			if probe.UpstreamModel != "" && probe.UpstreamModel != name {
+				note = fmt.Sprintf("模型映射：%s → %s", name, probe.UpstreamModel)
+			}
+			skipped = append(skipped, channel.Models[len(probedModels):]...)
+			skipped = append(skipped, skippedUnknown...)
+			result.Message = describeProbeStatus(probe.StatusCode, probe.Body, note)
+			if len(skipped) > 0 {
+				result.Message += fmt.Sprintf("　（其余 %d 个模型未逐一探测：%s）",
+					len(skipped), strings.Join(skipped, ", "))
+			}
+			result.OK = true
 			return result
 		}
-		result.Message = "无法连接到上游（网络不通或地址有误）：" + probe.Err.Error()
-		return result
+		// 记录首个失败详情（含网络错误），供全部失败时汇报
+		if probe.Err != nil && firstFailure.Err == nil {
+			firstFailure = probe
+			if probe.TimedOut() {
+				// 超时不代表模型失效，可能只是上游慢——跳过它继续测下一个
+				skippedUnknown = append(skippedUnknown, name)
+			}
+		}
+		if probe.StatusCode >= 400 && firstFailure.Err == nil {
+			firstFailure = probe
+		}
 	}
 
-	ok := probe.StatusCode >= 200 && probe.StatusCode < 300
-	result.OK = ok
-	result.Message = describeProbeStatus(probe.StatusCode, probe.Body, note)
+	// 全部失败：回传第一个失败模型的详情
+	result.Model = firstFailure.UpstreamModel
+	result.LatencyMS = firstFailure.LatencyMS
+	result.StatusCode = firstFailure.StatusCode
+	result.UpstreamBody = firstFailure.Body
+	if firstFailure.Err != nil {
+		if firstFailure.TimedOut() {
+			result.Message = fmt.Sprintf("全部模型均等待超时（超过 %d 秒）。"+
+				"这不代表渠道不可用（部分平台排队时间很长），建议稍后再测或直接交给实际调用验证。",
+				int(relay.UpstreamTimeout.Seconds()))
+			return result
+		}
+		result.Message = "无法连接到上游（网络不通或地址有误）：" + firstFailure.Err.Error()
+		return result
+	}
+	result.Message = describeProbeStatus(firstFailure.StatusCode, firstFailure.Body,
+		keySourceText(cred))
 	return result
 }
 

@@ -253,6 +253,29 @@ func (r *Relay) listCandidates(ctx context.Context, group, modelName string) ([]
 	return eligible, nil
 }
 
+// channelCountForModel 统计"任意启用渠道声明支持该模型"的数量（不限定分组）。
+//
+// 用途：转发层在"当前分组没有可用渠道"时区分两种情形——模型在别的分组可用
+// （可见性配置问题，应提示使用者检查分组）还是全站都没有渠道（容量问题）。
+// 判定口径与 listCandidates 的模型匹配一致（空模型清单 = 支持全部模型）。
+func (r *Relay) channelCountForModel(ctx context.Context, modelName string) int {
+	if r.channels == nil {
+		return 0
+	}
+	enabled := model.ChannelStatusEnabled
+	channels, err := r.channels.List(ctx, model.ChannelQuery{Status: &enabled, Limit: 500})
+	if err != nil {
+		return 0 // 查询失败按"无渠道"处理：宁可回笼统文案，也不阻塞请求
+	}
+	count := 0
+	for _, ch := range channels {
+		if len(ch.Models) == 0 || ch.HasModel(modelName) {
+			count++
+		}
+	}
+	return count
+}
+
 // groupFromContext 解析「本次请求应使用的分组」。
 //
 // 解析优先级（顺序不可变，改错会造成"用 A 分组选渠道、用 B 分组计费"的错账）：
