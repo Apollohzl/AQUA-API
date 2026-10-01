@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
 import { AppIcon } from '@/components/AppIcon'
+import { BrandLogo } from '@/components/BrandMark'
 import { useSite } from '@/lib/site/site-context'
 
 import { LocaleSwitcher } from './LocaleSwitcher'
@@ -56,12 +57,7 @@ export function SiteFooter() {
     <footer className="border-t border-line bg-card">
       <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:px-6 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand text-white">
-              <AppIcon name="bolt" size={16} />
-            </span>
-            <span className="font-semibold text-ink">{siteName}</span>
-          </div>
+          <BrandLogo />
           <p className="mt-3 max-w-sm text-[13px] leading-relaxed text-ink-3">
             自托管、可私有部署的 LLM API 网关：统一多协议上游、精细计费、全量日志与审计。
           </p>

@@ -13,6 +13,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useState } from 'react'
 
+import { BrandLogo } from '@/components/BrandMark'
 import { AppIcon, type IconName } from '@/components/AppIcon'
 import { LocaleSwitcher } from '@/components/site/LocaleSwitcher'
 import { useAuth } from '@/lib/auth/auth-context'
@@ -58,10 +59,7 @@ export function AppShell({ groups, brand, children }: AppShellProps) {
       {/* 桌面侧边栏 */}
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-56 flex-col border-r border-line bg-card lg:flex">
         <Link href="/" className="flex h-14 items-center gap-2 border-b border-line px-4">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand text-white">
-            <AppIcon name="bolt" size={16} />
-          </span>
-          <span className="font-semibold text-ink">{brand}</span>
+          <BrandLogo name={brand} />
         </Link>
         <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
           {groups.map((group, gi) => (

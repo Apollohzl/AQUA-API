@@ -10,7 +10,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
-import { AppIcon } from '@/components/AppIcon'
+import { BrandLogo } from '@/components/BrandMark'
 import { resetPassword, sendEmailCode } from '@/api/auth'
 import { SiteFooter } from '@/components/site/SiteFooter'
 import { Button } from '@/components/ui/Button'
@@ -78,10 +78,7 @@ export default function ForgotPasswordPage() {
     <div className="flex min-h-screen flex-col">
       <header className="flex h-14 items-center border-b border-line bg-card px-4 sm:px-6">
         <Link href="/" className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand text-white">
-            <AppIcon name="bolt" size={16} />
-          </span>
-          <span className="font-semibold text-ink">AQUA-API</span>
+          <BrandLogo />
         </Link>
       </header>
 

@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
 import { AppIcon } from '@/components/AppIcon'
+import { BrandLogo } from '@/components/BrandMark'
 import { useAuth } from '@/lib/auth/auth-context'
 
 import { LocaleSwitcher } from './LocaleSwitcher'
@@ -48,10 +49,7 @@ export function SiteHeader({ transparent = true }: { transparent?: boolean }) {
     >
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
         <Link href="/" className="flex items-center gap-2" aria-label="返回首页">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand text-white">
-            <AppIcon name="bolt" size={16} />
-          </span>
-          <span className={`font-semibold ${solid ? 'text-ink' : 'text-ink'}`}>AQUA-API</span>
+          <BrandLogo />
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex">
