@@ -13,7 +13,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 
 import { AppIcon } from '@/components/AppIcon'
 import { Button } from '@/components/ui/Button'
@@ -70,12 +70,16 @@ function HeroSection() {
           </Link>
         </div>
 
-        <div className="mt-12 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-4">
-          {stats.map((stat) => (
-            <div key={stat.label} className="bg-card px-4 py-5">
-              <div className="text-2xl font-bold text-ink">{stat.value}</div>
-              <div className="mt-1 text-xs text-ink-3">{stat.label}</div>
-            </div>
+        {/* 事实条：数字大而细、标签弱化、中点分隔——声明式而非统计卡，避免 SaaS 模板感 */}
+        <div className="mt-12 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-[13px] tracking-wide text-ink-3">
+          {stats.map((stat, index) => (
+            <Fragment key={stat.label}>
+              {index > 0 && <span className="hidden h-1 w-1 rounded-full bg-ink/20 sm:block" aria-hidden />}
+              <span>
+                <span className="text-2xl font-medium tabular-nums tracking-tight text-ink">{stat.value}</span>
+                <span className="ml-2">{stat.label}</span>
+              </span>
+            </Fragment>
           ))}
         </div>
       </div>
@@ -165,7 +169,7 @@ function CapabilitiesSection() {
         </div>
         <div ref={reveal} className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {CAPABILITIES.map((cap) => (
-            <div key={cap.title} className="group rounded-lg border border-line bg-card p-5 shadow-card transition hover:border-line-2 hover:shadow-pop">
+            <div key={cap.title} className="group rounded-lg border border-line bg-card p-5 transition hover:border-line-2 hover:bg-surface/70">
               <div className="flex items-center justify-between">
                 <span className="flex h-9 w-9 items-center justify-center rounded-md bg-brand/8 text-brand">
                   <AppIcon name={cap.icon} size={18} />
@@ -213,7 +217,7 @@ function ScenariosSection() {
         <div className="mt-10 grid gap-4 md:grid-cols-3">
           {SCENARIOS.map((scenario) => (
             <div key={scenario.title} className="rounded-lg border border-line bg-surface/50 p-5">
-              <span className="flex h-9 w-9 items-center justify-center rounded-md bg-card text-brand shadow-card">
+              <span className="flex h-9 w-9 items-center justify-center rounded-md border border-line bg-card text-brand">
                 <AppIcon name={scenario.icon} size={18} />
               </span>
               <div className="mt-3 font-semibold text-ink">{scenario.title}</div>

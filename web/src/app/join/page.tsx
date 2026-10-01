@@ -33,7 +33,7 @@ export default function JoinGroupsPage() {
 
         <div className="mx-auto mt-10 grid max-w-2xl gap-4 sm:grid-cols-1">
           {GROUPS.map((group) => (
-            <div key={group.name} className="flex items-center justify-between gap-4 rounded-lg border border-line bg-card p-5 shadow-card">
+            <div key={group.name} className="flex items-center justify-between gap-4 rounded-lg border border-line bg-card p-5">
               <div className="flex items-center gap-3">
                 <span className="flex h-11 w-11 items-center justify-center rounded-md bg-brand/8 text-brand">
                   <AppIcon name="users" size={22} />

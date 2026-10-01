@@ -20,7 +20,7 @@ interface CardProps {
 export function Card({ children, className, padding = 'md' }: CardProps) {
   const pad = padding === 'lg' ? 'p-6' : padding === 'none' ? 'p-0' : 'p-5'
   return (
-    <div className={`rounded-lg border border-line bg-card shadow-card ${pad} ${className ?? ''}`}>
+    <div className={`rounded-lg border border-line bg-card ${pad} ${className ?? ''}`}>
       {children}
     </div>
   )
@@ -59,7 +59,7 @@ interface StatCardProps {
 
 export function StatCard({ label, value, hint, extra }: StatCardProps) {
   return (
-    <div className="rounded-lg border border-line bg-card p-5 shadow-card">
+    <div className="rounded-lg border border-line bg-card p-5">
       <div className="text-[13px] text-ink-3">{label}</div>
       <div className="mt-1.5 font-semibold text-[22px] tracking-tight text-ink">{value}</div>
       {hint && <div className="mt-1 text-xs text-ink-3">{hint}</div>}
