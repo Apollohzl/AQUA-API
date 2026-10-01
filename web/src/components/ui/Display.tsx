@@ -58,10 +58,19 @@ interface StatCardProps {
 }
 
 export function StatCard({ label, value, hint, extra }: StatCardProps) {
+  // 超长数字（如管理员配额 10,000,000,000,000）在 22px 下会撑破卡片，
+  // 按字符数降一档字号并允许折行，保证任何量级都不溢出。
+  const compact = value.length > 10
   return (
     <div className="rounded-lg border border-line bg-card p-5">
       <div className="text-[13px] text-ink-3">{label}</div>
-      <div className="mt-1.5 font-semibold text-[22px] tracking-tight text-ink">{value}</div>
+      <div
+        className={`mt-1.5 font-semibold tracking-tight text-ink tabular-nums ${
+          compact ? 'break-all text-[17px] leading-snug' : 'text-[22px]'
+        }`}
+      >
+        {value}
+      </div>
       {hint && <div className="mt-1 text-xs text-ink-3">{hint}</div>}
       {extra && <div className="mt-2">{extra}</div>}
     </div>

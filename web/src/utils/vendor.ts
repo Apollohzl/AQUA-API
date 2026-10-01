@@ -74,16 +74,17 @@ export function vendorInitial(vendor: string): string {
   return label.slice(0, 1).toUpperCase()
 }
 
-/** 头像配色候选：统一走「浅色底 + 深色字 + 内描边」，保证在亮色主题下可读 */
+/** 头像配色候选：统一走「浅色底 + 深色字 + 内描边」；
+ *  夜间主题下 `text-*-700` 在深底上几乎看不清，故每项补 dark: 变体提到 300 档。 */
 const VENDOR_TONES = [
-  'bg-cyan-500/10 text-cyan-700 ring-cyan-500/25',
-  'bg-indigo-500/10 text-indigo-700 ring-indigo-500/25',
-  'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25',
-  'bg-amber-500/10 text-amber-700 ring-amber-500/25',
-  'bg-rose-500/10 text-rose-700 ring-rose-500/25',
-  'bg-violet-500/10 text-violet-700 ring-violet-500/25',
-  'bg-sky-500/10 text-sky-700 ring-sky-500/25',
-  'bg-teal-500/10 text-teal-700 ring-teal-500/25',
+  'bg-cyan-500/10 text-cyan-700 ring-cyan-500/25 dark:bg-cyan-400/15 dark:text-cyan-300 dark:ring-cyan-400/30',
+  'bg-indigo-500/10 text-indigo-700 ring-indigo-500/25 dark:bg-indigo-400/15 dark:text-indigo-300 dark:ring-indigo-400/30',
+  'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25 dark:bg-emerald-400/15 dark:text-emerald-300 dark:ring-emerald-400/30',
+  'bg-amber-500/10 text-amber-700 ring-amber-500/25 dark:bg-amber-400/15 dark:text-amber-300 dark:ring-amber-400/30',
+  'bg-rose-500/10 text-rose-700 ring-rose-500/25 dark:bg-rose-400/15 dark:text-rose-300 dark:ring-rose-400/30',
+  'bg-violet-500/10 text-violet-700 ring-violet-500/25 dark:bg-violet-400/15 dark:text-violet-300 dark:ring-violet-400/30',
+  'bg-sky-500/10 text-sky-700 ring-sky-500/25 dark:bg-sky-400/15 dark:text-sky-300 dark:ring-sky-400/30',
+  'bg-teal-500/10 text-teal-700 ring-teal-500/25 dark:bg-teal-400/15 dark:text-teal-300 dark:ring-teal-400/30',
 ]
 
 /**
