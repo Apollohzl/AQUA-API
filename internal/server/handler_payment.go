@@ -271,6 +271,13 @@ func (s *Server) handleCreateOrder(c *gin.Context) {
 			oai.TypeInvalidRequest, "amount_too_small")
 		return
 	}
+	// 兜底：即使后台把 MinCents 配成 0（视为"不限下限"），0 元订单依然没有意义
+	// （既无额度可充，也会被支付通道拒绝）。保证任何配置下都不会产生 0 元订单。
+	if req.AmountCents <= 0 {
+		oai.WriteError(c.Writer, http.StatusBadRequest,
+			"充值金额必须大于 0", oai.TypeInvalidRequest, "amount_zero")
+		return
+	}
 	if pay.MaxCents > 0 && req.AmountCents > pay.MaxCents {
 		oai.WriteError(c.Writer, http.StatusBadRequest,
 			fmt.Sprintf("单笔充值不能超过 %s 元", model.FormatCents(pay.MaxCents)),

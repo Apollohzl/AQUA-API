@@ -175,3 +175,52 @@ func TestPublicPaymentInfo_无子方式通道下发空数组(t *testing.T) {
 		t.Errorf("人工确认通道不应有子方式，实际 %v", subs)
 	}
 }
+
+// TestCreateOrder_最低充值可到1分 是"放开最低充值"（2026-10-01）的回归测试。
+//
+// 背景：站长要求取消"最低 1 元"限制，允许 0.01 元小额试充。
+// 实现：默认 min_cents 从 100 改为 1（1 分），并新增"0 元订单直接拒绝"的兜底校验。
+// 这里锁定三个边界：
+//   - 0.01 元（1 分）必须能下单（不低于上限即可通过 min 校验）；
+//   - 0 元必须被拒绝（即使后台把 min_cents 配成 0，也不能出现 0 元订单）；
+//   - 负数金额必须被拒绝。
+func TestCreateOrder_最低充值可到1分(t *testing.T) {
+	srv, st := newNotifyTestServer(t)
+	applySettings(t, st, map[string]string{
+		model.SettingKeyRegistrationRequireEmailCode: "false",
+		model.SettingKeyPaymentEnabled:               "true",
+		model.SettingKeyPaymentMethods:               model.PaymentMethodEPay,
+		model.SettingKeyPaymentExchangeRate:          "100",
+		model.SettingKeyPaymentMinCents:              "1", // 最少 1 分 = 0.01 元
+		model.SettingKeyPaymentMaxCents:              "0",
+		model.SettingKeyPaymentParams:                epaySubMethodParams,
+	})
+
+	token, _ := registerUser(t, srv, "cent-buyer", "")
+
+	cases := []struct {
+		name   string
+		cents  int64
+		wantOK bool
+	}{
+		{"一分钱可充", 1, true},
+		{"一角钱可充", 10, true},
+		{"一元钱可充", 100, true},
+		{"零元被拒", 0, false},
+		{"负数被拒", -5, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec, body := callJSON(t, srv, http.MethodPost, "/api/user/orders", map[string]any{
+				"amount_cents": tc.cents,
+				"method":       model.PaymentMethodEPay,
+			}, token)
+			if tc.wantOK && rec.Code != http.StatusOK {
+				t.Fatalf("应能下单，实际 %d，响应 %v", rec.Code, body)
+			}
+			if !tc.wantOK && rec.Code != http.StatusBadRequest {
+				t.Fatalf("应被拒绝（400），实际 %d，响应 %v", rec.Code, body)
+			}
+		})
+	}
+}

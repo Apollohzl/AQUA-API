@@ -470,12 +470,15 @@ func DefaultSiteSettings() SiteSettings {
 			Enabled: false,
 			// 只默认启用人工通道：它不依赖任何第三方，管理员可在后台手动入账，
 			// 适合自用部署；需要在线支付时站长再自行开易支付/Stripe。
-			Methods:         []string{PaymentMethodManual},
-			ExchangeRate:    100, // 1 元 = 100 额度（即 1 额度约等于 1 分）
-			Currency:        "CNY",
-			MinCents:        100, // 最小 1 元，避免大量 1 分订单把订单表撑爆
-			MaxCents:        0,   // 不限上限
-			OrderTTLMinutes: 30,  // 30 分钟未支付自动关单
+			Methods:      []string{PaymentMethodManual},
+			ExchangeRate: 100, // 1 元 = 100 额度（即 1 额度约等于 1 分）
+			Currency:     "CNY",
+			// MinCents = 1：单笔最低 0.01 元。
+			// 刻意不设"最低 1 元"：允许小额试充（体验友好），
+			// 0 元与负数订单由下单校验天然拒绝，无需额外分支。
+			MinCents:        1,
+			MaxCents:        0,  // 不限上限
+			OrderTTLMinutes: 30, // 30 分钟未支付自动关单
 			EPayTypes:       []string{"alipay", "wxpay"},
 		},
 		// SEO 默认值：开箱即用——默认开启站点地图，并内置项目官方站点的必应收录码。

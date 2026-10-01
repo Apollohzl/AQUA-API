@@ -395,8 +395,8 @@ export default function AdminSettingsPage() {
               </Field>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="最小充值金额（分）">
-                <Input value={minCents} onChange={(e) => setMinCents(e.target.value)} type="number" placeholder="100" />
+              <Field label="最小充值金额（分）" help="1 分 = 0.01 元；填 0 表示不限下限">
+                <Input value={minCents} onChange={(e) => setMinCents(e.target.value)} type="number" placeholder="1" />
               </Field>
               <Field label="最大充值金额（分，0 不限）">
                 <Input value={maxCents} onChange={(e) => setMaxCents(e.target.value)} type="number" placeholder="0" />
