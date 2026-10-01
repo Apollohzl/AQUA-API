@@ -21,10 +21,13 @@ interface LegalDocLayoutProps {
 export function LegalDocLayout({ title, updatedAt, children }: LegalDocLayoutProps) {
   return (
     <>
-      <SiteHeader transparent={false} />
+      <SiteHeader />
       <main className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
-        <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">{title}</h1>
-        {updatedAt && <div className="mt-2 text-xs text-ink-3">{updatedAt}</div>}
+        <div className="font-mono text-[12px] text-ink-3">
+          <span className="text-brand">/</span> 文档
+        </div>
+        <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-ink sm:text-3xl">{title}</h1>
+        {updatedAt && <div className="mt-2 font-mono text-[12px] text-ink-3">{updatedAt}</div>}
         <article className="prose-sm mt-8 rounded-lg border border-line bg-card p-6 sm:p-8">{children}</article>
       </main>
       <SiteFooter />

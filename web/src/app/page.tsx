@@ -1,220 +1,59 @@
-/** 落地页（App Router 首页）：极简个人主页 · 左对齐窄栏长文。
+/** 落地页（App Router 首页）：开发者技术站 · 工程文档气质。
  *
  * 意图（Why）：
- *   用户两轮否掉了「企业官网商业化」布局（sticky 居中顶栏 + 卡片栅格 + 分区描边）。
- *   本次按「极简个人主页 + 普通不悬浮头部」重构：
- *   - 全页 max-w-2xl 左对齐窄栏，像读一篇博客正文，而不是逛一个产品站；
- *   - 无大卡片栅格：用「小节 + 短段落 + 内联链接」组织，信息密度交给文字；
- *   - 顶栏不 sticky（SiteHeader 已改），滚到哪是哪。
+ *   用户先否掉「企业官网商业化」，再否掉「个人博客」——要的是一个**技术站**。
+ *   因此这里改用工程文档的排版语言，而不是散文或营销卡片：
+ *   - 分区带等宽编号（01 / 02 …），像规格说明书的小节；
+ *   - Hero 左右分栏：左边一句结论，右边一个模拟终端窗口（请求 + 响应）；
+ *   - 能力用发丝线网格矩阵（gap-px + 背景线）承载，信息密度高、无卡片浮起感；
+ *   - 关键指标走「规格条」，模型走等宽表格（模型 / 分组 / 价格）。
  *
  * 视觉原则：
- *   - 排版节奏：大标题 → 引语 → 小节（## 标题 + 正文），全是文档流；
- *   - 强调收敛：唯一品牌色用在「注册/开始使用」一处；
- *   - 事实用文字陈述（32 个模型在线、0 条广告），不做统计格子。
+ *   - 字体：正文无衬线，标签与数据一律等宽（font-mono），形成「工具站」的识别度；
+ *   - 强调收敛：唯一品牌色（青）只出现在编号、链接与主行动；
+ *   - 装饰克制：层次靠发丝描边与网格底纹，不靠投影与大圆角。
  *
  * 流转（Flow）：
- *   SiteHeader → 自述(Hero) → 在跑什么 → 为什么做 → 钱怎么花 → 怎么接入
- *   → 模型清单 → 支持我 → FAQ → 结尾 → SiteFooter
+ *   SiteHeader → Hero(结论 + 终端) → 规格条 → 01 能力 → 02 接入 → 03 模型
+ *   → 04 取舍与成本 → 05 FAQ → CTA → SiteFooter
  */
 'use client'
 
 import Link from 'next/link'
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
-import { AppIcon } from '@/components/AppIcon'
+import { fetchModelPlaza } from '@/api/site'
+import type { ModelPlaza, PlazaModel, PlazaPrice } from '@/api/types'
+import { AppIcon, type IconName } from '@/components/AppIcon'
 import { Button } from '@/components/ui/Button'
 import { CodeBlock } from '@/components/ui/Display'
 import { SiteFooter } from '@/components/site/SiteFooter'
 import { SiteHeader } from '@/components/site/SiteHeader'
 import { useAuth } from '@/lib/auth/auth-context'
 import { useSite } from '@/lib/site/site-context'
+import { formatYuanPerCall, formatYuanPerMillion } from '@/utils/money'
 
-/* ── 小节标题：统一窄栏内的大标题 ─────────────────────── */
+const REPO_URL = 'https://gitee.com/xiaosu4610/AQUA-API'
 
-function SectionTitle({ id, children }: { id?: string; children: React.ReactNode }) {
+/* ── 小节头：等宽编号 + 标题 + 说明 ─────────────────────── */
+
+function SectionHead({ index, title, desc, anchorId }: { index: string; title: string; desc?: string; anchorId?: string }) {
   return (
-    <h2 id={id} className="mt-14 text-xl font-bold tracking-tight text-ink sm:text-2xl">
-      {children}
-    </h2>
+    <div id={anchorId} className="scroll-mt-20">
+      <div className="flex items-baseline gap-3">
+        <span className="font-mono text-[12px] font-medium text-brand">{index}</span>
+        <h2 className="text-xl font-bold tracking-tight text-ink sm:text-2xl">{title}</h2>
+      </div>
+      {desc && <p className="mt-2.5 max-w-2xl text-[14px] leading-relaxed text-ink-2">{desc}</p>}
+    </div>
   )
 }
 
-/* ── 自述（Hero）────────────────────────────────────────── */
+/* ── Hero：左结论 + 右终端 ─────────────────────────────── */
 
-function Intro() {
+function Hero() {
   const { status } = useSite()
   const { isLoggedIn } = useAuth()
-
-  const stats = useMemo(() => {
-    const items: { value: string; label: string }[] = []
-    if (status?.models?.length) items.push({ value: String(status.models.length), label: '个模型在线' })
-    items.push({ value: '79', label: '类上游渠道' })
-    items.push({ value: '0', label: '条广告' })
-    items.push({ value: '1', label: '个二进制文件' })
-    return items
-  }, [status])
-
-  return (
-    <section className="grid-bg relative border-b border-line overflow-hidden">
-      <div className="mx-auto max-w-2xl px-4 pb-12 pt-14 sm:px-6 sm:pt-16">
-        <p className="text-[13px] tracking-wide text-ink-3">
-          这是一个人的自托管网关 · 不是公司产品
-        </p>
-
-        <h1 className="mt-3 text-3xl font-bold leading-[1.3] tracking-tight text-ink sm:text-[34px]">
-          我把几十家上游，
-          <br />
-          收拢成<span className="text-brand">一条通用的接口</span>。
-        </h1>
-
-        <p className="mt-5 max-w-xl text-[15px] leading-[1.9] text-ink-2">
-          这里是我自己搭、自己维护的 LLM API 网关：OpenAI、Anthropic、Gemini 等协议统一转成
-          OpenAI 兼容格式，计费、日志、密钥池、失败重试都是现成的。
-          它没有增长指标，也没打算把我自己做大——能把服务器成本跑平，顺手帮到一些人就够了。
-        </p>
-
-        <div className="mt-6 flex flex-wrap gap-3">
-          <Link href={isLoggedIn ? '/console' : '/register'}>
-            <Button variant="primary" size="lg">
-              {isLoggedIn ? '进入控制台' : '注册一个账号'}
-              <AppIcon name="chevron-right" size={16} />
-            </Button>
-          </Link>
-          <Link href="/models">
-            <Button variant="secondary" size="lg">
-              先看看有哪些模型
-            </Button>
-          </Link>
-        </div>
-
-        <div className="mt-9 flex flex-wrap gap-x-6 gap-y-2 text-[13px] text-ink-3">
-          {stats.map((stat, index) => (
-            <Fragment key={stat.label}>
-              {index > 0 && <span className="hidden h-1 w-1 rounded-full bg-ink/20 sm:inline-block" aria-hidden />}
-              <span>
-                <span className="text-lg font-medium tabular-nums text-ink">{stat.value}</span>
-                <span className="ml-1.5">{stat.label}</span>
-              </span>
-            </Fragment>
-          ))}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-/* ── 在跑什么（近况，纯文字）────────────────────────────── */
-
-const MOMENTS: { time: string; text: string; tags?: string[] }[] = [
-  {
-    time: '最近',
-    text: '又接了几路上游，把在跑的模型价格重新对了一遍账。免费分组保持开放，按次专线照旧——长提示词不加价。',
-    tags: ['运维', '计价'],
-  },
-  {
-    time: '前不久',
-    text: '给全套界面做了昼夜两套主题：白天暖白、夜里深墨，默认跟着北京时间走，也可以手动锁一个。',
-    tags: ['前端', '主题'],
-  },
-  {
-    time: '更早',
-    text: '把密钥池的冷却与自动摘除调顺了。上游偶发抽风时能自己换线路，调用方基本无感。',
-    tags: ['稳定性'],
-  },
-]
-
-function WhatNow() {
-  return (
-    <section className="mx-auto max-w-2xl px-4 sm:px-6">
-      <SectionTitle>最近在忙什么</SectionTitle>
-      <div className="mt-5 space-y-6">
-        {MOMENTS.map((m) => (
-          <article key={m.text}>
-            <p className="text-[14px] leading-[1.85] text-ink-2">
-              <span className="mr-1.5 font-medium text-ink">{m.time}</span>
-              {m.text}
-            </p>
-            {m.tags && (
-              <div className="mt-1.5 flex gap-1.5 text-[12px] text-ink-3">
-                {m.tags.map((t) => (
-                  <span key={t}>#{t}</span>
-                ))}
-              </div>
-            )}
-          </article>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-/* ── 为什么做（三条原则，列表式）────────────────────────── */
-
-function WhyDo() {
-  return (
-    <section className="mx-auto max-w-2xl px-4 sm:px-6">
-      <SectionTitle>为什么做这个</SectionTitle>
-      <div className="mt-5 space-y-4 text-[15px] leading-[1.9] text-ink-2">
-        <p>
-          市面上的中转站大多绕不开三件事：套路定价、看不清的用量、随时跑路。我不想再做一个那样的东西，
-          所以这里的规矩很简单——
-        </p>
-        <ul className="space-y-3 pl-1">
-          {[
-            ['计价写得明白', '每个模型的单价摆在模型广场上，按次/按量/免费三种模式，账单可逐条核对。'],
-            ['用量自己说了算', '每次调用的模型、token 数、耗时、状态码都留档，你随时能查，我也改不了。'],
-            ['代码是开源的', '整套网关在 Gitee / GitHub 公开，木兰宽松版。哪天我不做了，你也能自己部署一套。'],
-          ].map(([title, desc]) => (
-            <li key={title} className="flex gap-2">
-              <span className="mt-[2px] shrink-0 text-brand">·</span>
-              <span>
-                <b className="font-medium text-ink">{title}</b> —— {desc}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </section>
-  )
-}
-
-/* ── 钱怎么花（成本透明）────────────────────────────────── */
-
-function Money() {
-  return (
-    <section className="mx-auto max-w-2xl px-4 sm:px-6">
-      <SectionTitle>钱是怎么花的</SectionTitle>
-      <div className="mt-5 space-y-3 text-[15px] leading-[1.9] text-ink-2">
-        <p>
-          不搞「限时特惠」，也不做「充多少送多少」。这里只有一笔账：
-          <b className="font-medium text-ink">你付的钱先覆盖成本，多出来的才是我继续维护它的理由。</b>
-        </p>
-        <ul className="space-y-2 pl-1 text-[14px]">
-          {[
-            ['服务器', '每月固定——一台独服跑网关与数据库'],
-            ['带宽与流量', '按量浮动——调用越多越高'],
-            ['上游模型费用', '按用量结算——我向上游买的价就是成本基准'],
-            ['域名与证书', '每年少量'],
-          ].map(([k, v]) => (
-            <li key={k} className="flex flex-wrap gap-x-2">
-              <span className="w-24 shrink-0 font-medium text-ink">{k}</span>
-              <span className="text-ink-3">{v}</span>
-            </li>
-          ))}
-        </ul>
-        <p className="rounded-md border border-brand/20 bg-brand/5 p-3 text-[13px] leading-[1.8]">
-          如果有结余，我优先用来：接更多稳定上游、把便宜模型做成免费分组、给开源仓库补文档。
-          <b className="font-medium text-ink">如果哪天入不敷出，我会在公告里说明，而不是悄悄涨价。</b>
-        </p>
-      </div>
-    </section>
-  )
-}
-
-/* ── 怎么接入 ───────────────────────────────────────────── */
-
-function HowToUse() {
-  const { status } = useSite()
   const sampleModel = status?.models?.[0] || 'AQUA-CALL/deepseek-v4-flash'
 
   const [origin, setOrigin] = useState('https://aqua.is3.cc')
@@ -222,94 +61,319 @@ function HowToUse() {
     if (typeof window !== 'undefined') setOrigin(window.location.origin)
   }, [])
 
-  const curlCode = `curl ${origin}/v1/chat/completions \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer sk-你的令牌" \\
-  -d '{
-    "model": "${sampleModel}",
-    "messages": [{"role": "user", "content": "你好"}]
-  }'`
+  const terminal = `$ curl ${origin}/v1/chat/completions \\
+    -H "Authorization: Bearer sk-••••••••" \\
+    -d '{"model":"${sampleModel}",
+         "messages":[{"role":"user","content":"你好"}]}'
+
+# HTTP/1.1 200 OK
+{
+  "id": "chatcmpl-9f3a1c",
+  "object": "chat.completion",
+  "model": "${sampleModel}",
+  "choices": [{
+    "index": 0,
+    "message": { "role": "assistant", "content": "你好！有什么可以帮你？" },
+    "finish_reason": "stop"
+  }],
+  "usage": { "prompt_tokens": 9, "completion_tokens": 7, "total_tokens": 16 }
+}`
 
   return (
-    <section className="mx-auto max-w-2xl px-4 sm:px-6">
-      <SectionTitle id="terminal">接进来，只要一条命令</SectionTitle>
-      <div className="mt-5 space-y-3 text-[15px] leading-[1.9] text-ink-2">
-        <p>对外只暴露 OpenAI 兼容的接口，不折腾新协议。三步走：</p>
-        <ol className="space-y-2 pl-1">
-          {[
-            '注册后在控制台创建一把访问令牌，顺手设好预算和可用模型。',
-            '任何支持 OpenAI SDK 的客户端，把 base_url 换成这里就行。',
-            '代码一行不用改，协议是兼容的，出事了我这边先兜。',
-          ].map((step, i) => (
-            <li key={step} className="flex gap-2">
-              <span className="w-5 shrink-0 text-right font-medium text-brand">{i + 1}.</span>
-              <span>{step}</span>
-            </li>
-          ))}
-        </ol>
-      </div>
-      <div className="mt-5">
-        <CodeBlock code={curlCode} language="bash" title="终端示例" />
+    <section className="grid-bg border-b border-line">
+      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 lg:grid-cols-[1.02fr_1fr] lg:items-center lg:py-20">
+        <div>
+          <div className="font-mono text-[12px] text-ink-3">
+            <span className="text-brand">$</span> 自托管 LLM API 网关 · 单二进制部署
+          </div>
+
+          <h1 className="mt-4 text-3xl font-bold leading-[1.15] tracking-tight text-ink sm:text-[40px]">
+            一条 OpenAI 兼容接口，
+            <br />
+            收拢数十家上游。
+          </h1>
+
+          <p className="mt-5 max-w-xl text-[15px] leading-[1.85] text-ink-2">
+            OpenAI / Anthropic / Gemini 等协议在此统一转成 OpenAI 兼容格式。计费、日志、密钥池、
+            失败重试开箱即用。整套网关开源，随时可以自己部署一套。
+          </p>
+
+          <div className="mt-7 flex flex-wrap gap-3">
+            <Link href={isLoggedIn ? '/console' : '/register'}>
+              <Button variant="primary" size="lg">
+                {isLoggedIn ? '进入控制台' : '注册并获取令牌'}
+                <AppIcon name="chevron-right" size={16} />
+              </Button>
+            </Link>
+            <Link href="/models">
+              <Button variant="secondary" size="lg">
+                浏览模型与价格
+              </Button>
+            </Link>
+          </div>
+
+          <div className="mt-7 inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-line bg-card px-3.5 py-2.5 font-mono text-[12px] text-ink-2">
+            <span className="text-ink-3">base_url</span>
+            <span className="text-brand">{origin}/v1</span>
+          </div>
+        </div>
+
+        {/* 终端窗口：真实请求 → 真实响应，技术站最直接的说服方式 */}
+        <div className="overflow-hidden rounded-lg border border-line bg-code-bg text-code-fg shadow-pop">
+          <div className="flex items-center gap-3 border-b border-white/10 px-4 py-2.5">
+            <span className="term-dots inline-block h-2.5 w-8" aria-hidden />
+            <span className="font-mono text-[11px] text-white/50">quickstart.sh</span>
+          </div>
+          <pre className="code-block overflow-x-auto p-4 text-[12.5px] leading-[1.75] text-white/90">{terminal}</pre>
+        </div>
       </div>
     </section>
   )
 }
 
-/* ── 模型清单 ───────────────────────────────────────────── */
+/* ── 规格条：关键指标 ───────────────────────────────────── */
 
-function ModelList() {
+function SpecBar() {
   const { status } = useSite()
-  const models = status?.models?.slice(0, 14) ?? []
+  const stats = useMemo(() => {
+    const items: { value: string; label: string }[] = []
+    items.push({ value: status?.models?.length ? String(status.models.length) : '—', label: '模型在线' })
+    items.push({ value: '79', label: '上游渠道类型' })
+    items.push({ value: '3', label: '兼容协议' })
+    items.push({ value: '1', label: '部署文件' })
+    return items
+  }, [status])
+
   return (
-    <section className="mx-auto max-w-2xl px-4 sm:px-6">
-      <SectionTitle>现在能用的模型</SectionTitle>
-      <p className="mt-3 text-[14px] text-ink-2">实时来自站点信息，不带修饰。</p>
-      <div className="mt-4">
-        {models.length === 0 && <p className="text-[13px] text-ink-3">正在读取模型清单…</p>}
-        <ul className="space-y-2 text-[14px] leading-[1.8]">
-          {models.map((model) => (
-            <li key={model}>
-              <Link href="/models" className="text-ink-2 transition hover:text-brand">
-                {model}
-              </Link>
-            </li>
-          ))}
-        </ul>
+    <section className="border-b border-line bg-card">
+      <div className="mx-auto flex max-w-6xl flex-col divide-y divide-line px-4 sm:px-6 lg:flex-row lg:divide-x lg:divide-y-0">
+        {stats.map((s) => (
+          <div key={s.label} className="flex-1 px-0 py-5 lg:px-6 lg:first:pl-0 lg:last:pr-0">
+            <div className="font-mono text-2xl font-semibold tabular-nums tracking-tight text-ink">{s.value}</div>
+            <div className="mt-1 text-[12px] text-ink-3">{s.label}</div>
+          </div>
+        ))}
       </div>
-      <Link href="/models" className="mt-3 inline-block text-[13px] text-brand hover:underline">
-        完整清单与价格 →
+    </section>
+  )
+}
+
+/* ── 01 能力矩阵 ────────────────────────────────────────── */
+
+const FEATURES: { index: string; icon: IconName; title: string; desc: string }[] = [
+  { index: '01', icon: 'layers', title: '协议统一', desc: 'OpenAI / Anthropic / Gemini 等入站出站协议互转，对外只暴露一种 OpenAI 兼容格式。' },
+  { index: '02', icon: 'quota', title: '精细计费', desc: '按量 / 按次 / 免费三种模式，价格按分组配置，每一笔扣费都能逐条核对。' },
+  { index: '03', icon: 'key', title: '密钥池与重试', desc: '同一渠道多把密钥轮转，单把失败自动换下一把，上游偶发抽风基本无感。' },
+  { index: '04', icon: 'list', title: '全量日志', desc: '每次调用的模型、token 数、耗时与状态码全部留档，用量随时可查。' },
+  { index: '05', icon: 'refresh', title: '失败切换', desc: '渠道级熔断与冷却退避，整条线路不可用时自动切到下一路重试。' },
+  { index: '06', icon: 'server', title: '单二进制自托管', desc: '一套 Go 二进制 + SQLite，前端内嵌其中，部署只需要一个文件。' },
+]
+
+function Features() {
+  return (
+    <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-16">
+      <SectionHead
+        anchorId="features"
+        index="01"
+        title="核心能力"
+        desc="一个网关该有的都在里面：协议转换、计费、密钥管理、日志与容错，不需要再拼装第三方组件。"
+      />
+      {/* 发丝线网格：gap-px 露出底色形成 1px 分隔，比卡片投影更像工程图谱 */}
+      <div className="mt-8 grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
+        {FEATURES.map((f) => (
+          <div key={f.index} className="bg-card p-5">
+            <div className="flex items-center justify-between">
+              <span className="flex h-8 w-8 items-center justify-center rounded border border-line-2 bg-surface text-brand">
+                <AppIcon name={f.icon} size={16} />
+              </span>
+              <span className="font-mono text-[11px] text-ink-3">{f.index}</span>
+            </div>
+            <h3 className="mt-3.5 text-[15px] font-semibold text-ink">{f.title}</h3>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-ink-2">{f.desc}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/* ── 02 接入 ────────────────────────────────────────────── */
+
+const STEPS = [
+  { title: '注册并创建令牌', desc: '在控制台生成一把访问令牌，顺手设好预算与可用模型。' },
+  { title: '替换 base_url', desc: '任何支持 OpenAI SDK 的客户端，把 base_url 指向本站 /v1 即可。' },
+  { title: '保持原有代码', desc: '协议是兼容的，请求与响应结构不变，无需改动业务代码。' },
+]
+
+function Quickstart() {
+  const [origin, setOrigin] = useState('https://aqua.is3.cc')
+  useEffect(() => {
+    if (typeof window !== 'undefined') setOrigin(window.location.origin)
+  }, [])
+
+  const curl = `curl ${origin}/v1/chat/completions \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer sk-你的令牌" \\
+  -d '{
+    "model": "deepseek-v3",
+    "messages": [{ "role": "user", "content": "你好" }]
+  }'`
+
+  return (
+    <section className="border-y border-line bg-card">
+      <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-16">
+        <SectionHead anchorId="quickstart" index="02" title="接入，三步" desc="对外只暴露 OpenAI 兼容接口，现有 SDK 改一个 base_url 就能跑通。" />
+        <div className="mt-8 grid gap-10 lg:grid-cols-[0.8fr_1.2fr]">
+          <ol className="space-y-6">
+            {STEPS.map((s, i) => (
+              <li key={s.title} className="flex gap-4">
+                <span className="font-mono text-[13px] font-medium text-brand">0{i + 1}</span>
+                <div>
+                  <div className="text-[14px] font-medium text-ink">{s.title}</div>
+                  <p className="mt-1 text-[13px] leading-relaxed text-ink-2">{s.desc}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+          <div>
+            <CodeBlock code={curl} language="bash" title="bash" />
+            <p className="mt-3 font-mono text-[12px] text-ink-3">
+              # Python / Node：把 OpenAI SDK 的 base_url 换成 {origin}/v1
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/* ── 03 模型表格 ────────────────────────────────────────── */
+
+/** 价格摘要：一律换算成人民币展示（内部仍以整数额度记账） */
+function priceLabel(price: PlazaPrice | undefined, quotaPerYuan: number): string {
+  if (!price) return '待定价'
+  if (price.is_free || price.billing_mode === 'free') return '免费'
+  if (price.billing_mode === 'per_call') {
+    return price.per_call_price > 0 ? formatYuanPerCall(price.per_call_price, quotaPerYuan) : '按次'
+  }
+  const prompt = price.prompt_price
+  return prompt > 0 ? formatYuanPerMillion(prompt, quotaPerYuan) : '按量'
+}
+
+function ModelPreview() {
+  const { quotaPerYuan } = useSite()
+  const [plaza, setPlaza] = useState<ModelPlaza | null>(null)
+
+  useEffect(() => {
+    void fetchModelPlaza().then(setPlaza).catch(() => setPlaza(null))
+  }, [])
+
+  const rows: PlazaModel[] = plaza?.items?.slice(0, 8) ?? []
+
+  return (
+    <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-16">
+      <SectionHead
+        anchorId="models"
+        index="03"
+        title="模型与价格"
+        desc="实时来自站点信息，价格按分组展示，不做修饰。"
+      />
+      <div className="mt-8 overflow-hidden rounded-lg border border-line">
+        <table className="w-full text-left text-[13px]">
+          <thead className="bg-surface">
+            <tr className="font-mono text-[11px] uppercase tracking-wider text-ink-3">
+              <th className="px-4 py-2.5 font-normal">模型</th>
+              <th className="hidden px-4 py-2.5 font-normal sm:table-cell">分组</th>
+              <th className="px-4 py-2.5 text-right font-normal">价格</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {rows.length === 0
+              ? Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i} className="bg-card">
+                    <td colSpan={3} className="px-4 py-3">
+                      <span className="block h-3.5 w-52 animate-pulse rounded bg-ink/8" />
+                    </td>
+                  </tr>
+                ))
+              : rows.map((m) => (
+                  <tr key={m.model} className="bg-card transition hover:bg-surface/60">
+                    <td className="px-4 py-2.5 font-mono text-ink">{m.model}</td>
+                    <td className="hidden px-4 py-2.5 font-mono text-ink-3 sm:table-cell">
+                      {m.groups?.join(' / ') || '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-ink-2">{priceLabel(m.prices?.[0], quotaPerYuan)}</td>
+                  </tr>
+                ))}
+          </tbody>
+        </table>
+      </div>
+      <Link href="/models" className="mt-4 inline-flex items-center gap-1 text-[13px] font-medium text-brand hover:underline">
+        {plaza?.total ? `查看全部 ${plaza.total} 个模型与完整价格` : '查看全部模型与完整价格'}
+        <AppIcon name="chevron-right" size={14} />
       </Link>
     </section>
   )
 }
 
-/* ── 支持我 ─────────────────────────────────────────────── */
+/* ── 04 取舍与成本 ──────────────────────────────────────── */
 
-function SupportMe() {
+const PRINCIPLES: [string, string][] = [
+  ['计价写得明白', '每个模型的单价摆在模型广场上，按次 / 按量 / 免费三种模式，账单可逐条核对。'],
+  ['用量自己说了算', '每次调用的模型、token、耗时、状态码都留档，你随时能查，我也改不了。'],
+  ['代码是开源的', '整套网关在 Gitee / GitHub 公开，木兰宽松版；哪天我不做了，你也能自己部署一套。'],
+]
+
+const COSTS: [string, string][] = [
+  ['服务器', '每月固定 · 一台独服跑网关与数据库'],
+  ['带宽与流量', '按量浮动 · 调用越多越高'],
+  ['上游模型费用', '按用量结算 · 我向上游买的价就是成本基准'],
+  ['域名与证书', '每年少量'],
+]
+
+function Design() {
   return (
-    <section className="mx-auto max-w-2xl px-4 sm:px-6">
-      <SectionTitle>如果你想支持一下</SectionTitle>
-      <div className="mt-5 space-y-3 text-[15px] leading-[1.9] text-ink-2">
-        <p>不用捐钱。下面这几件事，比打赏有用得多：</p>
-        <ul className="space-y-2 pl-1">
-          {[
-            '来用一用，然后告诉我哪里难用——真实的抱怨比客套的夸奖值钱。',
-            '帮仓库补文档或提 Issue——一个人写文档总有盲区。',
-            '自己部署一套试试——你本地跑通了，我就少一份维护压力。',
-            '把链接发给可能用得上的人——不做推广，朋友间顺口一提完全欢迎。',
-          ].map((item) => (
-            <li key={item} className="flex gap-2">
-              <span className="mt-[2px] shrink-0 text-brand">·</span>
-              <span>{item}</span>
-            </li>
-          ))}
-        </ul>
+    <section className="border-y border-line bg-card">
+      <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-16">
+        <SectionHead
+          index="04"
+          title="设计取舍与成本"
+          desc="不做黑箱：定价规则、用量留档与成本边界都摆在明面上。"
+        />
+        <div className="mt-8 grid gap-10 lg:grid-cols-2">
+          <div>
+            <div className="font-mono text-[11px] uppercase tracking-wider text-ink-3">Principles</div>
+            <ul className="mt-4 space-y-4">
+              {PRINCIPLES.map(([title, desc]) => (
+                <li key={title} className="border-l-2 border-brand/30 pl-3.5">
+                  <div className="text-[14px] font-medium text-ink">{title}</div>
+                  <p className="mt-1 text-[13px] leading-relaxed text-ink-2">{desc}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <div className="font-mono text-[11px] uppercase tracking-wider text-ink-3">Cost Breakdown</div>
+            <div className="mt-4 divide-y divide-line rounded-lg border border-line">
+              {COSTS.map(([k, v]) => (
+                <div key={k} className="flex flex-col gap-0.5 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="text-[13px] font-medium text-ink-2">{k}</span>
+                  <span className="font-mono text-[12px] text-ink-3">{v}</span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 rounded-md border border-brand/25 bg-brand/5 p-3.5 text-[12.5px] leading-relaxed text-ink-2">
+              你付的钱先覆盖成本，多出来的才是我继续维护它的理由。若哪天真入不敷出，我会在公告里说明，
+              <b className="font-medium text-ink">而不是悄悄涨价</b>。
+            </p>
+          </div>
+        </div>
       </div>
     </section>
   )
 }
 
-/* ── FAQ ────────────────────────────────────────────────── */
+/* ── 05 FAQ ─────────────────────────────────────────────── */
 
 const FAQS = [
   { q: '这站能一直开着吗？', a: '我会尽力。它的成本可控，我也不靠它赚钱，没有「融资烧完就跑」的问题。真有关停那天，我会提前公告并给出自己部署的完整方案。' },
@@ -323,27 +387,28 @@ const FAQS = [
 function Faq() {
   const [open, setOpen] = useState<number | null>(0)
   return (
-    <section className="mx-auto max-w-2xl px-4 sm:px-6">
-      <SectionTitle id="faq">你可能想问</SectionTitle>
-      <div className="mt-4 space-y-3">
+    <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-16">
+      <SectionHead anchorId="faq" index="05" title="常见问题" />
+      <div className="mt-6 grid gap-x-10 gap-y-0 md:grid-cols-2">
         {FAQS.map((faq, index) => {
           const active = open === index
           return (
-            <div key={faq.q} className="border-b border-line pb-3">
+            <div key={faq.q} className="border-b border-line">
               <button
                 type="button"
                 onClick={() => setOpen(active ? null : index)}
-                className="flex w-full items-center justify-between gap-4 text-left"
+                className="flex w-full items-center gap-3 py-3.5 text-left"
                 aria-expanded={active}
               >
-                <span className="text-[15px] font-medium text-ink">{faq.q}</span>
+                <span className="font-mono text-[12px] text-ink-3">{String(index + 1).padStart(2, '0')}</span>
+                <span className="flex-1 text-[14px] font-medium text-ink">{faq.q}</span>
                 <AppIcon
                   name="chevron-down"
                   size={15}
                   className={`shrink-0 text-ink-3 transition-transform ${active ? 'rotate-180' : ''}`}
                 />
               </button>
-              {active && <p className="mt-2 text-[14px] leading-[1.85] text-ink-2">{faq.a}</p>}
+              {active && <p className="pb-4 pl-[30px] pr-6 text-[13px] leading-[1.85] text-ink-2">{faq.a}</p>}
             </div>
           )
         })}
@@ -352,31 +417,33 @@ function Faq() {
   )
 }
 
-/* ── 结尾 ───────────────────────────────────────────────── */
+/* ── CTA ────────────────────────────────────────────────── */
 
-function Ending() {
+function Cta() {
   const { isLoggedIn } = useAuth()
   return (
-    <section className="border-t border-line">
-      <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6">
-        <h2 className="text-2xl font-bold tracking-tight text-ink">
-          {isLoggedIn ? '去控制台创建你的第一把令牌。' : '那就从一把令牌开始吧。'}
-        </h2>
-        <p className="mt-3 max-w-xl text-balance text-[15px] leading-relaxed text-ink-2">
-          {isLoggedIn
-            ? '接进现有代码就行，先跑通一个请求，再决定要不要留下。'
-            : '注册是免费的，先跑通一个请求，再决定要不要留下。'}
-        </p>
-        <div className="mt-6 flex flex-wrap gap-3">
+    <section className="border-t border-line bg-card">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-14 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">
+            {isLoggedIn ? '从一把新令牌开始。' : '从一把令牌开始。'}
+          </h2>
+          <p className="mt-2.5 max-w-xl text-[14px] leading-relaxed text-ink-2">
+            {isLoggedIn
+              ? '接进现有代码就行，先跑通一个请求，再决定要不要留下。'
+              : '注册免费，先跑通一个请求，再决定要不要留下。'}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-3">
           <Link href={isLoggedIn ? '/console' : '/register'}>
             <Button variant="primary" size="lg">
-              {isLoggedIn ? '进入控制台' : '注册一个账号'}
+              {isLoggedIn ? '进入控制台' : '注册并获取令牌'}
               <AppIcon name="chevron-right" size={16} />
             </Button>
           </Link>
-          <a href="https://gitee.com/xiaosu4610/AQUA-API" target="_blank" rel="noreferrer">
+          <a href={REPO_URL} target="_blank" rel="noreferrer">
             <Button variant="secondary" size="lg">
-              先读读源码 <AppIcon name="external" size={15} />
+              阅读源码 <AppIcon name="external" size={15} />
             </Button>
           </a>
         </div>
@@ -392,17 +459,14 @@ export default function LandingPage() {
     <>
       <SiteHeader />
       <main>
-        <Intro />
-        <div className="py-4" />
-        <WhatNow />
-        <WhyDo />
-        <Money />
-        <HowToUse />
-        <ModelList />
-        <SupportMe />
+        <Hero />
+        <SpecBar />
+        <Features />
+        <Quickstart />
+        <ModelPreview />
+        <Design />
         <Faq />
-        <div className="py-4" />
-        <Ending />
+        <Cta />
       </main>
       <SiteFooter />
     </>
