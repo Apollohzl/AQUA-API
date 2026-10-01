@@ -1,8 +1,12 @@
-/** 管理后台布局（/admin/*）：鉴权守卫（管理员）+ 后台导航。
+/** 管理后台布局（/admin/*，route group (panel)）：鉴权守卫（管理员）+ 后台导航。
  *
  * 意图（Why）：
  *   后台全部页面需要「登录 + 管理员」双重权限。守卫在布局层统一完成，
  *   页面组件不必各自判断。导航按功能域分组（资源 / 合规 / 运维）。
+ *
+ * 流转（Flow）：
+ *   /admin/login 放在 (panel) 之外独立渲染，不经过本守卫外壳，
+ *   避免「要登录后台才能看到登录页」死循环；其余 /admin/* 全部套本布局。
  */
 'use client'
 
@@ -62,8 +66,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (!ready) return
-    // /admin/login 是独立登录入口，不参与后台守卫（否则出现死循环：未登录跳登录页、登录页又被守卫拦）
-    if (pathname === '/admin/login') return
+    // /admin/login 在 (panel) 之外独立渲染，不受本守卫约束（结构上已隔离）
     if (!isLoggedIn) {
       router.replace(`/admin/login?redirect=${encodeURIComponent(pathname)}`)
     } else if (!isAdmin) {
@@ -71,11 +74,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       router.replace('/console')
     }
   }, [ready, isLoggedIn, isAdmin, pathname, router, toastError])
-
-  if (pathname === '/admin/login') {
-    // 登录页独立渲染：不套后台外壳，也不受守卫约束
-    return <>{children}</>
-  }
 
   if (!ready || !isLoggedIn || !isAdmin) {
     return <div className="flex min-h-screen items-center justify-center text-[13px] text-ink-3">正在进入管理后台…</div>
