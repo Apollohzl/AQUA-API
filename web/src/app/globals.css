@@ -1,8 +1,8 @@
 /* AQUA-API 全局样式：Tailwind CSS v4（CSS-first 配置）与设计令牌。
  *
  * 意图（Why）：
- *   视觉工程学基线，风格定位为「个人博客 · 半公益 · 即刻风」——
- *   暖白纸感底 + 圆角卡片 + 极淡描边 + 单一品牌强调色，留白充足、装饰克制。
+ *   视觉工程学基线，风格定位为「开发者技术站 · 工程文档气质」——
+ *   冷中性底 + 发丝描边 + 表格化栅格 + 单一青（aqua）强调色，信息密度优先、装饰克制。
  *   提供「昼 / 夜」两套令牌：默认跟随北京时间（UTC+8）自动切换，用户也可手动选择。
  *
  * 流转（Flow）：
@@ -21,24 +21,25 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  /* ── 昼·色板：暖白纸感（博客气）───────────────── */
-  --color-surface: #f7f6f2;      /* 页面底：暖白纸 */
-  --color-card: #fffefb;         /* 卡片/面板底：微暖白 */
-  --color-ink: #221f1a;          /* 主文字：墨褐黑 */
-  --color-ink-2: #56514a;        /* 次文字 */
-  --color-ink-3: #8f887d;        /* 弱文字/占位 */
-  --color-line: #e9e5dd;         /* 描边：极淡暖灰 */
-  --color-line-2: #dbd5ca;       /* 强调描边 */
-  --color-brand: #2f6bff;        /* 品牌强调：靛蓝 */
-  --color-brand-2: #0ea5a5;      /* 次级强调：青 */
-  --color-ok: #16a34a;           /* 成功 */
-  --color-warn: #d97706;         /* 警告 */
+  /* ── 昼·色板：冷中性 + 青（aqua）强调 —— 工程文档气质 ── */
+  --color-surface: #f4f6f9;      /* 页面底：冷浅灰 */
+  --color-card: #ffffff;         /* 卡片/面板底：纯白 */
+  --color-ink: #0b1220;          /* 主文字：墨黑（偏冷） */
+  --color-ink-2: #47536a;        /* 次文字 */
+  --color-ink-3: #8a97ad;        /* 弱文字/占位 */
+  --color-line: #e3e8f0;         /* 描边：发丝级冷灰 */
+  --color-line-2: #cbd4e1;       /* 强调描边 */
+  --color-brand: #0e7490;        /* 品牌强调：青 700（白底上正文/链接可读） */
+  --color-on-brand: #ffffff;     /* 品牌底上的文字色：随主题切换以保住对比度 */
+  --color-brand-2: #4f46e5;      /* 次级强调：靛 */
+  --color-ok: #15803d;           /* 成功 */
+  --color-warn: #b45309;         /* 警告 */
   --color-err: #dc2626;          /* 错误 */
-  --color-info: #2563eb;         /* 信息 */
-  /* 代码块：昼为深墨底、夜为更深的墨底，两套主题下都保持「深底浅字」。
-     不能复用 ink/surface——那两个变量在暗色下会互换，导致代码块反相。 */
-  --color-code-bg: #23262d;
-  --color-code-fg: #e9e7e2;
+  --color-info: #1d4ed8;         /* 信息 */
+  /* 代码块/终端：两套主题下都保持「深底浅字」，模拟真实终端窗口。
+     不能复用 ink/surface——它们在暗色下会互换，导致代码块反相。 */
+  --color-code-bg: #0b1220;
+  --color-code-fg: #dbe4f0;
 
   /* ── 排版：中文优先的字体栈 ───────────────────── */
   --font-sans: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", ui-sans-serif,
@@ -60,21 +61,22 @@
 /* ── 夜·色板：同层覆盖同名变量，组件类名无需改动即整体换肤 ──
    注意：必须与 @theme 里的变量名逐一对应；漏掉的变量会保留昼色（在暗底上不可读）。 */
 html.dark {
-  --color-surface: #14161a;
-  --color-card: #1b1e24;
-  --color-ink: #e9e7e2;
-  --color-ink-2: #a9a59d;
-  --color-ink-3: #726e67;
-  --color-line: #2a2e35;
-  --color-line-2: #3a4048;
-  --color-brand: #6b93ff;
-  --color-brand-2: #35c2c2;
+  --color-surface: #0a0e14;
+  --color-card: #0f151d;
+  --color-ink: #e6ebf2;
+  --color-ink-2: #97a3b4;
+  --color-ink-3: #5f6b7d;
+  --color-line: #1b232e;
+  --color-line-2: #29323f;
+  --color-brand: #22d3ee;        /* 夜里的青：亮到能在深底上做链接 */
+  --color-on-brand: #06212b;     /* 亮青底上用深墨字，避免白字发虚 */
+  --color-brand-2: #818cf8;
   --color-ok: #4ade80;
   --color-warn: #fbbf24;
   --color-err: #f87171;
   --color-info: #60a5fa;
-  --color-code-bg: #0f1115;
-  --color-code-fg: #e9e7e2;
+  --color-code-bg: #05080d;
+  --color-code-fg: #dbe4f0;
   --shadow-pop: 0 8px 30px rgb(0 0 0 / 0.5);
 
   color-scheme: dark;
@@ -136,17 +138,28 @@ body {
   }
 }
 
-/* 细网格背景（hero 与区块通用）：极淡线条，不抢内容 */
+/* 细网格背景（hero 与区块通用）：极淡线条，像工程图纸的底纹，不抢内容 */
 .grid-bg {
   background-image:
-    linear-gradient(to right, rgb(34 31 26 / 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(34 31 26 / 0.03) 1px, transparent 1px);
-  background-size: 32px 32px;
+    linear-gradient(to right, rgb(11 18 32 / 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(11 18 32 / 0.045) 1px, transparent 1px);
+  background-size: 28px 28px;
 }
 html.dark .grid-bg {
   background-image:
-    linear-gradient(to right, rgb(233 231 226 / 0.035) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(233 231 226 / 0.035) 1px, transparent 1px);
+    linear-gradient(to right, rgb(230 235 242 / 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(230 235 242 / 0.05) 1px, transparent 1px);
+}
+
+/* 终端窗口顶部圆点（红/黄/绿），用纯 CSS 画，避免额外 DOM 结构 */
+.term-dots::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 9999px;
+  background: #ff5f56;
+  box-shadow: 16px 0 0 #ffbd2e, 32px 0 0 #27c93f;
 }
 
 /* 代码块基础皮肤 */

@@ -152,7 +152,7 @@ export default function ConsolePlaygroundPage() {
                 <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div
                     className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
-                      msg.role === 'user' ? 'bg-brand text-white' : 'border border-line bg-surface text-ink-2'
+                      msg.role === 'user' ? 'bg-brand text-on-brand' : 'border border-line bg-surface text-ink-2'
                     }`}
                   >
                     {msg.content || (streaming && index === messages.length - 1 ? '正在生成…' : '')}

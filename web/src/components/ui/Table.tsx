@@ -144,7 +144,7 @@ export function Pagination({ page, pageSize, total, onChange }: PaginationProps)
             type="button"
             onClick={() => onChange(p)}
             className={`min-w-7 rounded px-1.5 py-1 text-[13px] transition ${
-              p === page ? 'bg-brand text-white' : 'text-ink-3 hover:bg-ink/5 hover:text-ink'
+              p === page ? 'bg-brand text-on-brand' : 'text-ink-3 hover:bg-ink/5 hover:text-ink'
             }`}
           >
             {p}
