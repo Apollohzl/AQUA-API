@@ -25,7 +25,7 @@ bin/
 *.db-shm
 *.db-wal
 data/
-logs/
+/logs/
 coverage.out
 
 # 编辑器与系统文件
