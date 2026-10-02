@@ -12,11 +12,12 @@ import {
   createChannel,
   deleteChannel,
   fetchChannelTypes,
+  fetchUpstreamModels,
   listChannels,
   testChannel,
   updateChannel,
 } from '@/api/admin'
-import type { Channel, ChannelPayload, ChannelTestResult, ChannelType } from '@/api/types'
+import type { Channel, ChannelPayload, ChannelTestResult, ChannelType, FetchModelsPayload } from '@/api/types'
 import { ChannelHealthPanel } from '@/components/admin/ChannelHealthPanel'
 import { ChannelKeyPool } from '@/components/admin/ChannelKeyPool'
 import { SpeedTestModal } from '@/components/admin/SpeedTestModal'
@@ -244,6 +245,8 @@ function ChannelFormModal({
   const [keysText, setKeysText] = useState('')
   const [status, setStatus] = useState(1)
   const [loading, setLoading] = useState(false)
+  // 「从上游获取模型」进行中：按钮转圈并防止重复点击
+  const [fetchingModels, setFetchingModels] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -261,6 +264,44 @@ function ChannelFormModal({
   }, [open, channel, types])
 
   const selectedType = types.find((t) => t.key === typeKey) ?? types[0]
+
+  /** 从上游拉取模型清单并合并进输入框（不覆盖已填写的条目）。
+   *
+   * 凭据策略（与后端 handleFetchModels 的两种模式对齐）：
+   *   - 编辑态 + 未填新密钥 + 地址未改 → 传 channel_id，后端用库中地址与
+   *     密钥（含密钥池兜底）拉取——这正是"渠道已配好，同步一下清单"的场景；
+   *   - 其余情况（新建、或表单里改了地址/密钥）→ 传表单当前值，
+   *     拉到的一定是"即将保存的这套配置"的真实清单。
+   */
+  async function handleFetchModels() {
+    const url = baseUrl.trim()
+    const key = apiKey.trim()
+    const useSaved = channel != null && !key && url === channel.base_url
+    if (!useSaved && !url) {
+      toastError('请先填写上游地址')
+      return
+    }
+    setFetchingModels(true)
+    try {
+      const payload: FetchModelsPayload = useSaved
+        ? { channel_id: channel.id }
+        : { base_url: url, api_key: key || undefined }
+      const result = await fetchUpstreamModels(payload)
+      const existing = modelsText.split('\n').map((s) => s.trim()).filter(Boolean)
+      const seen = new Set(existing)
+      const added = result.models.filter((m) => !seen.has(m))
+      if (added.length === 0) {
+        toast(`已获取 ${result.count} 个模型（清单没有变化）`)
+      } else {
+        setModelsText([...existing, ...added].join('\n'))
+        toast(`已获取 ${result.count} 个模型，合并新增 ${added.length} 个`)
+      }
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : '获取模型列表失败')
+    } finally {
+      setFetchingModels(false)
+    }
+  }
 
   async function handleSubmit() {
     if (!name.trim()) {
@@ -342,6 +383,20 @@ function ChannelFormModal({
         )}
 
         <Field label="模型列表" help="每行一个；留空表示支持全部模型">
+          {/* 一键从上游拉取：省去逐个手敲模型名（长名字极易敲错导致路由失效）。
+              合并而非覆盖——已填写的条目可能是管理员刻意收敛过的子集。 */}
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-xs text-ink-3">支持从上游自动拉取清单，结果合并到下方</span>
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={fetchingModels}
+              onClick={handleFetchModels}
+              disabled={!fetchingModels && !baseUrl.trim() && channel == null}
+            >
+              从上游获取
+            </Button>
+          </div>
           <Textarea value={modelsText} onChange={(e) => setModelsText(e.target.value)} rows={5} placeholder="gpt-4o\nclaude-3-5-sonnet" />
         </Field>
 
