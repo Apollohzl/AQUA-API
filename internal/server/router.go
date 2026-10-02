@@ -26,10 +26,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"gitee.com/xiaosu4610/aqua-api/internal/config"
 	"gitee.com/xiaosu4610/aqua-api/internal/server/middleware"
 )
 
@@ -185,6 +188,23 @@ func (s *Server) registerRoutes() {
 
 	// ── 管理后台（需管理员）──────────────────────────────────────
 	admin := authed.Group("/admin")
+
+	// 管理面网络边界白名单（可选）：必须在 RequireAdmin 之前。
+	//
+	// 顺序理由（为什么放在身份鉴权之前）：
+	//  1) 白名单判断只依赖来源 IP，与"你是谁"无关；先在网络层拒绝非白名单来源，
+	//     可省掉一次鉴权开销（查会话 + 载入用户 + 角色判断，含数据库往返）；
+	//  2) 对公网暴露的后台，未授权来源本就不该触碰到任何鉴权代码路径。
+	// 语义：未配置（空列表）时不挂任何中间件，行为与从前逐字一致。
+	if prefixes, err := config.ParseAdminAllowCIDRs(s.deps.Config.AdminAllowCIDRs); err != nil {
+		// fail-closed 兜底：正常情况下 config.Load 的 Validate 已拦截非法 CIDR 并让进程退出，
+		// 走不到这里。若真走到，宁可 403 拒绝全部后台请求，也绝不放行到鉴权与业务层。
+		slog.Error("管理面 CIDR 白名单解析失败，已拒绝全部后台请求", "error", err)
+		admin.Use(denyAllAdminRequests)
+	} else if len(prefixes) > 0 {
+		admin.Use(middleware.RequireAdminCIDR(prefixes))
+	}
+
 	admin.Use(middleware.RequireAdmin())
 	// 审计中间件：记录后台所有写操作（POST/PUT/PATCH/DELETE）。
 	// 必须挂在 RequireAdmin 之后，才能从上下文取到已鉴权的管理员身份；
@@ -430,4 +450,19 @@ func (s *Server) registerRoutes() {
 	// Gemini 原生协议同样受内容合规过滤约束（同一个组件，同一份词表）。
 	gemini.Use(s.sensitiveFilter.Middleware())
 	gemini.POST("/models/*action", gin.WrapF(s.deps.Relay.ServeGeminiGenerate))
+}
+
+// denyAllAdminRequests 是白名单配置解析失败时的 fail-closed 兜底中间件：拒绝一切后台请求。
+//
+// 只在 config.ParseAdminAllowCIDRs 意外失败时挂载（正常应由启动校验拦截并让进程退出）。
+// 之所以"全拒"而不是"全放"：白名单配置损坏时放行，等于把后台直接暴露到公网，
+// 后果远比"后台暂时不可用"严重。
+func denyAllAdminRequests(c *gin.Context) {
+	c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+		"error": gin.H{
+			"message": "管理后台访问白名单配置无效，已拒绝全部请求（请检查 " + config.EnvPrefix + "ADMIN_ALLOW_CIDRS）",
+			"type":    "permission_error",
+			"code":    "ip_not_allowed",
+		},
+	})
 }
