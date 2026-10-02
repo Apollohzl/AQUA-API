@@ -7,6 +7,10 @@
  *     ① 上游进价（列表「进价」按钮 → ChannelCostModal）——/admin/finance 对账页成本列的数据来源；
  *     ② 模型映射（弹层内 ChannelModelMappings 分区）——平台模型 ID ↔ 上游模型 ID 的改写规则；
  *     ③ 从上游拉取模型（模型列表旁按钮）——按已存渠道或裸地址拉清单，避免手抄模型名出错。
+ *   表单还消费两个后端目录（此前同样零调用的封装）：
+ *     ④ 调度策略 / 失败处置下拉（fetchKeyStrategies / fetchKeyFailurePolicies）——
+ *        两项均为渠道级配置（落库 channels.key_strategy / key_failure_policy），
+ *        选项 label 与说明文案全部由后端下发，前端不硬编码，新增策略时界面自动跟随。
  */
 'use client'
 
@@ -16,12 +20,21 @@ import {
   createChannel,
   deleteChannel,
   fetchChannelTypes,
+  fetchKeyFailurePolicies,
+  fetchKeyStrategies,
   fetchUpstreamModels,
   listChannels,
   testChannel,
   updateChannel,
 } from '@/api/admin'
-import type { Channel, ChannelPayload, ChannelTestResult, ChannelType, FetchModelsPayload } from '@/api/types'
+import type {
+  Channel,
+  ChannelPayload,
+  ChannelTestResult,
+  ChannelType,
+  FetchModelsPayload,
+  KeyStrategyOption,
+} from '@/api/types'
 import { ChannelCostModal } from '@/components/admin/ChannelCostModal'
 import { ChannelHealthPanel } from '@/components/admin/ChannelHealthPanel'
 import { ChannelKeyPool } from '@/components/admin/ChannelKeyPool'
@@ -43,6 +56,10 @@ export default function AdminChannelsPage() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [types, setTypes] = useState<ChannelType[]>([])
+  // 凭据调度/失败处置策略目录：与 types 同一模式——页面加载时拉一次缓存供表单下拉复用。
+  // 文案由后端下发，前端不硬编码（后端新增策略时这里无需任何改动）。
+  const [strategies, setStrategies] = useState<KeyStrategyOption[]>([])
+  const [failurePolicies, setFailurePolicies] = useState<KeyStrategyOption[]>([])
   const [editing, setEditing] = useState<Channel | null | 'new'>(null)
   const [deleteTarget, setDeleteTarget] = useState<Channel | null>(null)
   const [testResult, setTestResult] = useState<ChannelTestResult | null>(null)
@@ -71,6 +88,10 @@ export default function AdminChannelsPage() {
 
   useEffect(() => {
     void fetchChannelTypes().then((data) => setTypes(data.items)).catch(() => setTypes([]))
+    // 两个目录都是稳定枚举（只读、无分页），失败时静默降级为空数组：
+    // 表单对空目录有兜底渲染（见 ChannelFormModal），不该因目录拉不下来就打断渠道管理主流程。
+    void fetchKeyStrategies().then((data) => setStrategies(data.items)).catch(() => setStrategies([]))
+    void fetchKeyFailurePolicies().then((data) => setFailurePolicies(data.items)).catch(() => setFailurePolicies([]))
   }, [])
 
   async function handleDelete() {
@@ -198,6 +219,8 @@ export default function AdminChannelsPage() {
         open={editing !== null}
         channel={editing === 'new' ? null : editing}
         types={types}
+        strategies={strategies}
+        failurePolicies={failurePolicies}
         onClose={() => setEditing(null)}
         onSaved={() => { setEditing(null); void load() }}
       />
@@ -228,12 +251,18 @@ function ChannelFormModal({
   open,
   channel,
   types,
+  strategies,
+  failurePolicies,
   onClose,
   onSaved,
 }: {
   open: boolean
   channel: Channel | null
   types: ChannelType[]
+  /** 凭据调度策略目录（页面加载时拉取缓存，见页面组件） */
+  strategies: KeyStrategyOption[]
+  /** 密钥失败处置策略目录（同上） */
+  failurePolicies: KeyStrategyOption[]
   onClose: () => void
   onSaved: () => void
 }) {
@@ -246,6 +275,11 @@ function ChannelFormModal({
   const [modelsText, setModelsText] = useState('')
   const [keysText, setKeysText] = useState('')
   const [status, setStatus] = useState(1)
+  // 凭据调度/失败处置（渠道级，落库 channels.key_strategy / key_failure_policy）：
+  // 存的是后端目录里的稳定标识。编辑时回显当前值（后端保证 DTO 恒为合法值）；
+  // 新建时留空提交 → 后端取默认策略（least_in_flight / cooldown_only）。
+  const [keyStrategy, setKeyStrategy] = useState('')
+  const [failurePolicy, setFailurePolicy] = useState('')
   const [loading, setLoading] = useState(false)
   // 「从上游拉取模型」结果与进行中标记：拉取回来的清单可直接填入模型列表
   const [fetchingModels, setFetchingModels] = useState(false)
@@ -264,6 +298,10 @@ function ChannelFormModal({
     setModelsText((channel?.models ?? []).join('\n'))
     setKeysText('')
     setStatus(channel?.status ?? 1)
+    // 策略字段回显当前值：更新接口对这两个字段的语义是「留空表示不修改」，
+    // 但编辑弹层既然展示了它们，就应该提交站长看到（且可改）的值，而不是靠留空隐式保留。
+    setKeyStrategy(channel?.key_strategy ?? '')
+    setFailurePolicy(channel?.key_failure_policy ?? '')
     // 每次打开弹层都清空上次拉取的清单：渠道可能已换地址，旧清单会误导
     setFetchedModels(null)
   }, [open, channel, types])
@@ -330,6 +368,9 @@ function ChannelFormModal({
         priority: 0,
         weight: 0,
         status,
+        // 空串时省略字段：新建走后端默认策略；编辑场景因回显恒非空，实际总会提交
+        key_strategy: keyStrategy || undefined,
+        key_failure_policy: failurePolicy || undefined,
         keys_text: keysText.trim() || undefined,
       }
       if (channel) {
@@ -381,6 +422,38 @@ function ChannelFormModal({
             <Textarea value={keysText} onChange={(e) => setKeysText(e.target.value)} rows={3} placeholder="sk-a\nsk-b 备注1" />
           </Field>
         )}
+
+        {/* 凭据调度/失败处置（渠道级配置，落库 channels.key_strategy / key_failure_policy）。
+            选项与说明全部来自后端目录，前端不硬编码；说明文案随选中项联动显示在下方 help 位置。
+            目录拉取失败（空数组）时退化为标识文本框，与渠道类型下拉的兜底模式一致——
+            宁可手填原始标识，也不渲染一个没有任何选项的下拉。 */}
+        <Field label="调度策略" help={strategies.find((s) => s.key === keyStrategy)?.description}>
+          {strategies.length > 0 ? (
+            <Select value={keyStrategy} onChange={(e) => setKeyStrategy(e.target.value)}>
+              {/* 新建时才有「跟随默认」项：留空提交后端取默认策略；
+                  编辑时当前值恒非空（回显保证），不需要这个隐式选项 */}
+              {!channel && <option value="">跟随系统默认</option>}
+              {strategies.map((s) => (
+                <option key={s.key} value={s.key}>{s.label}</option>
+              ))}
+            </Select>
+          ) : (
+            <Input value={keyStrategy} onChange={(e) => setKeyStrategy(e.target.value)} placeholder="least_in_flight" />
+          )}
+        </Field>
+
+        <Field label="失败处置" help={failurePolicies.find((p) => p.key === failurePolicy)?.description}>
+          {failurePolicies.length > 0 ? (
+            <Select value={failurePolicy} onChange={(e) => setFailurePolicy(e.target.value)}>
+              {!channel && <option value="">跟随系统默认</option>}
+              {failurePolicies.map((p) => (
+                <option key={p.key} value={p.key}>{p.label}</option>
+              ))}
+            </Select>
+          ) : (
+            <Input value={failurePolicy} onChange={(e) => setFailurePolicy(e.target.value)} placeholder="cooldown_only" />
+          )}
+        </Field>
 
         <Field label="模型列表" help="每行一个；留空表示支持全部模型">
           <Textarea value={modelsText} onChange={(e) => setModelsText(e.target.value)} rows={5} placeholder="gpt-4o\nclaude-3-5-sonnet" />
