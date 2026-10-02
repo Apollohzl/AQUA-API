@@ -150,10 +150,10 @@ func TestBuildMessage_未配置发件人显示名_不应出现尖括号包裹(t 
 
 func TestRegisterCodeEmail_空站点名_应回退为默认品牌名(t *testing.T) {
 	subject, body := RegisterCodeEmail("   ", "123456", 5*time.Minute)
-	if !strings.Contains(subject, "AQUA-API") {
+	if !strings.Contains(subject, "LTZY-API") {
 		t.Errorf("站点名为空时应回退默认品牌名，实际主题: %q", subject)
 	}
-	if !strings.Contains(body, "AQUA-API") {
+	if !strings.Contains(body, "LTZY-API") {
 		t.Error("正文站点名为空时应回退默认品牌名")
 	}
 }

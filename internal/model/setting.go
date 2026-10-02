@@ -451,7 +451,7 @@ func (p PaymentSettings) CurrencyOrDefault() string {
 // 设计意图：任何一项未配置时都应回退到合理默认，保证"零配置可用"。
 func DefaultSiteSettings() SiteSettings {
 	return SiteSettings{
-		SiteName: "AQUA-API",
+		SiteName: "LTZY-API",
 		// 站点描述的默认值刻意避免"资产""金融"这类联想词：
 		// 它同时出现在搜索引擎摘要与社交平台分享卡片上，
 		// 金融类表述会让支付通道与浏览器风控对站点产生错误归类。

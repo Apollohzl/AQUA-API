@@ -214,7 +214,7 @@ func TestRenderBroadcast_站点名被转义(t *testing.T) {
 
 	// 站点名为空时回退默认名，而不是留下一处空白
 	_, fallback, _ := RenderBroadcast(BroadcastTemplateBillingLine, "   ")
-	if !strings.Contains(fallback, "AQUA-API") {
-		t.Error("站点名为空时应回退为 AQUA-API")
+	if !strings.Contains(fallback, "LTZY-API") {
+		t.Error("站点名为空时应回退为 LTZY-API")
 	}
 }

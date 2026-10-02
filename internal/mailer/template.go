@@ -75,7 +75,7 @@ func renderEmailCode(siteName, code string, ttl time.Duration, c emailCodeCopy) 
 	// 避免管理员无意间填入的字符破坏邮件结构（或在客户端触发脚本解析）。
 	name := html.EscapeString(strings.TrimSpace(siteName))
 	if name == "" {
-		name = "AQUA-API"
+		name = "LTZY-API"
 	}
 
 	minutes := int(ttl.Minutes())
@@ -191,7 +191,7 @@ func RenderBroadcast(templateKey, siteName string) (subject, htmlBody string, ok
 func billingLineEmail(siteName string) (subject, htmlBody string, ok bool) {
 	name := html.EscapeString(strings.TrimSpace(siteName))
 	if name == "" {
-		name = "AQUA-API"
+		name = "LTZY-API"
 	}
 
 	subject = fmt.Sprintf("【%s】计费专线已上线", name)
@@ -235,8 +235,8 @@ func billingLineEmail(siteName string) (subject, htmlBody string, ok bool) {
       站点首页新增了「加入交流群」入口，点进去可以看到两个 QQ 群的群号与入群入口。
     </p>
     <ul style="margin:0 0 10px;padding-left:20px;font-size:13px;color:#475569;line-height:1.9;">
-      <li>主群（AQUA开源项目交流群）：<strong style="font-family:Consolas,monospace;">1103667832</strong></li>
-      <li>备用群（AQUA开源项目交流二群）：<strong style="font-family:Consolas,monospace;">1006740220</strong></li>
+      <li>主群（LTZY开源项目交流群）：<strong style="font-family:Consolas,monospace;">1103667832</strong></li>
+      <li>备用群（LTZY开源项目交流二群）：<strong style="font-family:Consolas,monospace;">1006740220</strong></li>
     </ul>
     <p style="margin:0 0 22px;font-size:13px;color:#475569;line-height:1.8;">
       建议先加主群，主群满员了再加备用群。使用中遇到的问题、想要的模型、对计费的疑问，
@@ -277,7 +277,7 @@ func billingLineEmail(siteName string) (subject, htmlBody string, ok bool) {
 func trialGrantEmail(siteName string) (subject, htmlBody string, ok bool) {
 	name := html.EscapeString(strings.TrimSpace(siteName))
 	if name == "" {
-		name = "AQUA-API"
+		name = "LTZY-API"
 	}
 
 	subject = fmt.Sprintf("【%s】限时试用额已发放", name)
@@ -352,7 +352,7 @@ func trialGrantEmail(siteName string) (subject, htmlBody string, ok bool) {
 func callLineEmail(siteName string) (subject, htmlBody string, ok bool) {
 	name := html.EscapeString(strings.TrimSpace(siteName))
 	if name == "" {
-		name = "AQUA-API"
+		name = "LTZY-API"
 	}
 
 	subject = fmt.Sprintf("【%s】按次计费专线已上线", name)

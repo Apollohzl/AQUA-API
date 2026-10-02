@@ -276,7 +276,7 @@ func buildMessage(cfg config.SMTPConfig, to, subject, htmlBody string) []byte {
 	writeHeader(&buf, "Date", time.Now().Format(time.RFC1123Z))
 	// Message-ID（RFC 5325）：唯一标识一封邮件，用于收件方的去重与线索归并；
 	// 缺失同样会被垃圾评分系统扣分。域部分取发件地址的域名，
-	// 使其形如 <随机数.纳秒@aqua.is3.cc>——这是"由本系统生成"的标准形态。
+	// 使其形如 <随机数.纳秒@ltzy.top>——这是"由本系统生成"的标准形态。
 	writeHeader(&buf, "Message-ID", fmt.Sprintf("<%d.%d@%s>",
 		time.Now().UnixNano(), msgIDCounter.Add(1), domainOf(cfg.From)))
 	writeHeader(&buf, "MIME-Version", "1.0")

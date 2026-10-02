@@ -1,4 +1,4 @@
-// Package main 是 AQUA-API 的程序入口。
+// Package main 是 LTZY-API 的程序入口。
 //
 // 意图（Why）：
 //
@@ -123,7 +123,7 @@ func run() error {
 	// ── 子命令：打印版本 ────────────────────────────────────────
 	if *showVersion {
 		info := version.Get()
-		fmt.Printf("AQUA-API %s (commit=%s, built=%s)\n", info.Version, info.GitCommit, info.BuildTime)
+		fmt.Printf("LTZY-API %s (commit=%s, built=%s)\n", info.Version, info.GitCommit, info.BuildTime)
 		return nil
 	}
 
@@ -155,7 +155,7 @@ func run() error {
 	slog.SetDefault(logger)
 
 	info := version.Get()
-	logger.Info("AQUA-API 启动中",
+	logger.Info("LTZY-API 启动中",
 		"version", info.Version,
 		"commit", info.GitCommit,
 		"listen", cfg.Server.Listen,
@@ -524,7 +524,7 @@ func run() error {
 		return fmt.Errorf("HTTP 服务异常退出: %w", err)
 	}
 
-	logger.Info("AQUA-API 已退出")
+	logger.Info("LTZY-API 已退出")
 	return nil
 }
 

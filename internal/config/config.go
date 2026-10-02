@@ -1,4 +1,4 @@
-// Package config 负责 AQUA-API 的配置加载、覆盖与校验。
+// Package config 负责 LTZY-API 的配置加载、覆盖与校验。
 //
 // 意图（Why）：
 //
@@ -58,7 +58,7 @@ const (
 	//
 	// 为什么必须可配（重要）：令牌未指定分组时，转发层会落到这个分组去选渠道。
 	// 默认值取 "default"，与迁移初始化的分组保持一致，保证"不配置任何东西"时
-	// 行为与旧版本完全相同；当站点把渠道整体迁到自有分组（如"免费公益 / AQUA 自营"）后，
+	// 行为与旧版本完全相同；当站点把渠道整体迁到自有分组（如"免费公益 / LTZY 自营"）后，
 	// 可用 AQUA_RELAY_GROUP 指向新分组——否则所有不带分组的令牌都会因为
 	// "default 分组下已无渠道"而统一报 503。
 	DefaultRelayGroup = "default" // 默认路由分组
@@ -83,7 +83,7 @@ const (
 	// 因为云厂商普遍封禁 25 端口的出站连接，用 25 会出现"配置看起来正确但永远发不出信"。
 	DefaultSMTPHost     = "smtpdm.aliyun.com" // 默认 SMTP 服务器
 	DefaultSMTPPort     = 465                 // 默认端口（SSL）
-	DefaultSMTPFromName = "AQUA-API"          // 默认发件人显示名
+	DefaultSMTPFromName = "LTZY-API"          // 默认发件人显示名
 )
 
 // Config 是程序运行所需的全部配置。
