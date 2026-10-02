@@ -48,7 +48,12 @@ type leaderboardEntryDTO struct {
 	Requests    int64   `json:"requests"`
 	Tokens      int64   `json:"tokens"`
 	Score       float64 `json:"score"`
-	AvgLatencyMS float64 `json:"avg_latency_ms"`
+	// SuccessRate 是该用户窗口内的请求成功率（0~1），与"综合分数"是两个独立维度：
+	// 分数衡量用得多不多（请求数 + Token 各半），成功率衡量用得稳不稳。
+	// 早期版本只有分数一列，导致用户无法区分"量大"与"稳定"，
+	// 因此成功率独立成列。
+	SuccessRate   float64 `json:"success_rate"`
+	AvgLatencyMS  float64 `json:"avg_latency_ms"`
 	// PeakConcurrency 是窗口内峰值并发请求数（估算口径见 model.LeaderboardEntry）。
 	PeakConcurrency int64 `json:"peak_concurrency"`
 	// IsMe 标记这一行是否属于当前登录用户（前端据此高亮并标注"我"）。
@@ -218,6 +223,7 @@ func (s *Server) buildLeaderboardSection(entries []model.LeaderboardEntry, myUse
 			Requests:        entry.Requests,
 			Tokens:          entry.Tokens,
 			Score:           entry.LeaderboardScore(maxRequests, maxTokens),
+			SuccessRate:     entry.SuccessRate(),
 			AvgLatencyMS:    entry.AvgLatencyMS,
 			PeakConcurrency: entry.PeakConcurrency,
 			IsMe:            entry.UserID == myUserID,

@@ -92,7 +92,7 @@ func TestLeaderboard_SuccessOnlyAndPaidSplit(t *testing.T) {
 	// 免费用户：2 次成功 + 1 次失败
 	createLog(t, repo, userID, now.Add(-time.Hour), 200, 100, 80)  // 成功 token=100
 	createLog(t, repo, userID, now.Add(-2*time.Hour), 200, 200, 120)
-	createLog(t, repo, userID, now.Add(-3*time.Hour), 500, 999, 10) // 失败，不应计入
+	createLog(t, repo, userID, now.Add(-3*time.Hour), 500, 999, 10) // 失败：请求数计入、token 计入、成功率扣分
 
 	// 付费用户：1 次成功
 	createLog(t, repo, paidUserID, now.Add(-time.Hour), 200, 300, 60)
@@ -106,7 +106,7 @@ func TestLeaderboard_SuccessOnlyAndPaidSplit(t *testing.T) {
 	}
 
 	if len(entries) != 2 {
-		t.Fatalf("榜单条目数 = %d，期望 2（失败请求的用户不应新增条目；两个用户各一条）", len(entries))
+		t.Fatalf("榜单条目数 = %d，期望 2（两个用户各一条）", len(entries))
 	}
 
 	// 免费用户校验
@@ -126,25 +126,43 @@ func TestLeaderboard_SuccessOnlyAndPaidSplit(t *testing.T) {
 	if freeEntry.Paid {
 		t.Error("免费用户被错误标记为付费")
 	}
-	if freeEntry.Requests != 2 {
-		t.Errorf("免费用户请求数 = %d，期望 2（失败请求不计入）", freeEntry.Requests)
+	// 新口径：请求数统计全部请求（含失败），成功率单独反映稳定性
+	if freeEntry.Requests != 3 {
+		t.Errorf("免费用户请求数 = %d，期望 3（含失败请求）", freeEntry.Requests)
 	}
-	if freeEntry.Tokens != 300 {
-		t.Errorf("免费用户 token = %d，期望 300（失败请求的 token 不累计）", freeEntry.Tokens)
+	if freeEntry.SuccessRequests != 2 {
+		t.Errorf("免费用户成功请求数 = %d，期望 2", freeEntry.SuccessRequests)
 	}
+	if rate := freeEntry.SuccessRate(); rate < 0.66 || rate > 0.67 {
+		t.Errorf("免费用户成功率 = %v，期望约 0.667（2/3）", rate)
+	}
+	if freeEntry.Tokens != 1299 {
+		t.Errorf("免费用户 token = %d，期望 1299（全部请求累计）", freeEntry.Tokens)
+	}
+	// 平均耗时只按成功请求计算（失败请求耗时不可信）
 	if freeEntry.AvgLatencyMS != 100 {
 		// (80+120)/2 = 100
-		t.Errorf("免费用户平均耗时 = %v，期望 100", freeEntry.AvgLatencyMS)
+		t.Errorf("免费用户平均耗时 = %v，期望 100（仅成功请求）", freeEntry.AvgLatencyMS)
 	}
 
-	if paidEntry == nil {
-		t.Fatal("未找到付费用户的榜单条目")
+	// 分数封顶 100：榜首（各项最大）应为 100 分
+	score := freeEntry.LeaderboardScore(freeEntry.Requests, freeEntry.Tokens)
+	if score != 100 {
+		t.Errorf("榜首分数 = %v，期望 100（0~100 封顶）", score)
+	}
+
+	// 付费用户 1 次成功：请求 1、成功率 100%
+	if paidEntry.Requests != 1 || paidEntry.SuccessRequests != 1 {
+		t.Errorf("付费用户聚合错误: requests=%d success=%d", paidEntry.Requests, paidEntry.SuccessRequests)
+	}
+	if rate := paidEntry.SuccessRate(); rate != 1 {
+		t.Errorf("付费用户成功率 = %v，期望 1（全成功）", rate)
 	}
 	if !paidEntry.Paid {
 		t.Error("有已支付订单的用户应标记为付费")
 	}
-	if paidEntry.Requests != 1 || paidEntry.Tokens != 300 {
-		t.Errorf("付费用户聚合错误: requests=%d tokens=%d", paidEntry.Requests, paidEntry.Tokens)
+	if paidEntry.Tokens != 300 {
+		t.Errorf("付费用户 token = %d，期望 300", paidEntry.Tokens)
 	}
 }
 

@@ -346,18 +346,19 @@ func (r *usageLogRepository) Leaderboard(ctx context.Context, q model.UsageLogQu
 	where, args := buildUsageWhere(q)
 	whereQualified := qualifyUsageWhereColumns(where)
 
-	// 强制过滤成功请求与有归属账号的请求：这两条是排行榜口径的硬约束，
-	// 不放进 buildUsageWhere（那里服务于通用查询），在此单独叠加。
-
-	// 第一遍：JOIN 聚合（列名带 u. 前缀）
+	// 排行榜口径：统计【全部请求】（含失败），成功数另行聚合——
+	// 这样"请求数"反映真实使用量，"成功率"能独立衡量稳定性，两者不互相污染。
+	// 唯一硬约束是必须有归属账号（user_id > 0），否则无法归属到人。
 	joinConditions := []string{whereQualified}
 	if whereQualified != "" {
 		joinConditions[0] = "(" + whereQualified + ")"
 	}
-	joinConditions = append(joinConditions, "u.status_code >= 200", "u.status_code < 400", "u.user_id > 0")
+	joinConditions = append(joinConditions, "u.user_id > 0")
 	joinFilter := strings.Join(joinConditions, " AND ")
 
 	// 第二遍：单表并发样本（无 JOIN，列名不带前缀）
+	// 第二遍（并发样本）仍只取【成功】请求：区间重叠算法要求每条区间有效，
+	// 失败请求没有可用的"在途时长"，计入只会让并发数虚高。
 	flatConditions := []string{where}
 	if where != "" {
 		flatConditions[0] = "(" + where + ")"
@@ -368,8 +369,9 @@ func (r *usageLogRepository) Leaderboard(ctx context.Context, q model.UsageLogQu
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT u.user_id,
 		       COALESCE(SUM(u.total_tokens), 0),
-		       COALESCE(AVG(u.latency_ms), 0),
+		       COALESCE(AVG(CASE WHEN u.status_code >= 200 AND u.status_code < 400 THEN u.latency_ms END), 0),
 		       COUNT(1),
+		       COALESCE(SUM(CASE WHEN u.status_code >= 200 AND u.status_code < 400 THEN 1 ELSE 0 END), 0),
 		       COALESCE(us.username, ''),
 		       EXISTS(SELECT 1 FROM payment_orders po WHERE po.user_id = u.user_id AND po.status = 2) AS paid
 		FROM usage_logs u
@@ -394,20 +396,22 @@ func (r *usageLogRepository) Leaderboard(ctx context.Context, q model.UsageLogQu
 			tokens         int64
 			avgLatency     float64
 			requests       int64
+			successReqs    int64
 			username       string
 			paid           bool
 		)
-		if err := rows.Scan(&userID, &tokens, &avgLatency, &requests, &username, &paid); err != nil {
+		if err := rows.Scan(&userID, &tokens, &avgLatency, &requests, &successReqs, &username, &paid); err != nil {
 			return nil, fmt.Errorf("store: 读取排行榜聚合结果失败: %w", err)
 		}
 		byUser[userID] = &rowSample{
 			entry: model.LeaderboardEntry{
-				UserID:       userID,
-				Username:     username,
-				Requests:     requests,
-				Tokens:       tokens,
-				AvgLatencyMS: avgLatency,
-				Paid:         paid,
+				UserID:          userID,
+				Username:        username,
+				Requests:        requests,
+				SuccessRequests: successReqs,
+				Tokens:          tokens,
+				AvgLatencyMS:    avgLatency,
+				Paid:            paid,
 			},
 			events: make([]usageEvent, 0, int(requests)),
 		}

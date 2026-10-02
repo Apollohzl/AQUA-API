@@ -273,12 +273,19 @@ export interface LeaderboardEntry {
   user_id: number
   /** 账号 ID（用户名） */
   username: string
-  /** 窗口内请求总数 */
+  /** 窗口内请求总数（含成功与失败） */
   requests: number
   /** 窗口内 token 消耗总数 */
   tokens: number
-  /** 综合使用量分数（0~1）= 0.5 × 请求归一 + 0.5 × token 归一 */
+  /**
+   * 综合使用量分数（0~100 封顶）。
+   *
+   * = 50 分 × 请求数归一 + 50 分 × token 归一（榜内相对刻度），
+   * 衡量「用得多不多」；与 success_rate（用得稳不稳）是两个独立维度。
+   */
   score: number
+  /** 请求成功率（0~1）：成功数 / 总数，衡量稳定性 */
+  success_rate: number
   /** 平均请求耗时（毫秒，仅成功请求） */
   avg_latency_ms: number
   /** 窗口内峰值并发请求数（差分扫描估算） */

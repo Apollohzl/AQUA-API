@@ -54,16 +54,21 @@ function usernameInitial(name: string): string {
   return trimmed ? trimmed.slice(0, 1).toUpperCase() : '#'
 }
 
-/** 把分数渲染为进度条（0~1），让"谁领先多少"一眼可见 */
-function ScoreBar({ score }: { score: number }) {
-  const pct = Math.round(Math.min(1, Math.max(0, score)) * 100)
+/** 成功率徽标：≥95% 绿、≥80% 常规、低于 80% 橙/红一眼可辨。 */
+function SuccessRateBadge({ rate }: { rate: number }) {
+  const pct = (rate * 100).toFixed(1)
+  const tone =
+    rate >= 0.95
+      ? 'bg-ok/10 text-ok border-ok/25'
+      : rate >= 0.8
+        ? 'text-ink-2'
+        : rate >= 0.5
+          ? 'bg-warn/10 text-warn border-warn/25'
+          : 'bg-err/10 text-err border-err/25'
   return (
-    <div className="flex items-center gap-2">
-      <div className="h-1.5 w-14 overflow-hidden rounded-full bg-ink/10">
-        <div className="h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-xs tabular-nums text-ink-2">{pct}%</span>
-    </div>
+    <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-xs tabular-nums ${tone}`}>
+      {pct}%
+    </span>
   )
 }
 
@@ -105,12 +110,17 @@ function LeaderboardRow({ entry, highlight }: { entry: LeaderboardEntry; highlig
           <span className="max-w-[140px] truncate text-[13px]">{entry.username || `#${entry.user_id}`}</span>
         </div>
       </td>
-      {/* 请求数 / token（合并成"综合使用量"两列） */}
+      {/* 请求数 / token */}
       <td className="px-3 py-2.5 text-right text-[13px] tabular-nums">{formatNumber(entry.requests)}</td>
       <td className="px-3 py-2.5 text-right text-[13px] tabular-nums">{formatNumber(entry.tokens)}</td>
-      {/* 分数 */}
-      <td className="px-3 py-2.5">
-        <ScoreBar score={entry.score} />
+      {/* 成功率：独立成列，与"综合分数"区分开——
+          分数衡量"用得多不多"，成功率衡量"用得稳不稳" */}
+      <td className="px-3 py-2.5 text-right">
+        <SuccessRateBadge rate={entry.success_rate} />
+      </td>
+      {/* 综合分数：0~100 分制（榜首封顶 100） */}
+      <td className="px-3 py-2.5 text-right text-[13px] font-semibold tabular-nums text-ink-2">
+        {entry.score.toFixed(1)}
       </td>
       {/* 平均请求时间 */}
       <td className="px-3 py-2.5 text-right text-[13px] tabular-nums">{entry.avg_latency_ms.toFixed(0)} ms</td>
@@ -134,7 +144,8 @@ function LeaderboardTable({ section }: { section: LeaderboardEntry[] }) {
             <th className="px-3 py-2 text-left font-medium">账号</th>
             <th className="px-3 py-2 text-right font-medium">请求数</th>
             <th className="px-3 py-2 text-right font-medium">Token</th>
-            <th className="px-3 py-2 text-left font-medium">综合分数</th>
+            <th className="px-3 py-2 text-right font-medium">成功率</th>
+            <th className="px-3 py-2 text-right font-medium">综合分数</th>
             <th className="px-3 py-2 text-right font-medium">平均耗时</th>
             <th className="px-3 py-2 text-right font-medium">峰值并发</th>
           </tr>

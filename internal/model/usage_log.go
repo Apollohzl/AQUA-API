@@ -270,18 +270,40 @@ type LeaderboardEntry struct {
 	PeakConcurrency int64
 	// Paid 标记该用户是否付费用户（存在 status=paid 的充值订单）。
 	Paid bool
+	// SuccessRequests 是窗口内该用户的成功请求数（2xx/3xx）。
+	//
+	// Requests 统计全部请求（含失败），SuccessRequests 只数成功——
+	// 两者相除即成功率。这是"用得稳不稳"与"用得多不多"的区分：
+	// 次数很高但频繁失败的用户，请求数领先却成功率低，应当被识别出来。
+	SuccessRequests int64
 }
 
-// LeaderboardScore 返回综合使用量分数（0~1）。
+// SuccessRate 返回该用户的请求成功率（0~1）；无请求时返回 0。
+func (e LeaderboardEntry) SuccessRate() float64 {
+	if e.Requests <= 0 {
+		return 0
+	}
+	return float64(e.SuccessRequests) / float64(e.Requests)
+}
+
+// LeaderboardScore 返回综合使用量分数（0~100）。
 //
-// 两个归一化分量各占 50%，缺失分母（榜内最大值为 0）时对应分量按 0 计。
+// 两个归一化分量各占 50 分，缺失分母（榜内最大值为 0）时对应分量按 0 计。
+//
+// 满分封顶 100：归一化后榜首两项均为 1，分数恰为 100；分数是"相对榜内
+// 标杆的刻度"，不是累计量，因此用得再久也不会超过榜首——把它做成可比较
+// 的百分制刻度，比 0~1 的小数直观，也杜绝了"数字无限增长"的误读。
 func (e LeaderboardEntry) LeaderboardScore(maxRequests, maxTokens int64) float64 {
-	score := 0.0
+	var score float64
 	if maxRequests > 0 {
-		score += 0.5 * float64(e.Requests) / float64(maxRequests)
+		score += 50 * float64(e.Requests) / float64(maxRequests)
 	}
 	if maxTokens > 0 {
-		score += 0.5 * float64(e.Tokens) / float64(maxTokens)
+		score += 50 * float64(e.Tokens) / float64(maxTokens)
+	}
+	// 浮点误差保护：归一化比值理论上不会超过 1，但除法舍入可能给出 1.0000000002。
+	if score > 100 {
+		return 100
 	}
 	return score
 }
