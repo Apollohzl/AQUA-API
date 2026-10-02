@@ -66,6 +66,14 @@ export function useSpeedTestRunner(channelId: number | null, models: string[]): 
   const stopRef = useRef(false)
   const loopRef = useRef(false)
 
+  // 模型清单以「内容键」参与依赖，而不是数组身份。
+  //
+  // 为什么：调用方（如关闭状态的弹层）可能每次渲染都传入新的空数组/新引用；
+  // 若直接以数组身份做 effect 依赖，会形成「渲染 → effect → setEntries(新数组)
+  // → 再渲染」的死循环，把整个页面的 JS 线程冻住（表现为页面卡死、点击无响应）。
+  // 用内容比较后，清单不变就不重建，身份抖动被完全吸收。
+  const modelsKey = models.join('\u0000')
+
   // 模型清单变化（打开弹层 / 切渠道）时重建条目并复位状态。
   useEffect(() => {
     const fresh: SpeedTestEntry[] = models.map((model) => ({ model, status: 'pending' }))
@@ -75,7 +83,9 @@ export function useSpeedTestRunner(channelId: number | null, models: string[]): 
     setBatchMessage(null)
     stopRef.current = false
     loopRef.current = false
-  }, [channelId, models]) // eslint-disable-line react-hooks/exhaustive-deps
+    // 依赖只认 channelId 与内容键；models 取当前渲染闭包中的最新值。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelId, modelsKey])
 
   /** 唯一的条目更新入口：先写 ref 再写 state，两者永不错位。 */
   const applyEntries = useCallback((next: SpeedTestEntry[]) => {
