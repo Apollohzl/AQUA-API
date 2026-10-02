@@ -28,8 +28,8 @@ Passerelle LLM API auto-hébergée · Système de gestion de l'usage de l'IA
 | Canal | Adresse |
 | --- | --- |
 | Site officiel (démonstration en ligne) | https://aqua.is3.cc |
-| Dépôt de code | https://github.com/xiaosu4610/AQUA-API |
-| Signaler un problème (Issues) | https://github.com/xiaosu4610/AQUA-API/issues |
+| Dépôt de code | https://github.com/LTZY-ACU/AQUA-API |
+| Signaler un problème (Issues) | https://github.com/LTZY-ACU/AQUA-API/issues |
 
 > **Ce dépôt est la seule source faisant autorité pour les adresses officielles.** En cas de changement de domaine, la mise à jour se fait d'abord ici, avant d'être propagée partout ailleurs.
 > Il est donc plus fiable de mettre ce dépôt en favori que de mettre un nom de domaine en favori.
@@ -569,7 +569,7 @@ faute de quoi cette part de coût serait comptée à 0 et le rapport serait trop
 ### Méthode 1 : Docker Compose (recommandée)
 
 ```bash
-git clone https://github.com/xiaosu4610/AQUA-API.git && cd AQUA-API
+git clone https://github.com/LTZY-ACU/AQUA-API.git && cd AQUA-API
 cp .env.example .env
 
 docker build -t aqua-api:local .          # première construction (frontend + backend + image d'exécution)
@@ -1023,6 +1023,6 @@ Documents annexes :
 
 **Si ce projet vous a fait gagner du temps sur la tenue de vos comptes, n'hésitez pas à lui donner une Star ⭐**
 
-[Démonstration en ligne](https://aqua.is3.cc) · [Ouvrir une Issue](https://github.com/xiaosu4610/AQUA-API/issues) · [GitHub](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
+[Démonstration en ligne](https://aqua.is3.cc) · [Ouvrir une Issue](https://github.com/LTZY-ACU/AQUA-API/issues) · [GitHub](https://github.com/LTZY-ACU/AQUA-API) · [English](README.en.md)
 
 </div>

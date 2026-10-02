@@ -28,8 +28,8 @@ Self-hosted LLM API gateway · AI usage management system
 | Channel | Address |
 | --- | --- |
 | Official website (live demo) | https://aqua.is3.cc |
-| Source repository | https://github.com/xiaosu4610/AQUA-API |
-| Issues | https://github.com/xiaosu4610/AQUA-API/issues |
+| Source repository | https://github.com/LTZY-ACU/AQUA-API |
+| Issues | https://github.com/LTZY-ACU/AQUA-API/issues |
 
 > **This repository is the sole authoritative source of the official address.** If the domain ever changes, it is updated here first and only then propagated anywhere else.
 > As a result, bookmarking this repository is more reliable than bookmarking a domain.
@@ -573,7 +573,7 @@ otherwise that portion of cost counts as 0 and the report skews optimistic.
 ### Option 1: Docker Compose (Recommended)
 
 ```bash
-git clone https://github.com/xiaosu4610/AQUA-API.git && cd AQUA-API
+git clone https://github.com/LTZY-ACU/AQUA-API.git && cd AQUA-API
 cp .env.example .env
 
 docker build -t aqua-api:local .          # First build (frontend + backend + runtime image)
@@ -1027,6 +1027,6 @@ Companion files:
 
 **If this project saved you time on reconciliation, a Star is welcome ⭐**
 
-[Live Demo](https://aqua.is3.cc) · [Open an Issue](https://github.com/xiaosu4610/AQUA-API/issues) · [GitHub](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
+[Live Demo](https://aqua.is3.cc) · [Open an Issue](https://github.com/LTZY-ACU/AQUA-API/issues) · [GitHub](https://github.com/LTZY-ACU/AQUA-API) · [English](README.en.md)
 
 </div>

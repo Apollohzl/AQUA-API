@@ -25,7 +25,7 @@
 # 1) 在网页上 fork 本仓库，然后：
 git clone https://github.com/<你的用户名>/AQUA-API.git
 cd AQUA-API
-git remote add upstream https://github.com/xiaosu4610/AQUA-API.git
+git remote add upstream https://github.com/LTZY-ACU/AQUA-API.git
 
 # 2) 从最新 main 拉出工作分支
 git fetch upstream

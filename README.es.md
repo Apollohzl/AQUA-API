@@ -28,8 +28,8 @@ Gateway de API LLM autoalojado · Sistema de gestión del uso de IA
 | Canal | Dirección |
 | --- | --- |
 | Sitio oficial (demostración en línea) | https://aqua.is3.cc |
-| Repositorio de código | https://github.com/xiaosu4610/AQUA-API |
-| Reportar un problema (Issues) | https://github.com/xiaosu4610/AQUA-API/issues |
+| Repositorio de código | https://github.com/LTZY-ACU/AQUA-API |
+| Reportar un problema (Issues) | https://github.com/LTZY-ACU/AQUA-API/issues |
 
 > **Este repositorio es la única fuente autoritativa de las direcciones oficiales.** Si el dominio cambia,
 > se actualizará aquí primero y después se sincronizará en cualquier otro lugar.
@@ -578,7 +578,7 @@ ya que de lo contrario su coste se contaría como 0 y el informe sería demasiad
 ### Opción 1: Docker Compose (recomendada)
 
 ```bash
-git clone https://github.com/xiaosu4610/AQUA-API.git && cd AQUA-API
+git clone https://github.com/LTZY-ACU/AQUA-API.git && cd AQUA-API
 cp .env.example .env
 
 docker build -t aqua-api:local .          # Primera compilación (frontend + backend + imagen de ejecución)
@@ -1042,6 +1042,6 @@ Archivos complementarios:
 
 **Si este proyecto te ha ahorrado tiempo de conciliación, ¡dale una Star ⭐!**
 
-[Demostración en línea](https://aqua.is3.cc) · [Enviar Issue](https://github.com/xiaosu4610/AQUA-API/issues) · [GitHub](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
+[Demostración en línea](https://aqua.is3.cc) · [Enviar Issue](https://github.com/LTZY-ACU/AQUA-API/issues) · [GitHub](https://github.com/LTZY-ACU/AQUA-API) · [English](README.en.md)
 
 </div>

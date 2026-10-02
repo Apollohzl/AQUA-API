@@ -28,8 +28,8 @@
 | القناة | العنوان |
 | --- | --- |
 | الموقع الرسمي (عرض حيّ) | https://aqua.is3.cc |
-| مستودع الكود | https://github.com/xiaosu4610/AQUA-API |
-| الإبلاغ عن مشكلة (Issues) | https://github.com/xiaosu4610/AQUA-API/issues |
+| مستودع الكود | https://github.com/LTZY-ACU/AQUA-API |
+| الإبلاغ عن مشكلة (Issues) | https://github.com/LTZY-ACU/AQUA-API/issues |
 
 > **هذا المستودع هو المصدر الموثوق الوحيد للعنوان الرسمي.** إذا تغيّر النطاق، فسيُحدَّث هنا أولًا ثم يُنقل إلى أي مكان آخر.
 > لذلك، حفظ هذا المستودع أكثر موثوقية من حفظ نطاق.
@@ -569,7 +569,7 @@ sequenceDiagram
 ### الطريقة 1: Docker Compose (موصى بها)
 
 ```bash
-git clone https://github.com/xiaosu4610/AQUA-API.git && cd AQUA-API
+git clone https://github.com/LTZY-ACU/AQUA-API.git && cd AQUA-API
 cp .env.example .env
 
 docker build -t aqua-api:local .          # البناء الأول (الواجهة + الخلفية + صورة التشغيل)
@@ -1023,6 +1023,6 @@ aqua-api.service       وحدة systemd (نشر على خادم فعلي)
 
 **إن كان هذا المشروع قد وفّر عليك وقت المطابقة، فمرحبًا بمنحه Star ⭐**
 
-[عرض حيّ](https://aqua.is3.cc) · [إرسال Issue](https://github.com/xiaosu4610/AQUA-API/issues) · [GitHub](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
+[عرض حيّ](https://aqua.is3.cc) · [إرسال Issue](https://github.com/LTZY-ACU/AQUA-API/issues) · [GitHub](https://github.com/LTZY-ACU/AQUA-API) · [English](README.en.md)
 
 </div>

@@ -28,8 +28,8 @@
 | 渠道 | 地址 |
 | --- | --- |
 | 官方网站（在线演示） | https://aqua.is3.cc |
-| 代码仓库 | https://github.com/xiaosu4610/AQUA-API |
-| 提交 Issue | https://github.com/xiaosu4610/AQUA-API/issues |
+| 代码仓库 | https://github.com/LTZY-ACU/AQUA-API |
+| 提交 Issue | https://github.com/LTZY-ACU/AQUA-API/issues |
 
 > **本仓库是官方地址的唯一权威来源。** 域名如有变更，会先在这里更新，再同步到其它任何地方。
 > 因此，收藏本仓库比收藏一个域名更可靠。
@@ -572,7 +572,7 @@ sequenceDiagram
 ### 方式一：Docker Compose（推荐）
 
 ```bash
-git clone https://github.com/xiaosu4610/AQUA-API.git && cd AQUA-API
+git clone https://github.com/LTZY-ACU/AQUA-API.git && cd AQUA-API
 cp .env.example .env
 
 docker build -t aqua-api:local .          # 首次构建（前端 + 后端 + 运行镜像）
@@ -1026,6 +1026,6 @@ aqua-api.service       systemd 单元（裸机部署）
 
 **如果这个项目帮你省下了对账的时间，欢迎点个 Star ⭐**
 
-[在线演示](https://aqua.is3.cc) · [提交 Issue](https://github.com/xiaosu4610/AQUA-API/issues) · [GitHub](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
+[在线演示](https://aqua.is3.cc) · [提交 Issue](https://github.com/LTZY-ACU/AQUA-API/issues) · [GitHub](https://github.com/LTZY-ACU/AQUA-API) · [English](README.en.md)
 
 </div>

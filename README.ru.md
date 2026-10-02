@@ -28,8 +28,8 @@
 | Канал | Адрес |
 | --- | --- |
 | Официальный сайт (онлайн-демонстрация) | https://aqua.is3.cc |
-| Репозиторий кода | https://github.com/xiaosu4610/AQUA-API |
-| Сообщить о проблеме (Issues) | https://github.com/xiaosu4610/AQUA-API/issues |
+| Репозиторий кода | https://github.com/LTZY-ACU/AQUA-API |
+| Сообщить о проблеме (Issues) | https://github.com/LTZY-ACU/AQUA-API/issues |
 
 > **Этот репозиторий — единственный авторитетный источник официальных адресов.** При изменении домена он обновляется здесь первым, а затем синхронизируется в любое другое место.
 > Поэтому добавить в закладки этот репозиторий надёжнее, чем сохранять один домен.
@@ -570,7 +570,7 @@ sequenceDiagram
 ### Вариант 1: Docker Compose (рекомендуется)
 
 ```bash
-git clone https://github.com/xiaosu4610/AQUA-API.git && cd AQUA-API
+git clone https://github.com/LTZY-ACU/AQUA-API.git && cd AQUA-API
 cp .env.example .env
 
 docker build -t aqua-api:local .          # Первая сборка (фронтенд + бэкенд + рабочий образ)
@@ -1024,6 +1024,6 @@ aqua-api.service       Юнит systemd (развёртывание на «го�
 
 **Если этот проект сэкономил вам время на сверке отчётности, поставьте Star ⭐**
 
-[Онлайн-демонстрация](https://aqua.is3.cc) · [Создать Issue](https://github.com/xiaosu4610/AQUA-API/issues) · [GitHub](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
+[Онлайн-демонстрация](https://aqua.is3.cc) · [Создать Issue](https://github.com/LTZY-ACU/AQUA-API/issues) · [GitHub](https://github.com/LTZY-ACU/AQUA-API) · [English](README.en.md)
 
 </div>
