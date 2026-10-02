@@ -453,6 +453,14 @@ func (s *Server) registerRoutes() {
 	// 只提供这个端点，对 /v1/chat/completions 一律 404。支持它才能把这些
 	// 模型真正用起来，否则它们在清单里等于"上架了但调不通"。
 	v1.POST("/embeddings", gin.WrapF(s.deps.Relay.ServeEmbeddings))
+	// 图像 / 音频类入站端点：与对话接口共用同一套令牌鉴权、分组路由、密钥池、
+	// 失败重试与计费（见 relay/media.go）。它们是"非文本"的转发变体——
+	// 图像请求/响应为 JSON，TTS 响应为二进制音频流，ASR 入参为 multipart/form-data，
+	// 网关一律按原始字节透传（含 Content-Type）。
+	v1.POST("/images/generations", gin.WrapF(s.deps.Relay.ServeImageGenerations))
+	v1.POST("/audio/speech", gin.WrapF(s.deps.Relay.ServeAudioSpeech))
+	v1.POST("/audio/transcriptions", gin.WrapF(s.deps.Relay.ServeAudioTranscriptions))
+	v1.POST("/audio/translations", gin.WrapF(s.deps.Relay.ServeAudioTranslations))
 	// Anthropic Messages 协议：Claude 官方 SDK、Claude Code 等客户端默认走这里。
 	// 网关内部会把请求转换为 OpenAI 格式再转发，响应再转换回 Anthropic 格式。
 	v1.POST("/messages", gin.WrapF(s.deps.Relay.ServeAnthropicMessages))
