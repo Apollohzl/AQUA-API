@@ -90,14 +90,38 @@ func (s *Server) handleLeaderboard(c *gin.Context) {
 	until := time.Now()
 	since := until.AddDate(0, 0, -days)
 
-	entries, err := s.deps.UsageLogs.Leaderboard(ctx, model.UsageLogQuery{
-		Since: &since,
-		Until: &until,
-	})
-	if err != nil {
+	// 并行发起两个聚合：排行榜明细 + 全站汇总（总请求/总Token/成功率）。
+	// 二者互不依赖，并行后总耗时≈较慢的那个，不因新增汇总而变慢。
+	type aggResult struct {
+		entries []model.LeaderboardEntry
+		summary *model.UsageSummary
+		err     error
+	}
+	aggCh := make(chan aggResult, 1)
+	go func() {
+		entries, err := s.deps.UsageLogs.Leaderboard(ctx, model.UsageLogQuery{
+			Since: &since,
+			Until: &until,
+		})
+		if err != nil {
+			aggCh <- aggResult{err: err}
+			return
+		}
+		// 全站汇总：与排行榜同一时间窗、同一数据源，口径天然一致。
+		// 成功数用 Summary（它内部按 2xx/3xx 判定），成功率 = 成功/总请求。
+		summary, err := s.deps.UsageLogs.Summary(ctx, model.UsageLogQuery{
+			Since: &since,
+			Until: &until,
+		})
+		aggCh <- aggResult{entries: entries, summary: summary, err: err}
+	}()
+
+	agg := <-aggCh
+	if agg.err != nil {
 		s.respondInternalError(c, "统计用量排行榜失败")
 		return
 	}
+	entries := agg.entries
 
 	// 管理员可查看完整榜单；普通用户只看前 N 名。
 	topN := leaderboardTopN
@@ -120,6 +144,14 @@ func (s *Server) handleLeaderboard(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"range_days": days,
+		// 全站汇总（与排行榜同一时间窗、同一数据源）。
+		// 成功率 = 成功请求 / 总请求，SuccessRate() 在无请求时返回 0。
+		"totals": gin.H{
+			"requests":     agg.summary.Requests,
+			"tokens":       agg.summary.Tokens,
+			"success_rate": agg.summary.SuccessRate(),
+			"users":        len(entries),
+		},
 		"paid":       paidDTO,
 		"free":       freeDTO,
 		"updated_at": until.Unix(),
