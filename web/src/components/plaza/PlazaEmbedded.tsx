@@ -17,6 +17,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Tabs } from '@/components/ui/Display'
 import { vendorLabel, vendorOf, vendorTone } from '@/utils/vendor'
 import { formatYuanPerCall, formatYuanPerMillion } from '@/utils/money'
+import { formatLatency } from '@/utils/format'
 import { useSite } from '@/lib/site/site-context'
 
 export function PlazaEmbedded() {
@@ -83,9 +84,15 @@ export function PlazaEmbedded() {
       <Modal open={Boolean(selected)} onClose={() => setSelected(null)} title={selected?.model ?? ''} width={560}>
         {selected && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {selected.available ? <Badge tone="ok">可用</Badge> : <Badge tone="err">不可用</Badge>}
               <Badge tone="off">{selected.channel_count} 个启用渠道</Badge>
+              {selected.speed_ttfb_ms ? (
+                <span className="font-mono text-xs text-ink-3" title="后台测速快照（非实时）">
+                  首字延迟 {formatLatency(selected.speed_ttfb_ms)}
+                  {selected.speed_tested_at ? ` · 测于 ${formatTestedAt(selected.speed_tested_at)}` : ''}
+                </span>
+              ) : null}
             </div>
             {selected.prices.length > 0 ? (
               <div className="space-y-2">
@@ -116,6 +123,23 @@ function priceSummary(price: PlazaPrice, quotaPerYuan: number): string {
   return `输入 ${formatYuanPerMillion(price.prompt_price, quotaPerYuan)} · 输出 ${formatYuanPerMillion(price.completion_price, quotaPerYuan)}`
 }
 
+/** 测速徽章的色调：与公开广场表格的 SpeedCell 同一套分档，两处观感保持一致。 */
+function speedTone(ms: number): 'ok' | 'off' | 'warn' {
+  if (ms < 1000) return 'ok'
+  if (ms < 3000) return 'off'
+  return 'warn'
+}
+
+/** 测速时间的可读形式：分钟级粒度即可，它只回答"这个数字有多新鲜"。 */
+function formatTestedAt(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function ModelTile({ model, onClick }: { model: PlazaModel; onClick: () => void }) {
   const { quotaPerYuan } = useSite()
   const vendor = vendorOf(model.model)
@@ -135,8 +159,11 @@ function ModelTile({ model, onClick }: { model: PlazaModel; onClick: () => void 
           <div className="text-xs text-ink-3">{vendorLabel(vendor)}</div>
         </div>
       </div>
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         {model.available ? <Badge tone="ok">可用</Badge> : <Badge tone="err">不可用</Badge>}
+        {model.speed_ttfb_ms ? (
+          <Badge tone={speedTone(model.speed_ttfb_ms)}>{formatLatency(model.speed_ttfb_ms)}</Badge>
+        ) : null}
         {price && <Badge tone={price.is_free ? 'info' : 'brand'}>{priceSummary(price, quotaPerYuan)}</Badge>}
       </div>
     </button>
