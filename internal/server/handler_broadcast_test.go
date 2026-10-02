@@ -23,12 +23,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/broadcast"
-	"gitee.com/xiaosu4610/aqua-api/internal/config"
-	"gitee.com/xiaosu4610/aqua-api/internal/crypto"
-	"gitee.com/xiaosu4610/aqua-api/internal/mailer"
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
-	"gitee.com/xiaosu4610/aqua-api/internal/store"
+	"github.com/xiaosu4610/aqua-api/internal/broadcast"
+	"github.com/xiaosu4610/aqua-api/internal/config"
+	"github.com/xiaosu4610/aqua-api/internal/crypto"
+	"github.com/xiaosu4610/aqua-api/internal/mailer"
+	"github.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/store"
 )
 
 // fakeBroadcastMailer 记录群发实际投递到的地址。

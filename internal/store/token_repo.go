@@ -28,8 +28,8 @@ import (
 	"strings"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/crypto"
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/crypto"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // 令牌列表查询的条数约束（与渠道列表同样的保护思路：避免一次性拉全表）。

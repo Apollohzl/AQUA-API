@@ -43,9 +43,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
-	"gitee.com/xiaosu4610/aqua-api/internal/oai"
-	"gitee.com/xiaosu4610/aqua-api/internal/reqctx"
+	"github.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/oai"
+	"github.com/xiaosu4610/aqua-api/internal/reqctx"
 )
 
 // bearerPrefix 是 Authorization 头中令牌的标准前缀。

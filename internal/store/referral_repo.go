@@ -31,7 +31,7 @@ import (
 	"strings"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // checkinStreakLookback 是计算连续签到时最多回看的签到记录条数。

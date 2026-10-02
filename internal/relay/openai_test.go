@@ -30,10 +30,10 @@ import (
 	"testing"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/crypto"
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
-	"gitee.com/xiaosu4610/aqua-api/internal/oai"
-	"gitee.com/xiaosu4610/aqua-api/internal/store"
+	"github.com/xiaosu4610/aqua-api/internal/crypto"
+	"github.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/oai"
+	"github.com/xiaosu4610/aqua-api/internal/store"
 )
 
 // testEncryptionKey 是测试用密钥材料（非真实密钥）。

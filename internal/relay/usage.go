@@ -40,9 +40,9 @@ import (
 	"strings"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/corpus"
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
-	"gitee.com/xiaosu4610/aqua-api/internal/reqctx"
+	"github.com/xiaosu4610/aqua-api/internal/corpus"
+	"github.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/reqctx"
 )
 
 // openAIUsage 对应一次调用最终采用的用量（内部统一为 OpenAI 口径）。

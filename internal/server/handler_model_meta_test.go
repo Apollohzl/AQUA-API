@@ -29,10 +29,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/config"
-	"gitee.com/xiaosu4610/aqua-api/internal/crypto"
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
-	"gitee.com/xiaosu4610/aqua-api/internal/store"
+	"github.com/xiaosu4610/aqua-api/internal/config"
+	"github.com/xiaosu4610/aqua-api/internal/crypto"
+	"github.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/store"
 )
 
 // modelMetaFixture 汇总模型相关接口测试所需的仓储与管理员会话。

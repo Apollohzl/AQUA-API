@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // newTestOrderRepo 构造订单仓储并返回用户仓储（入账需要真实用户）。

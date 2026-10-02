@@ -32,9 +32,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/config"
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
-	"gitee.com/xiaosu4610/aqua-api/internal/server/middleware"
+	"github.com/xiaosu4610/aqua-api/internal/config"
+	"github.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/server/middleware"
 )
 
 // loginUsernameKey 是登录接口的账号维度限流键（安全审计 P2-4）。

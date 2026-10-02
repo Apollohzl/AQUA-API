@@ -34,10 +34,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/mailer"
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
-	"gitee.com/xiaosu4610/aqua-api/internal/oai"
-	"gitee.com/xiaosu4610/aqua-api/internal/server/middleware"
+	"github.com/xiaosu4610/aqua-api/internal/mailer"
+	"github.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/oai"
+	"github.com/xiaosu4610/aqua-api/internal/server/middleware"
 )
 
 // ---------------------------------------------------------------------------

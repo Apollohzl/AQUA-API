@@ -32,7 +32,7 @@ import (
 	"strings"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // announcementColumns 集中定义查询列，顺序必须与 scanAnnouncement 的扫描顺序严格一致。

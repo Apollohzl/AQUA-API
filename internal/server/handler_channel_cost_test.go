@@ -11,7 +11,7 @@ package server
 import (
 	"testing"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 func TestBuildChannelKeyUsage_未录进价不按零成本算(t *testing.T) {

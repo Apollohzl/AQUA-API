@@ -36,8 +36,8 @@ import (
 	"net/http"
 	"strings"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/corpus"
-	"gitee.com/xiaosu4610/aqua-api/internal/oai"
+	"github.com/xiaosu4610/aqua-api/internal/corpus"
+	"github.com/xiaosu4610/aqua-api/internal/oai"
 )
 
 // Adapter 描述「下游协议 ↔ 内部 OpenAI 协议」的双向转换能力。

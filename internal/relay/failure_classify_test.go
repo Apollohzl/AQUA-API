@@ -30,7 +30,7 @@ import (
 	"testing"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // TestClassifyUpstreamFailure_各类失败判据 覆盖语义分类表。

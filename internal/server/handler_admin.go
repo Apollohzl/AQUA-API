@@ -30,14 +30,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/channeltype"
-	"gitee.com/xiaosu4610/aqua-api/internal/crypto"
-	"gitee.com/xiaosu4610/aqua-api/internal/mailer"
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
-	"gitee.com/xiaosu4610/aqua-api/internal/oai"
-	"gitee.com/xiaosu4610/aqua-api/internal/payment"
-	"gitee.com/xiaosu4610/aqua-api/internal/relay"
-	"gitee.com/xiaosu4610/aqua-api/internal/server/middleware"
+	"github.com/xiaosu4610/aqua-api/internal/channeltype"
+	"github.com/xiaosu4610/aqua-api/internal/crypto"
+	"github.com/xiaosu4610/aqua-api/internal/mailer"
+	"github.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/oai"
+	"github.com/xiaosu4610/aqua-api/internal/payment"
+	"github.com/xiaosu4610/aqua-api/internal/relay"
+	"github.com/xiaosu4610/aqua-api/internal/server/middleware"
 )
 
 // 分页默认值。

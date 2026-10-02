@@ -50,7 +50,7 @@ import (
 	"strings"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/oai"
+	"github.com/xiaosu4610/aqua-api/internal/oai"
 )
 
 // 媒体类上游端点路径。

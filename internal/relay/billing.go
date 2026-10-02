@@ -52,7 +52,7 @@ import (
 	"sync"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // priceCacheTTL 是价格缓存的存活时间。

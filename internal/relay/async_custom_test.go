@@ -24,7 +24,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // customTestChannel 构造一个最小可用的渠道（扩展配置按需传入）。

@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // fakeBudgetTokenRepo 是只服务于预算用例的内存版令牌仓储。

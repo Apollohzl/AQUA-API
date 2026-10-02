@@ -28,8 +28,8 @@ import (
 	"log/slog"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/config"
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/config"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // defaultChannelHealthWindow 是统计窗口的兜底默认值。

@@ -24,8 +24,8 @@ import (
 	"testing"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/crypto"
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/crypto"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // newBudgetTestRepos 在同一个临时库上构造令牌 / 渠道 / 日志三个仓储。

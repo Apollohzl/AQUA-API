@@ -47,7 +47,7 @@ import (
 	"sync"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // ErrNoUsableCredential 表示渠道的凭据池当前没有可用凭据

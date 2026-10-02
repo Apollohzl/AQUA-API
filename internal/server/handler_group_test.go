@@ -27,12 +27,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/config"
-	"gitee.com/xiaosu4610/aqua-api/internal/crypto"
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
-	"gitee.com/xiaosu4610/aqua-api/internal/payment"
-	"gitee.com/xiaosu4610/aqua-api/internal/relay"
-	"gitee.com/xiaosu4610/aqua-api/internal/store"
+	"github.com/xiaosu4610/aqua-api/internal/config"
+	"github.com/xiaosu4610/aqua-api/internal/crypto"
+	"github.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/payment"
+	"github.com/xiaosu4610/aqua-api/internal/relay"
+	"github.com/xiaosu4610/aqua-api/internal/store"
 )
 
 // plazaFixture 汇总测试所需的仓储与已创建的访问令牌。

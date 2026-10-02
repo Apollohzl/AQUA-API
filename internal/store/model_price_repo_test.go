@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // newTestPriceRepo 构造基于临时数据库的计价规则仓储。

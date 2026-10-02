@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // newTestEmailCode 插入一条验证码记录并返回其 ID。

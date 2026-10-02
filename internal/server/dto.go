@@ -22,7 +22,7 @@ package server
 import (
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // pagedResponse 是列表接口的统一响应结构。

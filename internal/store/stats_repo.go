@@ -31,7 +31,7 @@ import (
 	"strings"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // maintenanceTables 是运维概览与备份校验共同关注的核心表清单。

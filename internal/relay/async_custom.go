@@ -43,8 +43,8 @@ import (
 	"strconv"
 	"strings"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/channeltype"
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/channeltype"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // 自定义异步适配器的配置键（写在渠道扩展配置 ch.ExtraConfig 里）。

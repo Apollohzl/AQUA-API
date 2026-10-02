@@ -32,8 +32,8 @@ import (
 	"testing"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
-	"gitee.com/xiaosu4610/aqua-api/internal/reqctx"
+	"github.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/reqctx"
 )
 
 // fakeUsageLogRepo 是内存版调用日志仓储，用于断言"计费落了多少"。

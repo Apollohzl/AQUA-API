@@ -27,7 +27,7 @@ package reqctx
 import (
 	"context"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/i18n"
+	"github.com/xiaosu4610/aqua-api/internal/i18n"
 )
 
 // Identity 描述一次模型调用请求的调用者身份。

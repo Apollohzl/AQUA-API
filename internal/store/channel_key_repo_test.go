@@ -24,8 +24,8 @@ import (
 	"testing"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/crypto"
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/crypto"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // newTestKeyRepo 构造基于临时数据库的密钥池仓储，并返回底层连接用于安全断言。
