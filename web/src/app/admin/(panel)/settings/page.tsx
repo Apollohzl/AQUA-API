@@ -239,6 +239,7 @@ export default function AdminSettingsPage() {
           ? {
               enabled: speedtest.enabled,
               public: speedtest.public,
+              auto_block: speedtest.auto_block,
               timeout_seconds: Number(speedtest.timeout_seconds) || 20,
               max_models: Number(speedtest.max_models) || 50,
             }
@@ -481,6 +482,13 @@ export default function AdminSettingsPage() {
             </span>
             <Switch checked={speedtest.public} onChange={(v) => setSpeedtest({ ...speedtest, public: v })} label="在模型广场展示延迟" />
           </label>
+          <label className="flex items-center justify-between text-[13px] text-ink-2">
+            <span>
+              自动屏蔽无权限模型
+              <span className="ml-1 text-xs text-ink-3">（测速时上游明确回 403/404 的模型自动从渠道移除）</span>
+            </span>
+            <Switch checked={speedtest.auto_block} onChange={(v) => setSpeedtest({ ...speedtest, auto_block: v })} label="自动屏蔽无权限模型" />
+          </label>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="单模型超时（秒）" help="范围 5~120；部分平台排队久可调大">
               <Input
@@ -502,6 +510,8 @@ export default function AdminSettingsPage() {
           <div className="rounded-md border border-line bg-surface p-3 text-xs text-ink-3">
             测速说明：逐模型发送最小请求（提示词 ping + max_tokens=1，约消耗 2~3 token），
             测量首字延迟（TTFB）并在拿到首字后立即断开。串行探测，数字不受并发干扰。
+            开启自动屏蔽时，上游明确拒绝（403/404）的模型会自动从渠道清单移除；
+            超时与 5xx 属暂时性故障，不会被移除。
           </div>
         </Card>
       )}

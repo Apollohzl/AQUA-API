@@ -65,7 +65,8 @@ export function SpeedTestModal({
         <div className="rounded-md border border-line bg-surface p-3 text-xs text-ink-3">
           逐模型发送最小请求测<strong className="text-ink-2">首字延迟</strong>
           （提示词 ping + 输出截断 1 token，每个模型约消耗 2~3 个 token，
-          测到首字即断开）。结果会保存并在模型广场展示。
+          测到首字即断开）。结果会保存并在模型广场展示；
+          上游明确拒绝（403/404）的模型将自动从渠道移除。
         </div>
 
         {runner.batchMessage && (
@@ -138,7 +139,7 @@ function SpeedTestRow({ entry }: { entry: SpeedTestEntry }) {
       <td className="px-3 py-2">
         {entry.status === 'pending' && <Badge tone="off">待测</Badge>}
         {entry.status === 'running' && <Badge tone="warn">测速中</Badge>}
-        {entry.status === 'done' && result && (result.ok ? <Badge tone="ok">成功</Badge> : <Badge tone="err">失败</Badge>)}
+        {entry.status === 'done' && result && (result.ok ? <Badge tone="ok">成功</Badge> : result.blocked ? <Badge tone="warn">已移除</Badge> : <Badge tone="err">失败</Badge>)}
       </td>
       <td className="px-3 py-2 text-right font-mono tabular-nums text-ink">
         {result?.ok ? latencyText(result.ttfb_ms) : '—'}

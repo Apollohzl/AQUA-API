@@ -190,13 +190,17 @@ export default function AdminChannelsPage() {
         )}
       </Modal>
 
-      {/* 模型测速弹层：逐模型测首字延迟 */}
+      {/* 模型测速弹层：逐模型测首字延迟。关闭时刷新列表——
+          自动屏蔽（403/404）可能改了渠道的模型清单，需要反映到表格。 */}
       <SpeedTestModal
         open={speedTarget !== null}
         channelId={speedTarget?.id ?? null}
         channelName={speedTarget?.name}
         models={speedTarget?.models ?? []}
-        onClose={() => setSpeedTarget(null)}
+        onClose={() => {
+          setSpeedTarget(null)
+          void load()
+        }}
       />
 
       <ChannelFormModal

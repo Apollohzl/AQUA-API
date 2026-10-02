@@ -737,6 +737,8 @@ export interface SpeedTestItem {
   ttfb_ms: number
   total_ms: number
   message?: string
+  /** 该模型因无权限（403/404）被自动从渠道清单移除 */
+  blocked?: boolean
 }
 
 /** POST /api/admin/channels/{id}/speedtest 响应 */
@@ -747,6 +749,8 @@ export interface SpeedTestRunResult {
   elapsed_ms: number
   /** 整批级失败说明（如凭据不可用）；为空表示逐模型结果可信 */
   message?: string
+  /** 本次被自动屏蔽（无权限 403/404）并从渠道清单移除的模型 */
+  blocked_models?: string[]
   key_masked?: string
   key_source?: string
   pool_total?: number
@@ -1014,6 +1018,8 @@ export interface SpeedTestSettings {
   timeout_seconds: number
   /** 单次测速请求允许测的模型数上限，后端限定 1~500 */
   max_models: number
+  /** 测速后自动屏蔽无权限模型（上游明确回 403/404 的从渠道清单移除） */
+  auto_block: boolean
 }
 
 /**

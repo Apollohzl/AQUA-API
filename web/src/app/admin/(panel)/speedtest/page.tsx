@@ -216,7 +216,7 @@ function SpeedResultTable({ entries }: { entries: ReturnType<typeof useSpeedTest
               <td className="px-4 py-2">
                 {entry.status === 'pending' && <Badge tone="off">待测</Badge>}
                 {entry.status === 'running' && <Badge tone="warn">测速中</Badge>}
-                {entry.status === 'done' && entry.result && (entry.result.ok ? <Badge tone="ok">成功</Badge> : <Badge tone="err">失败</Badge>)}
+                {entry.status === 'done' && entry.result && (entry.result.ok ? <Badge tone="ok">成功</Badge> : entry.result.blocked ? <Badge tone="warn">已移除</Badge> : <Badge tone="err">失败</Badge>)}
               </td>
               <td className="px-4 py-2 text-right font-mono tabular-nums text-ink">
                 {entry.result?.ok ? formatLatency(entry.result.ttfb_ms) : '—'}
