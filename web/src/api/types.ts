@@ -264,6 +264,44 @@ export interface UsageStats {
   by_model: UsageByModel[]
 }
 
+/* ── 用量排行榜（GET /api/user/leaderboard）──────────────── */
+
+/** 排行榜中一行的对外表示。 */
+export interface LeaderboardEntry {
+  /** 名次（1 起） */
+  rank: number
+  user_id: number
+  /** 账号 ID（用户名） */
+  username: string
+  /** 窗口内请求总数 */
+  requests: number
+  /** 窗口内 token 消耗总数 */
+  tokens: number
+  /** 综合使用量分数（0~1）= 0.5 × 请求归一 + 0.5 × token 归一 */
+  score: number
+  /** 平均请求耗时（毫秒，仅成功请求） */
+  avg_latency_ms: number
+  /** 窗口内峰值并发请求数（差分扫描估算） */
+  peak_concurrency: number
+  /** 是否当前登录用户（前端据此高亮并标注"我"） */
+  is_me: boolean
+}
+
+/** 单个榜单（付费榜 / 免费榜）的响应。 */
+export interface LeaderboardSection {
+  items: LeaderboardEntry[]
+  /** 当前登录用户在该榜中的名次；未上榜为 0 */
+  my_rank: number
+}
+
+/** GET /api/user/leaderboard?days=30 响应 */
+export interface LeaderboardStats {
+  range_days: number
+  paid: LeaderboardSection
+  free: LeaderboardSection
+  updated_at: number
+}
+
 /** 调用日志对象（契约四节） */
 export interface UsageLog {
   id: number

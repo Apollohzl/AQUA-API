@@ -19,6 +19,7 @@ import type {
   CreateTokenPayload,
   CreateTokenResult,
   FinanceSummary,
+  LeaderboardStats,
   LogQuery,
   MyGroupsResponse,
   OrderQuery,
@@ -78,6 +79,15 @@ export function listMyGroups(): Promise<MyGroupsResponse> {
 /** GET /api/user/usage?days=7：我的用量统计（days 由页面控件决定） */
 export function fetchMyUsage(days: number): Promise<UsageStats> {
   return api.get<UsageStats>('/user/usage', { days })
+}
+
+/**
+ * GET /api/user/leaderboard?days=30：用量排行榜（付费榜 + 免费榜）。
+ *
+ * days：统计窗口天数（默认 30）；管理员传 all=1 可查看完整榜单（不限前 20）。
+ */
+export function fetchLeaderboard(days = 30, all = false): Promise<LeaderboardStats> {
+  return api.get<LeaderboardStats>('/user/leaderboard', all ? { days, all: '1' } : { days })
 }
 
 /** GET /api/user/logs：我的调用日志（分页 + 筛选） */
