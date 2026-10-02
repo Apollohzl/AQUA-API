@@ -52,6 +52,12 @@ type tokenUpdateRequest struct {
 	// 语义与渠道的 key_strategy 一致：留空（字段缺失或空串）表示"不修改"，
 	// 避免前端只提交部分字段（如仅启停）时把已配置的分组意外清空。
 	GroupName *string `json:"group_name"`
+	// 周期预算（迁移 0043）。两者用指针区分"未提交"与"显式清零"：
+	//   - 同时提交 budget_quota>0 与合法 budget_period 即开启预算；
+	//   - budget_quota=0 或 budget_period="" 即关闭预算（任一即可）。
+	// 只提交其一时，另一项保持原值（前端一次提交两者，这里做兜底）。
+	BudgetQuota  *int64  `json:"budget_quota"`
+	BudgetPeriod *string `json:"budget_period"`
 }
 
 // handleMyListTokens 返回当前用户的令牌列表。
@@ -296,6 +302,38 @@ func (s *Server) updateToken(c *gin.Context, ownerID uint64) {
 		} else {
 			return
 		}
+	}
+
+	// 周期预算：先合并"本次提交 + 原值"，再统一校验，最后整体覆盖。
+	// 校验在写库前完成，避免把非法组合（如有上限却无周期）交给仓储导致 500。
+	if req.BudgetQuota != nil || req.BudgetPeriod != nil {
+		quota := token.BudgetQuota
+		if req.BudgetQuota != nil {
+			quota = *req.BudgetQuota
+		}
+		period := token.BudgetPeriod
+		if req.BudgetPeriod != nil {
+			period = strings.TrimSpace(strings.ToLower(*req.BudgetPeriod))
+		}
+		if quota < 0 {
+			writeUserError(c, http.StatusBadRequest, "token.invalid_budget", oai.TypeInvalidRequest, "invalid_budget")
+			return
+		}
+		if period != "" && !model.IsValidBudgetPeriod(period) {
+			writeUserError(c, http.StatusBadRequest, "token.invalid_budget_period", oai.TypeInvalidRequest, "invalid_budget_period")
+			return
+		}
+		if quota > 0 && period == "" {
+			// 有上限却没有周期：语义不完整，拒绝而不是静默"永不触发"。
+			writeUserError(c, http.StatusBadRequest, "token.invalid_budget_period", oai.TypeInvalidRequest, "invalid_budget_period")
+			return
+		}
+		token.BudgetQuota = quota
+		token.BudgetPeriod = period
+		// 预算变更后重置窗口：起点清空（下次请求惰性锚定为新窗口）、基线取当前已用，
+		// 使新预算从"本周期已用 0"开始计算，而不是沿用旧窗口的累计消耗。
+		token.BudgetWindowStart = time.Time{}
+		token.BudgetWindowBase = token.UsedQuota
 	}
 
 	if err := s.deps.Tokens.Update(ctx, token); err != nil {

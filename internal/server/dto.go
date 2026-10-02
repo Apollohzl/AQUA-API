@@ -428,6 +428,18 @@ type tokenDTO struct {
 	UpdatedAt  int64  `json:"updated_at"`
 	LastUsedAt int64  `json:"last_used_at"`
 
+	// ── 周期预算（迁移 0043）────────────────────────────────
+	//
+	// BudgetQuota 是周期内额度上限（内部额度单位，0 = 不限）；
+	// BudgetPeriod 是周期（daily/weekly/monthly，空串 = 不启用）。
+	// BudgetWindowStart 是当前窗口起点，BudgetWindowBase 是窗口起点时的已用额度快照。
+	// 前端据此展示"本周期已用 = used_quota − budget_window_base / 上限"，
+	// 并按 quota_per_yuan 折算成元；四个字段都为 0/空时表示未启用预算。
+	BudgetQuota       int64  `json:"budget_quota"`
+	BudgetPeriod      string `json:"budget_period"`
+	BudgetWindowStart int64  `json:"budget_window_start"`
+	BudgetWindowBase  int64  `json:"budget_window_base"`
+
 	// 以下字段用于管理端展示归属信息（用户门户中为空，前端会自动忽略）。
 	UserID   uint64 `json:"user_id"`
 	Username string `json:"username"`
@@ -467,6 +479,11 @@ func toTokenDTO(t *model.Token, status model.TokenStatus) tokenDTO {
 		UpdatedAt:      unixOrZero(t.UpdatedAt),
 		LastUsedAt:     unixOrZero(t.LastUsedAt),
 		UserID:         t.OwnerID,
+
+		BudgetQuota:       t.BudgetQuota,
+		BudgetPeriod:      t.BudgetPeriod,
+		BudgetWindowStart: unixOrZero(t.BudgetWindowStart),
+		BudgetWindowBase:  t.BudgetWindowBase,
 	}
 }
 

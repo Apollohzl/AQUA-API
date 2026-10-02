@@ -160,6 +160,39 @@ func TestBuildChannelKeyUsage_全免费进价成本为零(t *testing.T) {
 	}
 }
 
+// TestBuildChannelKeyUsage_按次进价成本非零 锁住"按次计费渠道的成本不再是 0"。
+//
+// 背景（docs/17 缺口 1）：核算路径此前只按 token 公式算成本，对"只填了 PerCallPrice"
+// 的进价规则结果恒为 0 —— 不报错，但会让密钥余额永不减少、毛利虚高、重试率也算不出来。
+// 这条测试要求：纯按次规则下，成本 = 每次单价 × 成功请求数，且这些请求计入"已录进价"。
+func TestBuildChannelKeyUsage_按次进价成本非零(t *testing.T) {
+	keys := map[uint64]*model.ChannelKey{
+		1: {ID: 1, ChannelID: 9, Balance: 1_000_000},
+	}
+	usage := []*model.ChannelKeyUsage{
+		{ChannelKeyID: 1, ChannelID: 9, UpstreamModel: "glm-5.3", Requests: 4},
+	}
+	costs := []*model.ChannelModelCost{
+		{ID: 1, ChannelID: 9, Model: "glm-5.3", PerCallPrice: 2200},
+	}
+
+	items := buildChannelKeyUsage(keys, usage, costs)
+	if len(items) != 1 {
+		t.Fatalf("应返回 1 把密钥，实际 %d", len(items))
+	}
+	item := items[0]
+	if item.EstimatedCost != 8800 {
+		t.Fatalf("按次成本应为 2200 × 4 = 8800（不能是 0），实际 %d", item.EstimatedCost)
+	}
+	if item.PricedRequests != 4 || item.UnpricedRequests != 0 {
+		t.Fatalf("按次规则应算作已录进价，实际 priced=%d unpriced=%d",
+			item.PricedRequests, item.UnpricedRequests)
+	}
+	if want := int64(1_000_000 - 8800); item.Remaining != want {
+		t.Fatalf("剩余应为 %d，实际 %d", want, item.Remaining)
+	}
+}
+
 func TestDedupeStrings(t *testing.T) {
 	got := dedupeStrings([]string{"a", "b", "a", "c", "b"})
 	if len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {

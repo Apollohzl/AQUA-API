@@ -33,6 +33,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"gitee.com/xiaosu4610/aqua-api/internal/config"
+	"gitee.com/xiaosu4610/aqua-api/internal/model"
 	"gitee.com/xiaosu4610/aqua-api/internal/server/middleware"
 )
 
@@ -96,6 +97,10 @@ func (s *Server) registerRoutes() {
 	// 叠加「可选登录」：已登录的代理看自己拿货分组的模型与代理价（原价划线对照），
 	// 未登录或不带会话则完全按公开结果返回，与从前逐字一致。
 	api.GET("/models", middleware.SessionAuthOptional(s.deps.Sessions, s.deps.Users), s.handleModelPlaza)
+
+	// 公开定价试算（无需登录）：给定模型/分组/用量，返回折算后的预估费用。
+	// 只读对外的售价规则，不含任何上游成本信息；金额按站点兑换比例换算为元（微元）。
+	api.GET("/models/quote", s.handleModelQuote)
 
 	// 站点公告（无需登录）：前台横幅据此展示当前生效的公告。
 	api.GET("/announcements", s.handlePublicListAnnouncements)
@@ -402,6 +407,12 @@ func (s *Server) registerRoutes() {
 	admin.POST("/orders/:tradeNo/mark-paid", s.handleAdminMarkOrderPaid)
 	admin.POST("/orders/:tradeNo/close", s.handleAdminCloseOrder)
 
+	// 真实成本对账（收入 − 上游成本 = 毛利）：按 分组 / 渠道 / 模型 聚合。
+	//
+	// 收入取自 usage_logs（用户实扣额度），成本按 (渠道, 上游模型名) 匹配进价估算，
+	// 按次计费渠道同样计入（否则面板会显示"全是利润"，与真实账目背离）。
+	admin.GET("/finance/reconciliation", s.handleAdminFinanceReconciliation)
+
 	// ── 模型 API（访问令牌鉴权）──────────────────────────────────
 	//
 	// gin.WrapF 把标准库风格的 http.HandlerFunc 适配为 gin 处理器。
@@ -411,6 +422,18 @@ func (s *Server) registerRoutes() {
 	// 第三个参数（计费组件）用于"请求前额度预扣"：额度不足直接 429，
 	// 避免并发请求全部通过检查后再各自扣费导致超支。
 	v1.Use(middleware.TokenAuth(s.deps.Tokens, s.deps.Users, s.deps.Billing))
+	// 分组 RPM 限流：按"本次请求所属分组"做固定 1 分钟窗口计数（见 middleware.GroupRPMLimiter）。
+	//
+	// 挂在 TokenAuth 之后：分组来自 TokenAuth 写入 request context 的值。
+	// 挂在敏感词过滤之前：超限的请求在读到请求体之前就被拒绝，省掉一次正文扫描。
+	// 默认分组 rpm_limit=0（不限）时"零成本"通过，行为与引入前逐字一致。
+	//
+	// 同一个中间件实例同时挂到 /v1 与 /v1beta：两条协议共用一张"分组 × 分钟"计数表，
+	// 否则用户可以改走另一协议绕过限流，速率上限形同虚设。
+	groupRPM := s.buildGroupRPMMiddleware()
+	if groupRPM != nil {
+		v1.Use(groupRPM)
+	}
 	// 内容合规过滤：在【鉴权之后、转发之前】扫描请求正文，命中敏感词即拒绝。
 	//
 	// 放在鉴权之后的原因：过滤本身要读完整请求体，未鉴权的请求没必要为其付出这个成本；
@@ -447,9 +470,36 @@ func (s *Server) registerRoutes() {
 	// 因此用通配段承接，由适配器自行解析路径。
 	gemini := r.Group("/v1beta")
 	gemini.Use(middleware.TokenAuth(s.deps.Tokens, s.deps.Users, s.deps.Billing))
+	// Gemini 原生协议复用同一个分组 RPM 限流实例（与 /v1 共享计数，避免绕过）。
+	if groupRPM != nil {
+		gemini.Use(groupRPM)
+	}
 	// Gemini 原生协议同样受内容合规过滤约束（同一个组件，同一份词表）。
 	gemini.Use(s.sensitiveFilter.Middleware())
 	gemini.POST("/models/*action", gin.WrapF(s.deps.Relay.ServeGeminiGenerate))
+}
+
+// buildGroupRPMMiddleware 构造「分组 RPM 限流」中间件；未配置分组仓储时返回 nil。
+//
+// registerRoutes 只在启动时执行一次，因此这里构造的实例在整个进程生命周期内唯一，
+// 供 /v1 与 /v1beta 共用（见调用处的说明）。
+func (s *Server) buildGroupRPMMiddleware() gin.HandlerFunc {
+	if s.deps.Groups == nil {
+		return nil
+	}
+	return middleware.NewGroupRPMLimiter(s.deps.Groups, s.defaultGroupForRPM()).Middleware()
+}
+
+// defaultGroupForRPM 返回限流使用的默认分组名（与计费默认分组保持一致）。
+//
+// 必须与计费/路由的默认分组同源，否则不带分组的请求会"按 A 组计费、按 B 组限流"。
+func (s *Server) defaultGroupForRPM() string {
+	if s.deps.Billing != nil {
+		if group := s.deps.Billing.DefaultGroup(); group != "" {
+			return group
+		}
+	}
+	return model.DefaultGroupName
 }
 
 // denyAllAdminRequests 是白名单配置解析失败时的 fail-closed 兜底中间件：拒绝一切后台请求。
