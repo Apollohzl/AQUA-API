@@ -11,6 +11,15 @@ Self-hosted LLM API Gateway · AI Usage Management
 [![Gitee Star](https://gitee.com/xiaosu4610/AQUA-API/badge/star.svg?theme=dark)](https://gitee.com/xiaosu4610/AQUA-API/stargazers)
 [![Gitee Fork](https://gitee.com/xiaosu4610/AQUA-API/badge/fork.svg?theme=dark)](https://gitee.com/xiaosu4610/AQUA-API/members)
 
+![License](assets/badges/license.svg)
+![Go](assets/badges/go.svg)
+![CGO](assets/badges/cgo.svg)
+![Deploy](assets/badges/deploy.svg)
+![Database](assets/badges/database.svg)
+![Web](assets/badges/web.svg)
+![i18n](assets/badges/i18n.svg)
+![Platform](assets/badges/platform.svg)
+
 [简体中文](README.md) · [English](README.en.md) · [Live demo](https://aqua.is3.cc)
 
 </div>
@@ -327,6 +336,20 @@ Every row below is a decision made after being burned by the alternative.
 | Database | SQLite | Embedded and maintenance-free; migrations are per-dialect, leaving an extension seam |
 | Frontend | Next.js 16.3 (static export) + React 19 + Tailwind CSS v4 + TypeScript 5 | Build output `web/dist` is embedded via `go:embed` |
 | Charts | ECharts 5 | Console statistics |
+
+<div align="center">
+
+<img src="assets/icons/go.svg" width="36" title="Go 1.27" alt="Go" />
+<img src="assets/icons/nextdotjs.svg" width="36" title="Next.js 16" alt="Next.js" />
+<img src="assets/icons/react.svg" width="36" title="React 19" alt="React" />
+<img src="assets/icons/typescript.svg" width="36" title="TypeScript 5" alt="TypeScript" />
+<img src="assets/icons/tailwindcss.svg" width="36" title="Tailwind CSS v4" alt="Tailwind CSS" />
+<img src="assets/icons/sqlite.svg" width="36" title="SQLite" alt="SQLite" />
+<img src="assets/icons/docker.svg" width="36" title="Docker" alt="Docker" />
+<img src="assets/icons/nginx.svg" width="36" title="Nginx / Caddy reverse proxy" alt="Nginx" />
+<img src="assets/icons/gitee.svg" width="36" title="Gitee" alt="Gitee" />
+
+</div>
 
 > The frontend uses `output: 'export'` (static). There is **no separate frontend host**: the UI and
 > the API share one origin and one port, so deployment is a single binary.

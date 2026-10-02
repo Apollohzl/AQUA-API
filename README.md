@@ -11,6 +11,15 @@
 [![Gitee Star](https://gitee.com/xiaosu4610/AQUA-API/badge/star.svg?theme=dark)](https://gitee.com/xiaosu4610/AQUA-API/stargazers)
 [![Gitee Fork](https://gitee.com/xiaosu4610/AQUA-API/badge/fork.svg?theme=dark)](https://gitee.com/xiaosu4610/AQUA-API/members)
 
+![License](assets/badges/license.svg)
+![Go](assets/badges/go.svg)
+![CGO](assets/badges/cgo.svg)
+![Deploy](assets/badges/deploy.svg)
+![Database](assets/badges/database.svg)
+![Web](assets/badges/web.svg)
+![i18n](assets/badges/i18n.svg)
+![Platform](assets/badges/platform.svg)
+
 [简体中文](README.md) · [English](README.en.md) · [在线演示](https://aqua.is3.cc)
 
 </div>
@@ -285,6 +294,20 @@ flowchart LR
 | 数据库 | SQLite | 嵌入式、免运维；迁移脚本按方言分目录，已留出扩展接缝 |
 | 前端 | Next.js 16.3（静态导出）+ React 19 + Tailwind CSS v4 + TypeScript 5 | 构建产物 `web/dist` 由 `go:embed` 打进二进制 |
 | 图表 | ECharts 5 | 后台统计图表 |
+
+<div align="center">
+
+<img src="assets/icons/go.svg" width="36" title="Go 1.27" alt="Go" />
+<img src="assets/icons/nextdotjs.svg" width="36" title="Next.js 16" alt="Next.js" />
+<img src="assets/icons/react.svg" width="36" title="React 19" alt="React" />
+<img src="assets/icons/typescript.svg" width="36" title="TypeScript 5" alt="TypeScript" />
+<img src="assets/icons/tailwindcss.svg" width="36" title="Tailwind CSS v4" alt="Tailwind CSS" />
+<img src="assets/icons/sqlite.svg" width="36" title="SQLite" alt="SQLite" />
+<img src="assets/icons/docker.svg" width="36" title="Docker" alt="Docker" />
+<img src="assets/icons/nginx.svg" width="36" title="Nginx / Caddy 反向代理" alt="Nginx" />
+<img src="assets/icons/gitee.svg" width="36" title="Gitee" alt="Gitee" />
+
+</div>
 
 > 前端采用 `output: 'export'` 静态导出，**没有独立的前端托管**：界面与 API 同源同端口，
 > 部署只需一个二进制文件。
