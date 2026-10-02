@@ -50,10 +50,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/xiaosu4610/aqua-api/internal/model"
-	"github.com/xiaosu4610/aqua-api/internal/oai"
-	"github.com/xiaosu4610/aqua-api/internal/payment"
-	"github.com/xiaosu4610/aqua-api/internal/server/middleware"
+	"github.com/LTZY-ACU/aqua-api/internal/model"
+	"github.com/LTZY-ACU/aqua-api/internal/oai"
+	"github.com/LTZY-ACU/aqua-api/internal/payment"
+	"github.com/LTZY-ACU/aqua-api/internal/server/middleware"
 )
 
 // maxNotifyBodyBytes 是支付回调请求体的读取上限。

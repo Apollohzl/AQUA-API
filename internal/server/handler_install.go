@@ -40,10 +40,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/xiaosu4610/aqua-api/internal/crypto"
-	"github.com/xiaosu4610/aqua-api/internal/model"
-	"github.com/xiaosu4610/aqua-api/internal/oai"
-	"github.com/xiaosu4610/aqua-api/internal/version"
+	"github.com/LTZY-ACU/aqua-api/internal/crypto"
+	"github.com/LTZY-ACU/aqua-api/internal/model"
+	"github.com/LTZY-ACU/aqua-api/internal/oai"
+	"github.com/LTZY-ACU/aqua-api/internal/version"
 )
 
 // 安装向导中管理员用户名的默认值与长度上限。

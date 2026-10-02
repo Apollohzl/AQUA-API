@@ -28,10 +28,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/xiaosu4610/aqua-api/internal/config"
-	"github.com/xiaosu4610/aqua-api/internal/crypto"
-	"github.com/xiaosu4610/aqua-api/internal/model"
-	"github.com/xiaosu4610/aqua-api/internal/store"
+	"github.com/LTZY-ACU/aqua-api/internal/config"
+	"github.com/LTZY-ACU/aqua-api/internal/crypto"
+	"github.com/LTZY-ACU/aqua-api/internal/model"
+	"github.com/LTZY-ACU/aqua-api/internal/store"
 )
 
 // channelStrategyFixture 汇总调度相关接口测试所需的仓储与管理员会话。

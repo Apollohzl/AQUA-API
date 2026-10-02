@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xiaosu4610/aqua-api/internal/model"
-	"github.com/xiaosu4610/aqua-api/internal/reqctx"
+	"github.com/LTZY-ACU/aqua-api/internal/model"
+	"github.com/LTZY-ACU/aqua-api/internal/reqctx"
 )
 
 // fakePriceRepo 是内存版计价规则仓储。

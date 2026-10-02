@@ -41,7 +41,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/LTZY-ACU/aqua-api/internal/model"
 )
 
 // 上游响应体的读取上限。

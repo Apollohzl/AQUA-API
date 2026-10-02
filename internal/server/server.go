@@ -33,15 +33,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/xiaosu4610/aqua-api/internal/broadcast"
-	"github.com/xiaosu4610/aqua-api/internal/config"
-	"github.com/xiaosu4610/aqua-api/internal/corpus"
-	"github.com/xiaosu4610/aqua-api/internal/mailer"
-	"github.com/xiaosu4610/aqua-api/internal/model"
-	"github.com/xiaosu4610/aqua-api/internal/payment"
-	"github.com/xiaosu4610/aqua-api/internal/relay"
-	"github.com/xiaosu4610/aqua-api/internal/server/middleware"
-	"github.com/xiaosu4610/aqua-api/internal/store"
+	"github.com/LTZY-ACU/aqua-api/internal/broadcast"
+	"github.com/LTZY-ACU/aqua-api/internal/config"
+	"github.com/LTZY-ACU/aqua-api/internal/corpus"
+	"github.com/LTZY-ACU/aqua-api/internal/mailer"
+	"github.com/LTZY-ACU/aqua-api/internal/model"
+	"github.com/LTZY-ACU/aqua-api/internal/payment"
+	"github.com/LTZY-ACU/aqua-api/internal/relay"
+	"github.com/LTZY-ACU/aqua-api/internal/server/middleware"
+	"github.com/LTZY-ACU/aqua-api/internal/store"
 )
 
 // Deps 汇总服务运行所需的外部依赖，由 main 装配后注入。

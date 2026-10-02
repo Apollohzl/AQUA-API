@@ -1,4 +1,4 @@
-module github.com/xiaosu4610/aqua-api
+module github.com/LTZY-ACU/aqua-api
 
 go 1.27
 

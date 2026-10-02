@@ -41,8 +41,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/xiaosu4610/aqua-api/internal/model"
-	"github.com/xiaosu4610/aqua-api/internal/oai"
+	"github.com/LTZY-ACU/aqua-api/internal/model"
+	"github.com/LTZY-ACU/aqua-api/internal/oai"
 )
 
 // modelPriceDTO 是计价规则的对外表示。

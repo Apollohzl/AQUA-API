@@ -47,7 +47,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/LTZY-ACU/aqua-api/internal/model"
 )
 
 // 任务链路的错误定义。

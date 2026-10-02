@@ -27,10 +27,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/xiaosu4610/aqua-api/internal/config"
-	"github.com/xiaosu4610/aqua-api/internal/crypto"
-	"github.com/xiaosu4610/aqua-api/internal/relay"
-	"github.com/xiaosu4610/aqua-api/internal/store"
+	"github.com/LTZY-ACU/aqua-api/internal/config"
+	"github.com/LTZY-ACU/aqua-api/internal/crypto"
+	"github.com/LTZY-ACU/aqua-api/internal/relay"
+	"github.com/LTZY-ACU/aqua-api/internal/store"
 )
 
 // testEncryptionKey 是测试用密钥材料（非真实密钥）。

@@ -28,8 +28,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xiaosu4610/aqua-api/internal/crypto"
-	"github.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/LTZY-ACU/aqua-api/internal/crypto"
+	"github.com/LTZY-ACU/aqua-api/internal/model"
 )
 
 // channelKeyColumns 集中定义查询列，顺序必须与 scanChannelKey 的扫描顺序严格一致。

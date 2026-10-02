@@ -40,10 +40,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/xiaosu4610/aqua-api/internal/model"
-	"github.com/xiaosu4610/aqua-api/internal/oai"
-	"github.com/xiaosu4610/aqua-api/internal/relay"
-	"github.com/xiaosu4610/aqua-api/internal/server/middleware"
+	"github.com/LTZY-ACU/aqua-api/internal/model"
+	"github.com/LTZY-ACU/aqua-api/internal/oai"
+	"github.com/LTZY-ACU/aqua-api/internal/relay"
+	"github.com/LTZY-ACU/aqua-api/internal/server/middleware"
 )
 
 // taskRequestReservedKeys 是任务请求体中"由网关自己解释"的字段。
