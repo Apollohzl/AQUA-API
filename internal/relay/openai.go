@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +39,65 @@ import (
 	"gitee.com/xiaosu4610/aqua-api/internal/model"
 	"gitee.com/xiaosu4610/aqua-api/internal/oai"
 )
+
+// 路由可观测响应头（B9）。
+//
+// 意图（Why）：网关把请求"转发到了哪条渠道、试了几次、发给上游的模型名是什么"
+// 是排障与成本核对的一手信息。此前这些只存在于本站日志，使用者/接入方无从得知，
+// 出现"同一个模型两次结果不同"或"账单与预期不符"时无法自助定位。把它们以响应头
+// 回传，既不影响协议兼容（自定义头对客户端透明），又让"路由决策"可被观测。
+//
+// 取值约定：
+//   - X-Routed-Via     实际命中的渠道（渠道名 + #渠道ID），如 "OpenAI 官方 (#3)"；
+//   - X-Fallback-Attempts 为得到本次结果共尝试了几次（含换密钥/换渠道的重试）；
+//   - X-Upstream       实际发给上游的模型名（经渠道级模型映射改写后的名字）。
+const (
+	headerRoutedVia        = "X-Routed-Via"
+	headerFallbackAttempts = "X-Fallback-Attempts"
+	headerUpstreamModel    = "X-Upstream"
+)
+
+// routingHeaders 是一次成功响应的路由可观测信息集合。
+//
+// 抽成结构体而不是三个裸参数在各处传：这三个值来自同一处（forwardChat），
+// 且必须在 WriteHeader 之前一次性写入——散传容易漏掉某条回写路径（直通 / 适配器）。
+type routingHeaders struct {
+	// channelID 是实际命中渠道的主键；0 表示未知（不应出现）。
+	channelID uint64
+	// channelName 是渠道显示名，可为空（为空时只回传 ID）。
+	channelName string
+	// attempts 是本次请求的总尝试次数（1 表示一次成功，无重试）。
+	attempts int
+	// upstream 是实际发给上游的模型名（无映射时等于对外模型名）。
+	upstream string
+}
+
+// apply 把路由可观测头写入响应头。
+//
+// 调用约束（重要）：必须在 w.WriteHeader 之前调用，否则头已随状态行发出、无法再生效。
+// 采用 Set 而非 Add，保证与上游可能同名的头不会叠加出多值。
+func (h routingHeaders) apply(dst http.Header) {
+	if dst == nil {
+		return
+	}
+	if h.channelID != 0 || strings.TrimSpace(h.channelName) != "" {
+		via := strings.TrimSpace(h.channelName)
+		if h.channelID != 0 {
+			if via == "" {
+				via = "#" + strconv.FormatUint(h.channelID, 10)
+			} else {
+				via = via + " (#" + strconv.FormatUint(h.channelID, 10) + ")"
+			}
+		}
+		dst.Set(headerRoutedVia, via)
+	}
+	if h.attempts > 0 {
+		dst.Set(headerFallbackAttempts, strconv.Itoa(h.attempts))
+	}
+	if model := strings.TrimSpace(h.upstream); model != "" {
+		dst.Set(headerUpstreamModel, model)
+	}
+}
 
 // copyBufferBytes 是上游响应的拷贝缓冲区大小。
 //
@@ -207,6 +267,11 @@ type forwardTarget struct {
 	hasSpareKey bool
 	// hasSpareChannel 表示除本渠道外还有其他候选渠道，可用于渠道级重试。
 	hasSpareChannel bool
+	// attempt 是本次尝试在本请求内的序号（从 1 开始）。
+	//
+	// 用途：作为 X-Fallback-Attempts 回传给下游——"为得到结果一共试了几次"
+	// 是判断"渠道是否在频繁故障"的直观信号，比翻日志更即时。
+	attempt int
 }
 
 // forwardWithFallback 按路由策略选择渠道与密钥并转发，失败时按失败类型重试。
@@ -338,7 +403,9 @@ retryLoop:
 			credentialScope{Group: group, Model: modelName})
 		if !ok {
 			// 该渠道当前没有可用凭据（池内全部被禁用、冷却中、限速用满或额度用尽）：
-			// 直接放弃这个渠道，避免白白消耗一次尝试预算。
+			// 直接放弃这个渠道，避免白白消耗一次尝试预算。C4：若整条渠道的凭据余额
+			// 已全部耗尽，这里会留下明确日志，便于站长识别"渠道级预算熔断"。
+			r.logChannelSkipped(keyCtx, ch, modelName)
 			excludedChannels[ch.ID] = struct{}{}
 			continue
 		}
@@ -354,6 +421,7 @@ retryLoop:
 			keyMeta:         cred.Meta,
 			hasSpareKey:     retryPolicy.Enabled && hasSpareKey,
 			hasSpareChannel: retryPolicy.Enabled && r.hasOtherChannel(candidates, excludedChannels, ch.ID),
+			attempt:         keyAttempts,
 		}
 
 		// 占用在途计数（供 least_in_flight 使用）：与下方的 releaseKey 成对，
@@ -1041,9 +1109,19 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 	recorder := corpus.RecorderFrom(req.Context())
 	tee := responseTee(sniffer, recorder)
 
+	// 路由可观测头（B9）：在写状态行之前统一构造并注入，覆盖直通与适配器两条回写路径。
+	// 必须在 WriteHeader 之前——状态行一旦发出，响应头无法再追加。
+	rh := routingHeaders{
+		channelID:   ch.ID,
+		channelName: ch.Name,
+		attempts:    target.attempt,
+		upstream:    upstreamModel,
+	}
+
 	if adapter == nil {
 		// 直通路径：入站与上游同为 OpenAI 协议，成功响应原样透传。
 		copyResponseHeaders(w.Header(), resp.Header)
+		rh.apply(w.Header())
 		w.WriteHeader(resp.StatusCode)
 		if !flushCopy(w, resp.Body, tee) && recorder != nil {
 			// 只转发了一部分（客户端断开 / 上游中断）：如实标注，
@@ -1053,7 +1131,7 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 	} else {
 		// 转换路径：由适配器把上游的 OpenAI 响应改写为下游协议格式。
 		// 注意此时响应头由 writeAdapted 决定（各协议的 Content-Type 不同）。
-		r.writeAdapted(w, req, resp, adapter, sniffer, body)
+		r.writeAdapted(w, req, resp, adapter, sniffer, body, rh)
 	}
 
 	// 成功响应：清零该密钥的连续失败计数（"连续失败"语义要求成功即重置）

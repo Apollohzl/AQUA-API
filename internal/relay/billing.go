@@ -47,6 +47,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -250,30 +251,46 @@ func (b *Billing) resolveGroup(group string) string {
 	return b.group
 }
 
-// rulesFor 返回指定分组的最新价格与倍率缓存；缓存过期时重新加载该分组。
+// rulesFor 返回指定分组（+可选渠道）的最新价格与倍率缓存；缓存过期时重新加载。
 //
 // 注意 group 已按 resolveGroup 归一化，因此缓存键必然是"真实分组名"，
 // 不会出现 "a" 与 " a" 被当成两个分组各缓存一份的浪费。
-func (b *Billing) rulesFor(ctx context.Context, group string) *cachedRules {
+//
+// channelID 参与缓存键：渠道专用价只对特定渠道生效，若只按分组缓存，
+// 渠道 A 的专用价会被渠道 B 的请求读到（串价）。channelID 为 ChannelScopeAll
+// 时退化为纯分组缓存，与引入渠道专用价之前完全一致。
+func (b *Billing) rulesFor(ctx context.Context, group string, channelID uint64) *cachedRules {
 	group = b.resolveGroup(group)
+	cacheKey := rulesCacheKey(group, channelID)
 
 	b.mu.RLock()
-	cached := b.rules[group]
+	cached := b.rules[cacheKey]
 	fresh := cached != nil && time.Since(cached.cachedAt) < priceCacheTTL
 	b.mu.RUnlock()
 
 	if fresh {
 		return cached
 	}
-	return b.refresh(ctx, group, cached)
+	return b.refresh(ctx, group, channelID, cached)
 }
 
-// refresh 重新加载【指定分组】的价格规则与倍率，并写回该分组的缓存槽。
+// rulesCacheKey 生成价格缓存的键。
+//
+// 渠道 0（不限渠道）直接用分组名做键，保证"普通分组"的缓存行为与旧实现逐字一致；
+// 渠道专用价用 "分组\x00渠道ID" 做键，用 NUL 分隔避免与分组名拼接歧义。
+func rulesCacheKey(group string, channelID uint64) string {
+	if channelID == model.ChannelScopeAll {
+		return group
+	}
+	return group + "\x00" + strconv.FormatUint(channelID, 10)
+}
+
+// refresh 重新加载【指定分组 + 渠道】的价格规则与倍率，并写回对应的缓存槽。
 //
 // 容错（保持旧实现语义）：读库失败时不覆盖旧值——宁可短时间沿用旧价，
 // 也不要因为一次读库失败就把该分组的调用变成"未定价"（不扣费），那等于白送。
-// 由于缓存按分组隔离，某个分组读库失败只影响它自己，不会污染其他分组。
-func (b *Billing) refresh(ctx context.Context, group string, old *cachedRules) *cachedRules {
+// 由于缓存按分组（+渠道）隔离，某个分组的读库失败只影响它自己，不会污染其他分组。
+func (b *Billing) refresh(ctx context.Context, group string, channelID uint64, old *cachedRules) *cachedRules {
 	rules := &cachedRules{ratio: ratioScale}
 	if old != nil {
 		// 先继承旧快照：读库失败时据此沿用，而不是清成空。
@@ -282,7 +299,8 @@ func (b *Billing) refresh(ctx context.Context, group string, old *cachedRules) *
 	}
 
 	if b.prices != nil {
-		prices, err := b.prices.List(ctx, group, true)
+		// ListForPricing 返回「分组默认价 + 本渠道专用价」，由匹配函数决定优先级。
+		prices, err := b.prices.ListForPricing(ctx, group, channelID, true)
 		if err != nil {
 			slog.Warn("读取计价规则失败，本次沿用旧缓存", "error", err, "group", group)
 		} else {
@@ -320,33 +338,45 @@ func (b *Billing) refresh(ctx context.Context, group string, old *cachedRules) *
 	if b.rules == nil {
 		b.rules = make(map[string]*cachedRules)
 	}
-	b.rules[group] = rules
+	b.rules[rulesCacheKey(group, channelID)] = rules
 	b.mu.Unlock()
 
 	return rules
 }
 
 // ratioFor 返回指定分组的计费倍率（百分比）；空分组用 Billing 的默认分组。
+//
+// 倍率是"分组级"属性，与具体渠道无关，因此这里固定按 ChannelScopeAll 取缓存。
 func (b *Billing) ratioFor(ctx context.Context, group string) int64 {
-	ratio := b.rulesFor(ctx, group).ratio
+	ratio := b.rulesFor(ctx, group, model.ChannelScopeAll).ratio
 	if ratio <= 0 {
 		return ratioScale
 	}
 	return ratio
 }
 
-// priceFor 返回适用于该模型的最优计价规则；无匹配时返回 nil（表示未定价）。
-//
-// 缓存实现：按【分组】整表缓存（仅启用），过期后重新加载该分组。
-// 选择"整表"而不是"按模型缓存"，是因为规则数极少而模型名组合无限，
-// 按模型缓存反而会让缓存无限膨胀。
+// priceFor 返回适用于该模型的最优计价规则（不含渠道专用价）；无匹配时返回 nil。
 //
 // 参数 group 为空表示使用 Billing 的默认分组（见 resolveGroup）。
+// 转发计费请用 priceForChannel，它会把"本次实际命中的渠道"纳入取值优先级。
 func (b *Billing) priceFor(ctx context.Context, group, modelName string) *model.ModelPrice {
+	return b.priceForChannel(ctx, group, modelName, model.ChannelScopeAll)
+}
+
+// priceForChannel 返回"该渠道 + 该分组"下适用于该模型的最优计价规则。
+//
+// 取值优先级（见 model.MatchModelPriceForChannel）：
+//  1. 渠道专用价（ChannelID == channelID）优先；
+//  2. 无专用价时回退分组默认价（ChannelID == ChannelScopeAll）。
+//
+// 缓存实现：按【分组 + 渠道】整表缓存（仅启用），过期后重新加载该键。
+// 选择"整表"而不是"按模型缓存"，是因为规则数极少而模型名组合无限，
+// 按模型缓存反而会让缓存无限膨胀。
+func (b *Billing) priceForChannel(ctx context.Context, group, modelName string, channelID uint64) *model.ModelPrice {
 	if b == nil || b.prices == nil {
 		return nil
 	}
-	return model.MatchModelPrice(b.rulesFor(ctx, group).prices, modelName)
+	return model.MatchModelPriceForChannel(b.rulesFor(ctx, group, channelID).prices, modelName, channelID)
 }
 
 // PriceInfo 返回某模型在某分组下命中的计价规则（供后台展示与试算使用）。
@@ -356,8 +386,32 @@ func (b *Billing) priceFor(ctx context.Context, group, modelName string) *model.
 //
 // 导出它的原因：计费链路与后台展示必须用同一份规则匹配结果，
 // 后台若自行遍历价格表，就可能出现"试算说免费、实际在扣费"的不一致。
+//
+// 本方法按分组默认价（不含渠道专用价）匹配，供"分组层面"的展示使用；
+// 需要看到某渠道专用价时用 PriceInfoForChannel。
 func (b *Billing) PriceInfo(ctx context.Context, group, modelName string) *model.ModelPrice {
 	return b.priceFor(ctx, group, modelName)
+}
+
+// PriceInfoForChannel 与 PriceInfo 同源，但把"渠道专用价优先"纳入匹配。
+func (b *Billing) PriceInfoForChannel(ctx context.Context, group, modelName string, channelID uint64) *model.ModelPrice {
+	return b.priceForChannel(ctx, group, modelName, channelID)
+}
+
+// PriceVersionForChannel 返回本次调用命中的计价规则版本标识（供账目快照）。
+//
+// 与 ChargeForChannel / QuoteForChannel 取价同源（渠道专用价优先、分组默认价兜底），
+// 保证"账目里记的版本"就是"实际用来扣费的那条规则"，改价后旧账仍可按旧价复算。
+// 未定价或未注入价格仓储时返回空串（日志里的版本列留空，不影响其它字段）。
+func (b *Billing) PriceVersionForChannel(ctx context.Context, group, modelName string, channelID uint64) string {
+	if b == nil {
+		return ""
+	}
+	price := b.priceForChannel(ctx, group, modelName, channelID)
+	if price == nil {
+		return ""
+	}
+	return model.PriceSnapshotVersion(price.ID, price.UpdatedAt)
 }
 
 // Quote 计算该次用量应扣的额度（只算不扣）。
@@ -366,9 +420,21 @@ func (b *Billing) PriceInfo(ctx context.Context, group, modelName string) *model
 // 这部分按规则的 CachePrice 计费，未配置时自动回退输入价，因此老配置账目不变。
 //
 // 参数 group 为空表示使用 Billing 的默认分组；扣费请用 Charge。
+//
+// 本方法按分组默认价计价（不含渠道专用价）。转发链路已知实际渠道时，
+// 应改用 QuoteForChannel 以享受"渠道专用价优先"的取值。
 func (b *Billing) Quote(ctx context.Context, group, modelName string,
 	promptTokens, completionTokens, cachedTokens int64) int64 {
-	price := b.priceFor(ctx, group, modelName)
+	return b.QuoteForChannel(ctx, group, modelName,
+		promptTokens, completionTokens, cachedTokens, model.ChannelScopeAll)
+}
+
+// QuoteForChannel 与 Quote 同口径，但按"该渠道专用价优先、默认价兜底"取价。
+//
+// channelID 为 0（未指定渠道）时退化为 Quote 的行为。
+func (b *Billing) QuoteForChannel(ctx context.Context, group, modelName string,
+	promptTokens, completionTokens, cachedTokens int64, channelID uint64) int64 {
+	price := b.priceForChannel(ctx, group, modelName, channelID)
 	if price == nil || price.IsFree() {
 		// 两种情况都算 0，但语义不同：
 		//   未定价（nil）= 站长还没给这个模型定价，日志里 quota 记 0 属于"待办"；
@@ -608,13 +674,27 @@ func (b *Billing) RetryRatioSnapshots() []RetryRatioSnapshot {
 // 只扣令牌会让用户通过"多建几个令牌"绕过总量限制。
 //
 // 参数 group 为空表示使用 Billing 的默认分组。
+//
+// 本方法按分组默认价计价（不含渠道专用价）。转发链路已知实际渠道时，
+// 应改用 ChargeForChannel 以享受"渠道专用价优先"的取值。
 func (b *Billing) Charge(ctx context.Context, group string, userID, tokenID uint64, modelName string,
 	promptTokens, completionTokens, cachedTokens int64) int64 {
+	return b.ChargeForChannel(ctx, group, userID, tokenID, modelName,
+		promptTokens, completionTokens, cachedTokens, model.ChannelScopeAll)
+}
+
+// ChargeForChannel 与 Charge 完全同口径，但按"该渠道专用价优先、默认价兜底"取价。
+//
+// 为什么单开一个方法而不改 Charge 的签名：Charge 被鉴权/结算等既有调用点使用，
+// 改签名会牵动所有调用点；新增方法则让"有渠道上下文"的转发链路按需选择，
+// 其余调用点行为逐字不变（channelID 为 0 时二者等价）。
+func (b *Billing) ChargeForChannel(ctx context.Context, group string, userID, tokenID uint64, modelName string,
+	promptTokens, completionTokens, cachedTokens int64, channelID uint64) int64 {
 	if b == nil {
 		return 0
 	}
 
-	price := b.priceFor(ctx, group, modelName)
+	price := b.priceForChannel(ctx, group, modelName, channelID)
 	if price == nil {
 		// 未定价：不扣费但照常记录日志（quota=0）。
 		// 这样站长能从日志看出"哪些模型还没定价"，而不是被静默拦住。

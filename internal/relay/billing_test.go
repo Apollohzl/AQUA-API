@@ -31,6 +31,28 @@ func (f *fakePriceRepo) GetByID(context.Context, uint64) (*model.ModelPrice, err
 func (f *fakePriceRepo) List(_ context.Context, group string, enabledOnly bool) ([]*model.ModelPrice, error) {
 	result := make([]*model.ModelPrice, 0, len(f.prices))
 	for _, price := range f.prices {
+		// 与真实仓储一致：List 只返回分组默认价（channel_id = 0）。
+		if price.ChannelID != model.ChannelScopeAll {
+			continue
+		}
+		if group != "" && price.Group != group {
+			continue
+		}
+		if enabledOnly && !price.Enabled {
+			continue
+		}
+		result = append(result, price)
+	}
+	return result, nil
+}
+
+// ListForPricing 与真实仓储一致：返回分组默认价 + 指定渠道的专用价。
+func (f *fakePriceRepo) ListForPricing(_ context.Context, group string, channelID uint64, enabledOnly bool) ([]*model.ModelPrice, error) {
+	result := make([]*model.ModelPrice, 0, len(f.prices))
+	for _, price := range f.prices {
+		if price.ChannelID != model.ChannelScopeAll && price.ChannelID != channelID {
+			continue
+		}
 		if group != "" && price.Group != group {
 			continue
 		}

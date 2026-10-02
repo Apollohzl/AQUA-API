@@ -40,6 +40,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"net/http"
 	"strings"
@@ -54,6 +55,55 @@ import (
 //
 // 调用方据此决定"是否换渠道"：它不是致命错误，而是"这个渠道暂时用不了"。
 var ErrNoUsableCredential = errors.New("relay: 渠道没有可用凭据（禁用/冷却/限速）")
+
+// channelKeysAllBalanceExhausted 判断渠道的凭据池是否"全部因余额耗尽而不可调度"。
+//
+// 用途（C4 渠道级预算熔断）：当整条渠道的每把凭据余额都已耗尽时，
+// 该渠道在本次请求里注定选不出凭据；路由应主动跳过它并留下可解释的日志，
+// 而不是选到之后才发现无凭可用、白白消耗一次尝试预算。
+//
+// 注意：本判定是"渠道级"的粗粒度判断，不作为选择凭据的唯一依据——
+// 细粒度的可用性仍由 keyRunnable（状态/冷却/限速/余额/额度窗口）负责。
+//
+// 返回 false 的几种情形都表示"不构成渠道级熔断"：
+//   - 未注入凭据仓储（退化为单密钥模式）；
+//   - 渠道没有凭据池（历史数据，用渠道自带单密钥）；
+//   - 池为空或读取失败；
+//   - 存在至少一把余额未耗尽的凭据。
+func (r *Relay) channelKeysAllBalanceExhausted(ctx context.Context, channelID uint64) bool {
+	if r.keys == nil || channelID == 0 {
+		return false
+	}
+	pool, err := r.keys.ListUsable(ctx, channelID)
+	if err != nil || len(pool) == 0 {
+		return false
+	}
+	for _, k := range pool {
+		if !k.BalanceExhausted() {
+			return false
+		}
+	}
+	return true
+}
+
+// logChannelSkipped 记录"渠道被跳过"的原因，让站长能区分两类常见噪音：
+//   - 凭据余额全部耗尽（渠道级预算熔断，需补录余额或接入新账号）；
+//   - 凭据因禁用/冷却/限速/额度窗口而暂时不可用（无需人工干预，会自动恢复）。
+//
+// 之所以在跳过分支才做这次额外查询：跳过是低频事件，
+// 而把"原因"写清楚能把"渠道为何整体不可用"从猜测变成事实。
+func (r *Relay) logChannelSkipped(ctx context.Context, ch *model.Channel, modelName string) {
+	if ch == nil {
+		return
+	}
+	if r.channelKeysAllBalanceExhausted(ctx, ch.ID) {
+		slog.Warn("渠道凭据余额全部耗尽，已跳过该渠道",
+			"channel_id", ch.ID, "channel", ch.Name, "model", modelName)
+		return
+	}
+	slog.Warn("渠道暂无可调度凭据（禁用/冷却/限速/额度窗口满），已跳过该渠道",
+		"channel_id", ch.ID, "channel", ch.Name, "model", modelName)
+}
 
 const (
 	// credentialSessionHeader 是会话标识的请求头。
