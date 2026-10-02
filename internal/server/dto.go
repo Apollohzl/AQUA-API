@@ -234,13 +234,30 @@ type channelKeyDTO struct {
 	//   - quota_known / quota_exhausted 是给前端直接判定的派生布尔，
 	//     避免前端自己实现"-1 表示未探测""重置时间已过视为已恢复"这两条规则
 	//     （规则只在领域层维护一处，见 model.ChannelKey.QuotaExhausted）。
-	AccountID        string `json:"account_id"`
-	PlanType         string `json:"plan_type"`
+	AccountID string `json:"account_id"`
+	PlanType  string `json:"plan_type"`
+	// Email 是订阅账号邮箱（来自凭据的账号标识），用于界面辨认"这是谁的账号"；
+	// 空串表示未知或是 API Key 型凭据。
+	Email            string `json:"email"`
 	QuotaUsedPercent int    `json:"quota_used_percent"`
 	QuotaResetAt     int64  `json:"quota_reset_at"`
 	QuotaCheckedAt   int64  `json:"quota_checked_at"`
 	QuotaKnown       bool   `json:"quota_known"`
 	QuotaExhausted   bool   `json:"quota_exhausted"`
+
+	// 额度窗口的次窗口与窗口时长（迁移 0048）。
+	//
+	//   - quota_secondary_used_percent / quota_secondary_reset_at 是次窗口（每周）快照，
+	//     -1 / 0 表示未探测；它【不】参与调度判定，仅用于界面预警；
+	//   - quota_primary_window_seconds / quota_secondary_window_seconds 是窗口时长（秒，0=未知），
+	//     供前端把窗口标注成"5 小时 / 每周"而不是硬编码文案；
+	//   - quota_secondary_known 与 quota_known 同构（-1 语义只在领域层维护一处），
+	//     前端据此显示"未查询"而不是把 -1 画成 0%。
+	QuotaSecondaryUsedPercent   int   `json:"quota_secondary_used_percent"`
+	QuotaSecondaryResetAt       int64 `json:"quota_secondary_reset_at"`
+	QuotaPrimaryWindowSeconds   int   `json:"quota_primary_window_seconds"`
+	QuotaSecondaryWindowSeconds int   `json:"quota_secondary_window_seconds"`
+	QuotaSecondaryKnown         bool  `json:"quota_secondary_known"`
 
 	// 路由分叉（迁移 0038）：本凭据可服务的分组与模型。
 	//
@@ -291,11 +308,18 @@ func toChannelKeyDTO(key *model.ChannelKey, reveal bool) channelKeyDTO {
 
 		AccountID:        key.AccountID,
 		PlanType:         key.PlanType,
+		Email:            key.AccountHint,
 		QuotaUsedPercent: key.QuotaUsedPercent,
 		QuotaResetAt:     unixOrZero(key.QuotaResetAt),
 		QuotaCheckedAt:   unixOrZero(key.QuotaCheckedAt),
 		QuotaKnown:       key.QuotaKnown(),
 		QuotaExhausted:   key.QuotaExhausted(time.Now()),
+
+		QuotaSecondaryUsedPercent:   key.QuotaSecondaryUsedPercent,
+		QuotaSecondaryResetAt:       unixOrZero(key.QuotaSecondaryResetAt),
+		QuotaPrimaryWindowSeconds:   key.QuotaPrimaryWindowSeconds,
+		QuotaSecondaryWindowSeconds: key.QuotaSecondaryWindowSeconds,
+		QuotaSecondaryKnown:         key.QuotaSecondaryKnown(),
 
 		// 路由分叉：恒以非 nil 数组下发（空数组 = 不限），前端不必判空。
 		Groups: retryRulesStringsOrEmpty(key.Groups),

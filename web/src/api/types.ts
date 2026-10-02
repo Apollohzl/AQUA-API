@@ -531,16 +531,33 @@ export interface ChannelKey {
   account_id: string
   /** 套餐标识（plus / pro / team…）；空串表示未知 */
   plan_type: string
-  /** 上游额度窗口已用百分比；-1 表示尚未探测 */
+  /** 订阅账号邮箱（空串 = 未知或非订阅账号）；用于界面辨认"这是谁的账号" */
+  email: string
+  /** 上游【主】额度窗口（5 小时）已用百分比；-1 表示尚未探测 */
   quota_used_percent: number
-  /** 额度窗口重置时间的 Unix 秒（0 = 未知） */
+  /** 主窗口重置时间的 Unix 秒（0 = 未知） */
   quota_reset_at: number
   /** 上次探测额度的 Unix 秒（0 = 从未探测） */
   quota_checked_at: number
-  /** 是否已探测过额度（后端派生，避免前端自己实现 -1 的规则） */
+  /** 是否已探测过主窗口额度（后端派生，避免前端自己实现 -1 的规则） */
   quota_known: boolean
-  /** 额度是否已用满（后端已考虑"重置时间已过视为已恢复"） */
+  /** 主窗口额度是否已用满（后端已考虑"重置时间已过视为已恢复"） */
   quota_exhausted: boolean
+  /**
+   * 以下为【次】额度窗口（每周）字段（迁移 0048）。
+   *
+   * 与主窗口同构：-1 表示尚未探测。次窗口【不】参与调度判定，
+   * 仅用于界面预警（避免"没怎么用账号却突然全满"）。
+   */
+  quota_secondary_used_percent: number
+  /** 次窗口重置时间的 Unix 秒（0 = 未知） */
+  quota_secondary_reset_at: number
+  /** 是否已探测过次窗口额度（后端派生） */
+  quota_secondary_known: boolean
+  /** 主窗口时长（秒；0 = 上游未提供，前端退回默认文案） */
+  quota_primary_window_seconds: number
+  /** 次窗口时长（秒；0 = 上游未提供） */
+  quota_secondary_window_seconds: number
   /**
    * 路由分叉（迁移 0038）：本凭据可服务的分组与模型。
    *
@@ -555,11 +572,20 @@ export interface ChannelKey {
 export interface ChannelKeyQuota {
   key_id: number
   plan_type: string
-  /** 已用百分比；-1 表示上游未提供额度窗口 */
-  used_percent: number
-  /** 重置时间（Unix 秒，0 = 未知） */
-  reset_at: number
+  /** 订阅账号邮箱（空串 = 上游未提供） */
   email: string
+  /** 主窗口（5 小时）已用百分比；-1 表示上游未提供额度窗口 */
+  used_percent: number
+  /** 主窗口重置时间（Unix 秒，0 = 未知） */
+  reset_at: number
+  /** 主窗口时长（秒；0 = 未知） */
+  primary_window_seconds: number
+  /** 次窗口（每周）已用百分比；-1 表示上游未提供 */
+  secondary_used_percent: number
+  /** 次窗口重置时间（Unix 秒，0 = 未知） */
+  secondary_reset_at: number
+  /** 次窗口时长（秒；0 = 未知） */
+  secondary_window_seconds: number
   /** 上游是否明确告知"当前已触顶" */
   limit_reached: boolean
   /** 后端给出的说明文案（成功/未提供额度窗口），前端直接展示 */

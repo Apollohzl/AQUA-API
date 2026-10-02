@@ -935,12 +935,24 @@ type channelKeyUpdateRequest struct {
 // channelKeyQuotaResponse 是额度探测的响应。
 //
 // 为什么同时回传"已落库的字段"：前端据此立即刷新那一行，不必再整表拉一次。
+//
+// 主 / 次两个窗口都回传：上游对订阅账号给出"5 小时"与"每周"两条独立的额度线，
+// 前端要同时渲染两条进度条，只给主窗口会让周额度的预警信息在探测后凭空消失。
 type channelKeyQuotaResponse struct {
-	KeyID        uint64 `json:"key_id"`
-	PlanType     string `json:"plan_type"`
-	UsedPercent  int    `json:"used_percent"`
-	ResetAt      int64  `json:"reset_at"`
-	Email        string `json:"email"`
+	KeyID    uint64 `json:"key_id"`
+	PlanType string `json:"plan_type"`
+	Email    string `json:"email"`
+
+	// 主窗口（5 小时）。
+	UsedPercent          int   `json:"used_percent"`
+	ResetAt              int64 `json:"reset_at"`
+	PrimaryWindowSeconds int   `json:"primary_window_seconds"`
+
+	// 次窗口（每周）；used_percent 为 -1 表示上游未提供。
+	SecondaryUsedPercent   int   `json:"secondary_used_percent"`
+	SecondaryResetAt       int64 `json:"secondary_reset_at"`
+	SecondaryWindowSeconds int   `json:"secondary_window_seconds"`
+
 	LimitReached bool   `json:"limit_reached"`
 	Note         string `json:"note"`
 }
@@ -999,15 +1011,28 @@ func (s *Server) handleProbeChannelKeyQuota(c *gin.Context) {
 	quota, err := s.deps.Relay.QueryCodexQuota(ctx, channel, target)
 	if err != nil {
 		// 探测失败要落"未知"而不是保留旧值：旧快照会继续影响调度判断，
-		// 让一个可能已经恢复的账号被继续跳过。
-		_ = s.deps.ChannelKeys.UpdateQuota(ctx, keyID, model.QuotaUsedPercentUnknown, time.Time{}, time.Now())
+		// 让一个可能已经恢复的账号被继续跳过。主 / 次两个窗口一起置回未知，
+		// 避免界面出现"主窗口未查询、次窗口还是旧百分比"的矛盾状态。
+		_ = s.deps.ChannelKeys.UpdateQuota(ctx, keyID, model.QuotaWindows{
+			PrimaryUsedPercent:   model.QuotaUsedPercentUnknown,
+			SecondaryUsedPercent: model.QuotaUsedPercentUnknown,
+			CheckedAt:            time.Now(),
+		})
 		oai.WriteError(c.Writer, http.StatusBadGateway, err.Error(),
 			oai.TypeServer, "quota_probe_failed")
 		return
 	}
 
 	now := time.Now()
-	if err := s.deps.ChannelKeys.UpdateQuota(ctx, keyID, quota.UsedPercent, quota.ResetAt, now); err != nil {
+	if err := s.deps.ChannelKeys.UpdateQuota(ctx, keyID, model.QuotaWindows{
+		PrimaryUsedPercent:     quota.UsedPercent,
+		PrimaryResetAt:         quota.ResetAt,
+		PrimaryWindowSeconds:   quota.PrimaryWindowSeconds,
+		SecondaryUsedPercent:   quota.SecondaryUsedPercent,
+		SecondaryResetAt:       quota.SecondaryResetAt,
+		SecondaryWindowSeconds: quota.SecondaryWindowSeconds,
+		CheckedAt:              now,
+	}); err != nil {
 		s.respondInternalError(c, "保存额度快照失败")
 		return
 	}
@@ -1022,11 +1047,18 @@ func (s *Server) handleProbeChannelKeyQuota(c *gin.Context) {
 		note = "上游未返回额度窗口（该账号可能不按窗口计费，或套餐不支持查询）"
 	}
 	c.JSON(http.StatusOK, channelKeyQuotaResponse{
-		KeyID:        keyID,
-		PlanType:     quota.PlanType,
-		UsedPercent:  quota.UsedPercent,
-		ResetAt:      unixOrZeroTime(quota.ResetAt),
-		Email:        quota.Email,
+		KeyID:    keyID,
+		PlanType: quota.PlanType,
+		Email:    quota.Email,
+
+		UsedPercent:          quota.UsedPercent,
+		ResetAt:              unixOrZeroTime(quota.ResetAt),
+		PrimaryWindowSeconds: quota.PrimaryWindowSeconds,
+
+		SecondaryUsedPercent:   quota.SecondaryUsedPercent,
+		SecondaryResetAt:       unixOrZeroTime(quota.SecondaryResetAt),
+		SecondaryWindowSeconds: quota.SecondaryWindowSeconds,
+
 		LimitReached: quota.LimitReached,
 		Note:         note,
 	})
