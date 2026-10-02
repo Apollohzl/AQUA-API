@@ -26,6 +26,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -66,92 +67,142 @@ type dashboardSectionCount struct {
 }
 
 // handleDashboard 返回仪表盘汇总数据。
+//
+// 性能说明：仪表盘共 7 组相互独立的统计查询。串行执行时总耗时是
+// 各组查询耗时的累加；并行执行后总耗时≈最慢一组（通常是用量聚合）。
+// 对自托管网关（单进程 + SQLite）而言，并行是压低仪表盘 P95 的关键手段。
+//
+// 并发正确性（重要）：用 WaitGroup 等待全部 goroutine 结束，而不是
+// "阻塞读某个 channel"——若某查询失败，其结果 channel 永远不会收到值，
+// 主协程会永久挂起（整体页超时）。错误统一收集，取首个即可。
 func (s *Server) handleDashboard(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// 渠道
-	channelCounts, err := s.deps.Channels.StatusCounts(ctx)
-	if err != nil {
-		s.respondInternalError(c, "统计渠道失败")
-		return
+	type dashboardData struct {
+		channels     dashboardSectionCount
+		tokens       dashboardSectionCount
+		userTotal    int
+		userActive   int
+		todaySummary *model.UsageSummary
+		series       []model.DailyUsage
+		topModels    []model.ModelUsage
 	}
-	channels := dashboardSectionCount{
-		Total:        channelCounts[model.ChannelStatusEnabled] + channelCounts[model.ChannelStatusDisabled] + channelCounts[model.ChannelStatusAutoDisabled],
-		Enabled:      channelCounts[model.ChannelStatusEnabled],
-		AutoDisabled: channelCounts[model.ChannelStatusAutoDisabled],
-	}
+	var (
+		data dashboardData
+		errs []error
+		wg   sync.WaitGroup
+	)
 
-	// 令牌
-	tokenCounts, err := s.deps.Tokens.StatusCounts(ctx)
-	if err != nil {
-		s.respondInternalError(c, "统计令牌失败")
-		return
-	}
-	tokens := dashboardSectionCount{
-		Total:   tokenCounts[model.TokenStatusEnabled] + tokenCounts[model.TokenStatusDisabled] + tokenCounts[model.TokenStatusExpired] + tokenCounts[model.TokenStatusExhausted],
-		Enabled: tokenCounts[model.TokenStatusEnabled],
-	}
+	// 第 1 路：渠道 / 令牌 / 用户计数（三组互不依赖，合一并发）
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 
-	// 用户
-	enabledStatus := model.UserStatusEnabled
-	userTotal, err := s.deps.Users.Count(ctx, model.UserQuery{})
-	if err != nil {
-		s.respondInternalError(c, "统计用户失败")
-		return
-	}
-	userActive, err := s.deps.Users.Count(ctx, model.UserQuery{Status: &enabledStatus})
-	if err != nil {
-		s.respondInternalError(c, "统计用户失败")
-		return
-	}
+		channelCounts, err := s.deps.Channels.StatusCounts(ctx)
+		if err != nil {
+			errs = append(errs, err)
+			return
+		}
+		data.channels = dashboardSectionCount{
+			Total:        channelCounts[model.ChannelStatusEnabled] + channelCounts[model.ChannelStatusDisabled] + channelCounts[model.ChannelStatusAutoDisabled],
+			Enabled:      channelCounts[model.ChannelStatusEnabled],
+			AutoDisabled: channelCounts[model.ChannelStatusAutoDisabled],
+		}
 
-	// 今日用量与近 7 天趋势
+		tokenCounts, err := s.deps.Tokens.StatusCounts(ctx)
+		if err != nil {
+			errs = append(errs, err)
+			return
+		}
+		data.tokens = dashboardSectionCount{
+			Total:   tokenCounts[model.TokenStatusEnabled] + tokenCounts[model.TokenStatusDisabled] + tokenCounts[model.TokenStatusExpired] + tokenCounts[model.TokenStatusExhausted],
+			Enabled: tokenCounts[model.TokenStatusEnabled],
+		}
+
+		enabledStatus := model.UserStatusEnabled
+		userTotal, err := s.deps.Users.Count(ctx, model.UserQuery{})
+		if err != nil {
+			errs = append(errs, err)
+			return
+		}
+		userActive, err := s.deps.Users.Count(ctx, model.UserQuery{Status: &enabledStatus})
+		if err != nil {
+			errs = append(errs, err)
+			return
+		}
+		data.userTotal = userTotal
+		data.userActive = userActive
+	}()
+
+	// 今日用量
 	todayStart := truncateToDay(time.Now())
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		summary, err := s.deps.UsageLogs.Summary(ctx, model.UsageLogQuery{Since: &todayStart})
+		if err != nil {
+			errs = append(errs, err)
+			return
+		}
+		data.todaySummary = summary
+	}()
+
+	// 近 7 天趋势 + Top 模型
 	recentSince := todayStart.AddDate(0, 0, -6)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		series, err := s.deps.UsageLogs.DailySeries(ctx, model.UsageLogQuery{Since: &recentSince})
+		if err != nil {
+			errs = append(errs, err)
+			return
+		}
+		data.series = series
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		topModels, err := s.deps.UsageLogs.TopModels(ctx, model.UsageLogQuery{Since: &recentSince}, 5)
+		if err != nil {
+			errs = append(errs, err)
+			return
+		}
+		data.topModels = topModels
+	}()
 
-	todaySummary, err := s.deps.UsageLogs.Summary(ctx, model.UsageLogQuery{Since: &todayStart})
-	if err != nil {
-		s.respondInternalError(c, "统计今日用量失败")
-		return
-	}
+	wg.Wait()
 
-	series, err := s.deps.UsageLogs.DailySeries(ctx, model.UsageLogQuery{Since: &recentSince})
-	if err != nil {
-		s.respondInternalError(c, "统计用量趋势失败")
-		return
-	}
-
-	topModels, err := s.deps.UsageLogs.TopModels(ctx, model.UsageLogQuery{Since: &recentSince}, 5)
-	if err != nil {
-		s.respondInternalError(c, "统计模型排行失败")
+	// 任一查询失败即整体失败（数据不完整会渲染成"缺块"的仪表盘，误导性强）
+	if len(errs) > 0 {
+		s.respondInternalError(c, "统计数据失败")
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"channels": channels,
+		"channels": data.channels,
 		"users": gin.H{
-			"total":  userTotal,
-			"active": userActive,
+			"total":  data.userTotal,
+			"active": data.userActive,
 		},
-		"tokens": tokens,
+		"tokens": data.tokens,
 		"today": gin.H{
-			"requests":     todaySummary.Requests,
-			"tokens":       todaySummary.Tokens,
-			"quota":        todaySummary.Quota,
-			"success_rate": todaySummary.SuccessRate(),
+			"requests":     data.todaySummary.Requests,
+			"tokens":       data.todaySummary.Tokens,
+			"quota":        data.todaySummary.Quota,
+			"success_rate": data.todaySummary.SuccessRate(),
 			// 用量细节：把总量拆成输入/输出/缓存/推理，站长才能回答
 			// "成本涨在输入还是输出""缓存到底省了多少"。
-			"prompt_tokens":         todaySummary.PromptTokens,
-			"completion_tokens":     todaySummary.CompletionTokens,
-			"cached_tokens":         todaySummary.CachedTokens,
-			"reasoning_tokens":      todaySummary.ReasoningTokens,
-			"cache_hit_rate":        todaySummary.CacheHitRate(),
-			"avg_latency_ms":        todaySummary.AvgLatencyMS(),
-			"avg_first_token_ms":    todaySummary.AvgFirstTokenMS(),
-			"avg_tokens_per_second": todaySummary.AvgTokensPerSecond(),
+			"prompt_tokens":         data.todaySummary.PromptTokens,
+			"completion_tokens":     data.todaySummary.CompletionTokens,
+			"cached_tokens":         data.todaySummary.CachedTokens,
+			"reasoning_tokens":      data.todaySummary.ReasoningTokens,
+			"cache_hit_rate":        data.todaySummary.CacheHitRate(),
+			"avg_latency_ms":        data.todaySummary.AvgLatencyMS(),
+			"avg_first_token_ms":    data.todaySummary.AvgFirstTokenMS(),
+			"avg_tokens_per_second": data.todaySummary.AvgTokensPerSecond(),
 		},
-		"recent_days": toDailyUsageDTOList(series),
-		"top_models":  toModelUsageDTOList(topModels),
+		"recent_days": toDailyUsageDTOList(data.series),
+		"top_models":  toModelUsageDTOList(data.topModels),
 	})
 }
 
@@ -2816,7 +2867,17 @@ func (s *Server) respondInternalError(c *gin.Context, _ string) {
 }
 
 // loadUsernames 一次性加载"用户 ID → 用户名"映射，用于避免日志/列表的 N+1 查询。
+//
+// 性能说明：日志列表每次请求都会调用，而用户名几乎是静态数据，
+// 结果按 30 秒 TTL 缓存（见 Server.nameCache）——把"每页日志 =
+// 一次全用户扫描"降为"每 30 秒一次全用户扫描"；改名后至多滞后 30 秒。
 func (s *Server) loadUsernames(ctx context.Context) map[uint64]string {
+	const cacheKey = "names:users"
+
+	if cached, ok := s.nameCache.Get(cacheKey); ok {
+		return cached.(map[uint64]string)
+	}
+
 	result := make(map[uint64]string)
 	users, err := s.deps.Users.List(ctx, model.UserQuery{Limit: nameLookupLimit})
 	if err != nil {
@@ -2826,11 +2887,22 @@ func (s *Server) loadUsernames(ctx context.Context) map[uint64]string {
 	for _, user := range users {
 		result[user.ID] = user.Username
 	}
+
+	s.nameCache.Set(cacheKey, result)
 	return result
 }
 
 // loadChannelNames 一次性加载"渠道 ID → 渠道名"映射。
+//
+// 与 loadUsernames 同理：渠道名静态，结果按 TTL 缓存，
+// 避免日志列表每次请求都全表扫描渠道表。
 func (s *Server) loadChannelNames(ctx context.Context) map[uint64]string {
+	const cacheKey = "names:channels"
+
+	if cached, ok := s.nameCache.Get(cacheKey); ok {
+		return cached.(map[uint64]string)
+	}
+
 	result := make(map[uint64]string)
 	channels, err := s.deps.Channels.List(ctx, model.ChannelQuery{Limit: nameLookupLimit})
 	if err != nil {
@@ -2839,6 +2911,8 @@ func (s *Server) loadChannelNames(ctx context.Context) map[uint64]string {
 	for _, channel := range channels {
 		result[channel.ID] = channel.Name
 	}
+
+	s.nameCache.Set(cacheKey, result)
 	return result
 }
 
