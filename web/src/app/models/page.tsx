@@ -191,6 +191,12 @@ function AgentBanner({ viewer }: { viewer: PlazaViewer }) {
         基础价 × {viewer.ratio}% = {discountLabel(viewer.ratio)}
       </span>
       <span className="text-[12px] text-ink-3">下方价格已按你的拿货折扣结算，与原价并排展示。</span>
+      {/* 分组 RPM 提示：仅当后端下发且 >0 时显示（0/缺失 = 不限速，不显示） */}
+      {viewer.rpm_limit && viewer.rpm_limit > 0 ? (
+        <span className="w-full text-[12px] text-ink-3">
+          该分组每分钟请求上限：{viewer.rpm_limit} 次/分钟
+        </span>
+      ) : null}
     </div>
   )
 }

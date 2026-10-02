@@ -20,9 +20,11 @@
 'use client'
 
 import type { PlazaModel, PlazaPrice, PlazaViewer } from '@/api/types'
+import { AppIcon } from '@/components/AppIcon'
 import { Badge } from '@/components/ui/Display'
 import { Modal } from '@/components/ui/Modal'
 import { formatDiscountLabel, formatYuanPerCall, formatYuanPerMillion } from '@/utils/money'
+import { formatDateTime } from '@/utils/format'
 import { useSite } from '@/lib/site/site-context'
 
 import { ModelPriceCalculator } from './ModelPriceCalculator'
@@ -85,7 +87,13 @@ export function ModelDetailModal({ model, viewer, onClose }: Props) {
 
       <div className="mt-4">
         {/* key=模型名：切换模型时重置试算器的分组与用量输入 */}
-        <ModelPriceCalculator key={model.model} prices={model.prices} viewer={viewer} quotaPerYuan={quotaPerYuan} />
+        <ModelPriceCalculator
+          key={model.model}
+          prices={model.prices}
+          viewer={viewer}
+          quotaPerYuan={quotaPerYuan}
+          modelName={model.model}
+        />
       </div>
     </Modal>
   )
@@ -118,11 +126,20 @@ function PriceRow({
   const kind = billingKindOf(price)
   // 代理视图下 prices[].ratio 恒为 100（价格已折算过），真正生效的折扣在 viewer.ratio
   const ratio = viewer ? viewer.ratio : price.ratio
+  // 价格生效时间：优先后端下发的 effective_at，其次 updated_at；两者都缺失则不展示
+  // （后端 plazaPriceDTO 目前未下发，需补字段后此处自动生效）
+  const effectiveAt = price.effective_at || price.updated_at || 0
   return (
     <tr>
       <td className="px-3 py-2.5 align-top">
         <div className="break-all font-mono text-ink-2">{price.group}</div>
         <div className="mt-0.5 font-mono text-[11px] text-ink-3">{ratioLabel(ratio)}</div>
+        {effectiveAt > 0 && (
+          <div className="mt-0.5 flex items-center gap-1 text-[11px] text-ink-3">
+            <AppIcon name="clock" size={11} />
+            价格生效 {formatDateTime(effectiveAt)}
+          </div>
+        )}
       </td>
       <td className="px-3 py-2.5 align-top">
         <Badge tone={kind === 'free' ? 'info' : 'brand'}>{billingKindLabel(kind)}</Badge>

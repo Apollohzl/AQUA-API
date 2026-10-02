@@ -167,6 +167,23 @@ export interface AccessToken {
    * 声明为可选是为了兼容早期后端响应，展示时按「空 = 默认」处理。
    */
   group_name?: string
+  /**
+   * ── 周期预算（滚动窗口，迁移 0043）────────────────────────
+   *
+   * 与 remain_quota（总量墙）并列的「周期墙」：每个周期内最多消耗这么多额度，
+   * 周期一到自动翻篇。本窗口已消耗 = used_quota − budget_window_base（负数按 0）。
+   *
+   * 注意：后端 tokenDTO 当前【未下发】这几个字段（见 internal/server/dto.go），
+   * 故声明为可选：有则展示周期预算进度，无则显示"未设置"（后端补字段后自动生效）。
+   */
+  /** 周期预算额度（站内单位）；0/缺失表示未启用预算 */
+  budget_quota?: number
+  /** 预算周期：daily / weekly / monthly；空/缺失表示未启用 */
+  budget_period?: string
+  /** 当前预算窗口起点（Unix 秒；0 = 尚未锚定） */
+  budget_window_start?: number
+  /** 窗口起点时刻的 used_quota 快照（窗口基线） */
+  budget_window_base?: number
   /** 契约未定义：管理端列表可能带出的归属信息，前端有则展示 */
   user_id?: number
   username?: string
@@ -1294,6 +1311,16 @@ export interface PlazaPrice {
   is_free: boolean
   /** 该分组的计费倍率（百分比） */
   ratio: number
+  /**
+   * 价格生效时间 / 最近更新时间（Unix 秒；0 或缺失表示后端未下发）。
+   *
+   * 为什么需要它：价格随时会被站长调整，用户比对账单时最常问"这个价是什么时候的"。
+   * 后端 plazaPriceDTO 当前【未下发】该字段（见 internal/server/handler_group.go），
+   * 因此这里声明为可选：有则展示，无则不显示（后端补 updated_at/effective_at 后自动生效）。
+   */
+  updated_at?: number
+  /** 价格生效时间（若后端区分"更新时间"与"生效时间"则优先用它） */
+  effective_at?: number
 }
 
 /** 模型广场里的一张模型卡片 */
@@ -1322,6 +1349,8 @@ export interface PlazaGroup {
   ratio: number
   description: string
   model_count: number
+  /** 该分组的每分钟请求上限（0/缺失 = 不限速）；后端 plazaGroupDTO 暂未下发 */
+  rpm_limit?: number
 }
 
 /** 广场查看者身份（仅代理登录后下发） */
@@ -1332,6 +1361,8 @@ export interface PlazaViewer {
   label: string
   /** 分组计费倍率（百分比，60 = 拿货 6 折） */
   ratio: number
+  /** 该分组的每分钟请求上限（0/缺失 = 不限速）；后端 plazaViewerDTO 暂未下发 */
+  rpm_limit?: number
 }
 
 /** GET /api/models 响应 */
@@ -1341,6 +1372,42 @@ export interface ModelPlaza {
   total: number
   /** 代理视图标识：存在即表示"这次是代理在看广场" */
   viewer?: PlazaViewer
+}
+
+/**
+ * GET /api/models/quote 响应（公开费用试算）。
+ *
+ * ⚠️ 契约见 docs/23 C5。该接口在后端【尚未落地】（当前仅有管理员接口
+ * /api/admin/prices/quote）；此处先按约定契约声明，UI 优先调用、失败回退本地计算。
+ *
+ * 单位假设（需与后端核对）：price/cost 类字段按站内「额度」下发（与全站记账口径一致），
+ * 展示时由前端按 quota_per_yuan 折算成人民币；currency 仅作标注。
+ */
+export interface ModelQuoteResult {
+  model: string
+  group: string
+  /** 生效的计费方式 */
+  billing_mode: 'free' | 'token' | 'per_call'
+  /** 币种标注（如 CNY）；单位换算仍以额度为准 */
+  currency: string
+  /** 该分组的计费倍率（百分比） */
+  ratio: number
+  /** 折扣文案（后端翻译，如「6折」/「原价」） */
+  discount_label: string
+  /** 输入单价（每 1M token 额度） */
+  input_unit_price: number
+  /** 输出单价（每 1M token 额度） */
+  output_unit_price: number
+  /** 缓存命中单价（每 1M token 额度） */
+  cached_unit_price: number
+  /** 输入部分费用（额度） */
+  input_cost: number
+  /** 输出部分费用（额度） */
+  output_cost: number
+  /** 缓存命中部分费用（额度） */
+  cached_cost: number
+  /** 合计费用（额度） */
+  total_cost: number
 }
 
 /* ─────────────────── 门户可选分组（GET /api/user/groups） ─────────────────── */
@@ -1365,6 +1432,13 @@ export interface PortalGroup {
   paid_amount_cents: number
   /** 这是当前用户自己的代理拿货档（由管理员指派）；前端据此单独标注 */
   is_agent?: boolean
+  /**
+   * 该分组的每分钟请求上限（0/缺失 = 不限速）。
+   *
+   * 后端 portalGroupDTO 当前【未下发】该字段（见 internal/server/handler_group.go），
+   * 故切记判空：>0 才展示提示，0/缺失一律不显示。
+   */
+  rpm_limit?: number
 }
 
 /** GET /api/user/groups 响应 */

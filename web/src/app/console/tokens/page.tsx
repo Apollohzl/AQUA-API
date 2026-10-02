@@ -140,6 +140,11 @@ export default function ConsoleTokensPage() {
       align: 'right',
       render: (row) => <span className="text-ink-2">{formatYuanFromQuota(row.used_quota, quotaPerYuan)}</span>,
     },
+    {
+      title: '周期预算',
+      width: 'w-48',
+      render: (row) => <BudgetCell token={row} quotaPerYuan={quotaPerYuan} />,
+    },
     { title: '到期', render: (row) => <span className="text-ink-2">{row.expires_at ? formatDateTime(row.expires_at) : '永不过期'}</span> },
     {
       title: '操作',
@@ -288,6 +293,16 @@ function CreateTokenModal({
             ))}
           </Select>
         </Field>
+        {/* 分组 RPM 提示：仅当该分组下发且 >0 时显示（0/缺失 = 不限速，不显示） */}
+        {(() => {
+          const selected = groups.find((g) => g.name === group)
+          if (!selected?.rpm_limit || selected.rpm_limit <= 0) return null
+          return (
+            <p className="-mt-2 text-[12px] text-ink-3">
+              该分组每分钟请求上限：{selected.rpm_limit} 次/分钟
+            </p>
+          )
+        })()}
         <Field label="有效期" help="0 表示永不过期">
           <Input type="number" min={0} value={expiresInDays} onChange={(e) => setExpiresInDays(Number(e.target.value))} />
         </Field>
@@ -311,5 +326,54 @@ function CreateTokenModal({
         <Button variant="primary" loading={loading} onClick={handleSubmit}>创建</Button>
       </div>
     </Modal>
+  )
+}
+
+/* ── 周期预算展示（只读）──────────────────────────────────
+ *
+ * 后端令牌模型已有 budget_quota / budget_period / budget_window_start /
+ * budget_window_base 四个字段（见 internal/model/token.go，迁移 0043）。
+ * 本窗口已消耗 = used_quota − budget_window_base（负数按 0），与后端口径一致。
+ *
+ * 注意：tokenDTO 目前尚未把这四个字段下发给前端，因此此处对每行做判空：
+ * 后端补齐后本列会自动显示进度；未配置/未下发时显示「未设置」。
+ */
+
+/** 预算周期标识 → 中文短标签 */
+function budgetPeriodLabel(period: string): string {
+  switch (period) {
+    case 'daily':
+      return '每日'
+    case 'weekly':
+      return '每周'
+    case 'monthly':
+      return '每月'
+    default:
+      return period
+  }
+}
+
+/** 单行的周期预算：进度条 + 本周期已用/上限 */
+function BudgetCell({ token, quotaPerYuan }: { token: AccessToken; quotaPerYuan: number }) {
+  const limit = token.budget_quota ?? 0
+  const period = token.budget_period ?? ''
+  if (limit <= 0 || !period) {
+    return <span className="text-[12px] text-ink-3">未设置</span>
+  }
+  const used = Math.max(0, (token.used_quota ?? 0) - (token.budget_window_base ?? 0))
+  const pct = Math.min(100, Math.round((used / limit) * 100))
+  const tone = pct >= 100 ? 'bg-err' : pct >= 80 ? 'bg-warn' : 'bg-brand'
+  return (
+    <div className="min-w-[8rem]">
+      <div className="flex items-center justify-between gap-2 text-[11px] text-ink-3">
+        <span>{budgetPeriodLabel(period)}</span>
+        <span className="font-mono tabular-nums">
+          {formatYuanFromQuota(used, quotaPerYuan)} / {formatYuanFromQuota(limit, quotaPerYuan)}
+        </span>
+      </div>
+      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-ink/10">
+        <div className={`h-full rounded-full ${tone}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
   )
 }

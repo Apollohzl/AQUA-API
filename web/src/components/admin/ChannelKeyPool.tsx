@@ -7,19 +7,22 @@
  *   让"什么时候会恢复"一眼可见。
  *
  * 流转（Flow）：
- *   渠道编辑弹层 → <ChannelKeyPool channelId={id}/> → listChannelKeys(id) → GET /api/admin/channels/:id/keys
+ *   渠道编辑弹层 → <ChannelKeyPool channelId={id}/> → listChannelKeysWithBalance(id)
+ *   → GET /api/admin/channels/:id/keys
  *   字段全部来自后端 channelKeyDTO（见 internal/server/dto.go），前端不臆造字段名。
  *
  * 扩展（Extend）：
  *   - 冷却结束的"自动恢复可用"由本地 setInterval 每秒重算剩余时间实现，无需后端推送；
  *   - 需要"RPM 使用率"时后端需补「当前分钟已用请求数」字段（当前 DTO 只有 rpm_limit 上限
- *     与 in_flight 在途数，二者单位不同，不能相除当使用率）；本组件暂以「限速 / 在途」展示。
+ *     与 in_flight 在途数，二者单位不同，不能相除当使用率）；本组件暂以「限速 / 在途」展示；
+ *   - 「余额/额度耗尽」判定直接用后端下发的派生布尔 balance_exhausted / quota_exhausted，
+ *     规则只在领域层维护一处，前端不再自行实现阈值。
  */
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
 
-import { listChannelKeys } from '@/api/admin'
+import { listChannelKeysWithBalance, type ChannelKeyWithBalance } from '@/api/channel'
 import { KEY_STATUS_AUTO_REMOVED, KEY_STATUS_ENABLED, type ChannelKey } from '@/api/types'
 import { Badge, EmptyState, SkeletonRows } from '@/components/ui/Display'
 import { Button } from '@/components/ui/Button'
@@ -53,7 +56,7 @@ function KeyStatusBadge({ item }: { item: ChannelKey }) {
 }
 
 export function ChannelKeyPool({ channelId }: ChannelKeyPoolProps) {
-  const [items, setItems] = useState<ChannelKey[] | null>(null)
+  const [items, setItems] = useState<ChannelKeyWithBalance[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   // 每秒刷新的"当前时刻"，用于把 cooldown_until 换算成倒计时并在到期后自动变回可用
@@ -63,7 +66,7 @@ export function ChannelKeyPool({ channelId }: ChannelKeyPoolProps) {
     setLoading(true)
     setError(null)
     try {
-      const data = await listChannelKeys(channelId)
+      const data = await listChannelKeysWithBalance(channelId)
       setItems(data.items)
     } catch (err) {
       setError(err instanceof Error ? err.message : '密钥池加载失败')
@@ -83,6 +86,11 @@ export function ChannelKeyPool({ channelId }: ChannelKeyPoolProps) {
   }, [])
 
   const coolingCount = items?.filter((k) => cooldownSeconds(k.cooldown_until, now) > 0).length ?? 0
+  // 被「余额/额度耗尽」排除的凭据数：余额（API Key）与订阅额度（OAuth）任一耗尽即计入，
+  // 判定直接用后端派生布尔，避免前端另行实现阈值规则。
+  const exhaustedCount = items?.filter((k) => k.balance_exhausted || k.quota_exhausted).length ?? 0
+  // 整池都耗尽：调度会跳过全部凭据，渠道事实上不可用——必须让站长一眼看到并去补录。
+  const allExhausted = (items?.length ?? 0) > 0 && exhaustedCount === items?.length
 
   const header = (
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -94,7 +102,13 @@ export function ChannelKeyPool({ channelId }: ChannelKeyPoolProps) {
           </span>
         )}
       </div>
-      {coolingCount > 0 && <Badge tone="warn">{coolingCount} 把冷却中</Badge>}
+      {allExhausted ? (
+        <Badge tone="err">全部凭据余额/额度耗尽</Badge>
+      ) : exhaustedCount > 0 ? (
+        <Badge tone="warn">{exhaustedCount} 把余额/额度耗尽</Badge>
+      ) : coolingCount > 0 ? (
+        <Badge tone="warn">{coolingCount} 把冷却中</Badge>
+      ) : null}
     </div>
   )
 
@@ -135,6 +149,12 @@ export function ChannelKeyPool({ channelId }: ChannelKeyPoolProps) {
   return (
     <div className="space-y-3">
       {header}
+      {allExhausted && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-err/40 bg-err/10 px-3 py-2 text-[13px] text-err">
+          <Badge tone="err">余额耗尽</Badge>
+          <span>该渠道全部 {items?.length} 把凭据的余额/额度已耗尽，调度会跳过整池。请补录余额或更换凭据。</span>
+        </div>
+      )}
       <div className="overflow-hidden rounded-md border border-line">
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-[13px]">
@@ -166,7 +186,12 @@ export function ChannelKeyPool({ channelId }: ChannelKeyPoolProps) {
                       </div>
                     </td>
                     <td className="px-3 py-2">
-                      <KeyStatusBadge item={item} />
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <KeyStatusBadge item={item} />
+                        {(item.balance_exhausted || item.quota_exhausted) && (
+                          <Badge tone="err">{item.balance_exhausted ? '余额耗尽' : '额度耗尽'}</Badge>
+                        )}
+                      </div>
                     </td>
                     <td className="px-3 py-2">
                       {cooling ? (

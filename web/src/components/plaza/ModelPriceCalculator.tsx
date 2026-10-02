@@ -5,21 +5,27 @@
  *   试算器把这段换算替用户算掉，并在结果里回显「命中了哪条规则、什么倍率」，
  *   让"为什么是这个价"变得可解释；代理视图下还顺带印证了拿货折扣。
  *
- *   本组件【本地计算】（见 pricing.ts 的 localQuote），与后端计费链路同口径；
- *   不调用 /api/admin/prices/quote —— 那是管理员接口，公开广场无权访问。
+ *   试算分两级：
+ *     1) 优先调用【公开试算接口】GET /api/models/quote（契约见 docs/23 C5），
+ *        由服务端用与计费链路同一套价格规则计算，口径最权威；
+ *     2) 接口不可用（尚未落地 / 404 / 网络失败 / 按次计费无对应入参）时，
+ *        回退到本地换算（见 pricing.ts 的 localQuote），保证功能永远可用。
  *
  * 流转（Flow）：
- *   PlazaPrice[]（当前模型的逐分组价格）
- *     → 选择分组 → 输入用量 → localQuote() → formatYuanFromQuota() → 展示
+ *   PlazaPrice[]（当前模型的逐分组价格）+ modelName
+ *     → 选择分组 → 输入用量 → [调用 /api/models/quote 成功 ? 服务端结果 : localQuote()]
+ *     → formatYuanFromQuota() → 展示
  *
  * 扩展（Extend）：
- *   新增输入维度（如缓存命中率）时：在 QuoteInput 加字段 + 加输入框 + 传入 localQuote。
+ *   新增输入维度（如缓存命中率）时：在 QuoteInput 加字段 + 加输入框 + 传入 localQuote，
+ *   并在下方 effect 里同步给 fetchModelQuote 的查询参数。
  */
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { PlazaPrice, PlazaViewer } from '@/api/types'
+import { fetchModelQuote } from '@/api/site'
+import type { ModelQuoteResult, PlazaPrice, PlazaViewer } from '@/api/types'
 import { AppIcon } from '@/components/AppIcon'
 import { Badge } from '@/components/ui/Display'
 import { Field, Input, Select } from '@/components/ui/Form'
@@ -41,6 +47,8 @@ interface Props {
   prices: PlazaPrice[]
   viewer?: PlazaViewer
   quotaPerYuan: number
+  /** 模型名：调用公开试算接口 /api/models/quote 时需要；缺省时只用本地回退 */
+  modelName?: string
 }
 
 /** 输入框文本 → 非负数值（空串/非法按 0） */
@@ -49,7 +57,10 @@ function toNum(text: string): number {
   return Number.isFinite(v) && v > 0 ? v : 0
 }
 
-export function ModelPriceCalculator({ prices, viewer, quotaPerYuan }: Props) {
+/** 服务端试算的防抖时长（毫秒）：避免每敲一个数字就打一次接口 */
+const QUOTE_DEBOUNCE_MS = 350
+
+export function ModelPriceCalculator({ prices, viewer, quotaPerYuan, modelName }: Props) {
   const [group, setGroup] = useState(prices[0]?.group ?? '')
   const [prompt, setPrompt] = useState('1000')
   const [completion, setCompletion] = useState('1000')
@@ -70,6 +81,48 @@ export function ModelPriceCalculator({ prices, viewer, quotaPerYuan }: Props) {
     return localQuote(price, input)
   }, [price, prompt, completion, cached, count])
 
+  // ── 服务端试算（可选增强，失败静默回退本地）────────────────
+  const [serverQuote, setServerQuote] = useState<ModelQuoteResult | null>(null)
+  // 请求序号：丢弃乱序返回的过期响应，避免"快速输入时旧结果覆盖新结果"
+  const requestSeq = useRef(0)
+
+  useEffect(() => {
+    const seq = ++requestSeq.current
+    // 仅按量计费才调接口：按次/免费没有对应的入参（接口无 count），直接用本地结果。
+    if (!modelName || kind !== 'token') {
+      setServerQuote(null)
+      return
+    }
+    const promptN = toNum(prompt)
+    const completionN = toNum(completion)
+    if (promptN <= 0 && completionN <= 0) {
+      setServerQuote(null)
+      return
+    }
+    const timer = setTimeout(() => {
+      void fetchModelQuote({
+        model: modelName,
+        group: group || undefined,
+        prompt_tokens: promptN,
+        completion_tokens: completionN,
+        cached_tokens: toNum(cached),
+      })
+        .then((res) => {
+          if (seq === requestSeq.current) setServerQuote(res)
+        })
+        .catch(() => {
+          // 接口未落地 / 失败 → 回退本地（静默，不算错误）
+          if (seq === requestSeq.current) setServerQuote(null)
+        })
+    }, QUOTE_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [modelName, kind, group, prompt, completion, cached])
+
+  /** 展示口径：优先服务端结果，否则本地回退结果（null = 未定价） */
+  const isFree = serverQuote ? serverQuote.billing_mode === 'free' : Boolean(result?.isFree)
+  const quota = serverQuote ? serverQuote.total_cost : (result?.quota ?? null)
+  const usingServer = serverQuote !== null
+
   if (prices.length === 0) {
     return (
       <div className="rounded-lg border border-line bg-surface/50 p-4 text-[13px] text-ink-3">
@@ -83,7 +136,9 @@ export function ModelPriceCalculator({ prices, viewer, quotaPerYuan }: Props) {
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <AppIcon name="bolt" size={15} className="text-brand" />
         <h4 className="text-[13px] font-semibold text-ink">费用试算</h4>
-        <span className="text-[12px] text-ink-3">按下方价格本地估算，结果仅供参考</span>
+        <span className="text-[12px] text-ink-3">
+          {usingServer ? '由服务端试算接口实时估算，结果仅供参考' : '按下方价格本地估算，结果仅供参考'}
+        </span>
       </div>
 
       {/* 分组选择：多分组时让用户切换，代理视图只有一档无需选择 */}
@@ -172,18 +227,18 @@ export function ModelPriceCalculator({ prices, viewer, quotaPerYuan }: Props) {
         <div>
           <div className="text-[12px] text-ink-3">预估花费</div>
           <div className="mt-0.5 font-mono text-xl font-semibold tabular-nums text-ink">
-            {result ? formatYuanFromQuota(result.quota, quotaPerYuan) : '—'}
+            {quota !== null ? formatYuanFromQuota(quota, quotaPerYuan) : '—'}
           </div>
-          {result && !result.isFree && (
-            <div className="mt-0.5 font-mono text-[11px] text-ink-3">= {result.quota} 额度</div>
+          {quota !== null && !isFree && (
+            <div className="mt-0.5 font-mono text-[11px] text-ink-3">= {quota} 额度</div>
           )}
         </div>
         <div className="flex flex-col items-end gap-1">
-          {result ? (
-            result.isFree ? (
+          {result || serverQuote ? (
+            isFree ? (
               <Badge tone="info">免费</Badge>
             ) : (
-              <Badge tone="brand">{billingKindLabel(result.kind)}</Badge>
+              <Badge tone="brand">{billingKindLabel(kind)}</Badge>
             )
           ) : null}
           <span className="max-w-[18rem] text-right text-[11px] text-ink-3">{ruleText(price, result, count, quotaPerYuan)}</span>

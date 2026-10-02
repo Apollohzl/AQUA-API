@@ -1,4 +1,4 @@
-/** 管理后台：令牌管理（/admin/tokens）。列表 + 新建弹层（含一次性明文 key 提示保存）+ 编辑（状态/额度）+ 删除；数据经 api/admin.ts 读写 /api/admin/tokens。 */
+/** 管理后台：令牌管理（/admin/tokens）。列表 + 新建弹层（含一次性明文 key 提示保存）+ 编辑（状态/额度/周期预算）+ 删除；数据经 api/admin.ts 读写 /api/admin/tokens。 */
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
@@ -9,7 +9,7 @@ import { STATUS_DISABLED, STATUS_ENABLED } from '@/api/types'
 import { Badge, Card } from '@/components/ui/Display'
 import { DataTable, Pagination, type Column } from '@/components/ui/Table'
 import { Button } from '@/components/ui/Button'
-import { Field, Input, Switch } from '@/components/ui/Form'
+import { Field, Input, Select, Switch } from '@/components/ui/Form'
 import { Modal, ConfirmDialog, CopyButton } from '@/components/ui/Modal'
 import { useToast } from '@/lib/toast/toast-context'
 import { useSite } from '@/lib/site/site-context'
@@ -18,14 +18,39 @@ import { formatYuanFromQuota, quotaToYuanInput, yuanToQuota } from '@/utils/mone
 
 const PAGE_SIZE = 20
 
+/**
+ * 令牌 + 周期预算字段。
+ *
+ * 契约：后端 model.Token 已有 budget_quota / budget_period（迁移 0043），
+ * 但 tokenDTO / 更新请求体尚未透出，故此处以交叉类型局部承载：
+ * 响应里没有这两个字段时按“未启用预算”处理，请求体多带它们（后端落地后即生效）。
+ */
+type TokenWithBudget = AccessToken & {
+  /** 周期预算额度（内部单位）；0 = 不限 */
+  budget_quota?: number
+  /** 预算周期：'' / 'daily' / 'weekly' / 'monthly' */
+  budget_period?: string
+}
+
+/** 周期预算的下拉选项：值必须与后端 model.BudgetPeriod* 常量一致 */
+const BUDGET_PERIOD_OPTIONS = [
+  { value: '', label: '不启用（取消周期预算）' },
+  { value: 'daily', label: '每日' },
+  { value: 'weekly', label: '每周' },
+  { value: 'monthly', label: '每月' },
+] as const
+
+/** 周期标识 → 中文短名（列表展示用） */
+const BUDGET_PERIOD_LABEL: Record<string, string> = { daily: '日', weekly: '周', monthly: '月' }
+
 export default function AdminTokensPage() {
   const { quotaPerYuan } = useSite()
-  const [items, setItems] = useState<AccessToken[]>([])
+  const [items, setItems] = useState<TokenWithBudget[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
-  const [editing, setEditing] = useState<AccessToken | null | 'new'>(null)
-  const [deleteTarget, setDeleteTarget] = useState<AccessToken | null>(null)
+  const [editing, setEditing] = useState<TokenWithBudget | null | 'new'>(null)
+  const [deleteTarget, setDeleteTarget] = useState<TokenWithBudget | null>(null)
   const { toast, toastError } = useToast()
 
   /** 明文密钥查看态：点击「查看」后调接口取回原文并展示 + 一键复制 */
@@ -81,7 +106,7 @@ export default function AdminTokensPage() {
     }
   }
 
-  const columns: Column<AccessToken>[] = [
+  const columns: Column<TokenWithBudget>[] = [
     { title: 'ID', render: (row) => <span className="text-ink-3">#{row.id}</span> },
     { title: '名称', render: (row) => <span className="font-medium text-ink">{row.name}</span> },
     {
@@ -125,6 +150,20 @@ export default function AdminTokensPage() {
       title: '已用',
       align: 'right',
       render: (row) => <span className="text-ink-2">{formatYuanFromQuota(row.used_quota, quotaPerYuan)}</span>,
+    },
+    {
+      title: '周期预算',
+      align: 'right',
+      render: (row) => {
+        const budget = row.budget_quota ?? 0
+        const period = row.budget_period ?? ''
+        if (!(budget > 0) || !period) return <span className="text-ink-3">不限</span>
+        return (
+          <span className="text-ink-2">
+            {formatYuanFromQuota(budget, quotaPerYuan)} / {BUDGET_PERIOD_LABEL[period] ?? period}
+          </span>
+        )
+      },
     },
     {
       title: '到期',
@@ -206,7 +245,7 @@ function TokenFormModal({
   onClose,
 }: {
   open: boolean
-  token: AccessToken | null
+  token: TokenWithBudget | null
   onClose: () => void
 }) {
   const { toast, toastError } = useToast()
@@ -220,6 +259,9 @@ function TokenFormModal({
   const [unlimited, setUnlimited] = useState(false)
   const [remainQuota, setRemainQuota] = useState('')
   const [status, setStatus] = useState(STATUS_ENABLED)
+  // 周期预算（仅编辑已有令牌时编辑；新建接口暂不接受该字段）
+  const [budgetYuan, setBudgetYuan] = useState('')
+  const [budgetPeriod, setBudgetPeriod] = useState('')
   const [loading, setLoading] = useState(false)
   // 新建成功后的一次性明文密钥
   const [createdKey, setCreatedKey] = useState('')
@@ -233,8 +275,11 @@ function TokenFormModal({
     setUnlimited(token?.unlimited_quota ?? false)
     setRemainQuota(token ? quotaToYuanInput(token.remain_quota, quotaPerYuan) : '')
     setStatus(token?.status ?? STATUS_ENABLED)
+    // 周期预算：额度 → 元回填；未启用（0）时留空
+    setBudgetYuan(token?.budget_quota && token.budget_quota > 0 ? quotaToYuanInput(token.budget_quota, quotaPerYuan) : '')
+    setBudgetPeriod(token?.budget_period ?? '')
     setCreatedKey('')
-  }, [open, token])
+  }, [open, token, quotaPerYuan])
 
   async function handleSubmit() {
     if (createdKey) return // 已创建成功，等待关闭
@@ -246,13 +291,24 @@ function TokenFormModal({
       toastError('请填写归属用户 ID')
       return
     }
+    // 周期预算：选了周期就必须给一个 > 0 的金额；金额 <= 0 视为「不启用」。
+    // 后端约束：budget_quota > 0 时必须带合法 budget_period；取消时两者都清空。
+    const budgetQuota = budgetPeriod ? yuanToQuota(Number(budgetYuan || 0), quotaPerYuan) : 0
+    if (budgetPeriod && (!budgetQuota || budgetQuota <= 0)) {
+      toastError('启用周期预算时必须填写大于 0 的金额（元）；如需取消请将周期选为“不启用”')
+      return
+    }
     setLoading(true)
     try {
       if (token) {
-        const payload: AdminUpdateTokenPayload = {
+        const payload: AdminUpdateTokenPayload & { budget_quota: number; budget_period: string } = {
           status,
           unlimited_quota: unlimited,
           remain_quota: yuanToQuota(Number(remainQuota || 0), quotaPerYuan) ?? 0, // 人民币 → 额度
+          // budget_quota/budget_period 尚未进 AdminUpdateTokenPayload，用交叉类型承载：
+          // 接口复用现有 PUT /admin/tokens/{id}，请求体多带这两个字段。
+          budget_quota: budgetQuota ?? 0,
+          budget_period: budgetPeriod,
         }
         await updateToken(token.id, payload)
         toast('令牌已更新')
@@ -346,6 +402,36 @@ function TokenFormModal({
               disabled={unlimited}
             />
           </Field>
+
+          {/* 周期预算：仅在编辑已有令牌时可改（新建接口暂不接受该字段）。
+              留空 / 选「不启用」= 取消预算（提交 budget_quota=0、budget_period=''）。 */}
+          {token && (
+            <>
+              <Field
+                label="周期预算（¥）"
+                help="该令牌每个周期可消耗的额度上限（人民币）；周期选「不启用」即取消。注：不限额度令牌不受周期预算影响。"
+              >
+                <Input
+                  value={budgetYuan}
+                  onChange={(e) => setBudgetYuan(e.target.value)}
+                  type="number"
+                  min={0}
+                  placeholder="0.00"
+                  disabled={budgetPeriod === ''}
+                />
+              </Field>
+
+              <Field label="周期" help="预算窗口长度：日 / 周 / 月（滚动窗口）">
+                <Select value={budgetPeriod} onChange={(e) => setBudgetPeriod(e.target.value)}>
+                  {BUDGET_PERIOD_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </>
+          )}
         </div>
       )}
 
