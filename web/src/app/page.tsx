@@ -34,7 +34,7 @@ import { useAuth } from '@/lib/auth/auth-context'
 import { useSite } from '@/lib/site/site-context'
 import { formatDiscountLabel, formatYuanPerCall, formatYuanPerMillion } from '@/utils/money'
 
-const REPO_URL = 'https://github.com/xiaosu4610/AQUA-API'
+const REPO_URL = 'https://github.com/LTZY-ACU/AQUA-API'
 
 /* ── 小节头：等宽编号 + 标题 + 说明 ─────────────────────── */
 
