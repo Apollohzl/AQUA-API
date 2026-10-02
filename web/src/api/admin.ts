@@ -51,6 +51,7 @@ import type {
   RedeemCodeQuery,
   SiteSettings,
   SMTPSettings,
+  SpeedTestRunResult,
   SMTPSettingsPayload,
   Task,
   TaskProvider,
@@ -112,6 +113,18 @@ export function testChannel(id: number): Promise<ChannelTestResult> {
   // 后端会等上游最多 300 秒（部分平台排队很久），前端必须比它更有耐心，
   // 否则后端还在等、前端已经报"请求超时"，用户得到的是错误结论。
   return api.post<ChannelTestResult>(`/admin/channels/${id}/test`, undefined, {
+    timeout: UPSTREAM_TIMEOUT_MS,
+  })
+}
+
+/**
+ * POST /api/admin/channels/{id}/speedtest：模型测速（逐模型测首字延迟）。
+ *
+ * 每次对上游产生真实但极小的消耗（提示词 "ping" + max_tokens=1 ≈ 2~3 token/模型）。
+ * 前端为拿到实时进度，通常一次只传一个模型并循环调用；后端串行探测。
+ */
+export function speedTestChannel(id: number, models: string[]): Promise<SpeedTestRunResult> {
+  return api.post<SpeedTestRunResult>(`/admin/channels/${id}/speedtest`, { models }, {
     timeout: UPSTREAM_TIMEOUT_MS,
   })
 }
