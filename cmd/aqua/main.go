@@ -479,6 +479,8 @@ func run() error {
 		SensitiveWords: sensitiveWords,
 		// 上游进价：按密钥核算消耗、计算余额剩余与毛利
 		ChannelModelCosts: channelModelCosts,
+		// 模型测速：渠道 × 模型的最新延迟快照（管理端测速落库、广场展示）
+		ModelSpeeds: store.NewModelSpeedRepository(st.DB()),
 		// 订阅账号：OAuth 提供方配置（后台维护）
 		OAuthProviders: oauthProviders,
 		// 异步任务：仓储（查询）+ 编排服务（提交/轮询/取消）

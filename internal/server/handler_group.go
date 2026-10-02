@@ -639,6 +639,14 @@ type plazaModelDTO struct {
 	ListPrice *plazaPriceDTO `json:"list_price,omitempty"`
 	// ChannelCount 是支持该模型的启用渠道数量，作为"供给充足度"的直观指标。
 	ChannelCount int `json:"channel_count"`
+	// SpeedTTFBMS 是该模型在各启用渠道中最近一次测速的最小首字延迟（毫秒）。
+	//
+	// 运营参考数据：后台「模型测速」的产物（每次真实调用约消耗 2~3 token），
+	// 不代表实时性能。omitempty——未测过或站长关闭公示时整个字段不下发，
+	// 前端据此不渲染延迟列（与"还没测过"是同一种表现，无需区分）。
+	SpeedTTFBMS int `json:"speed_ttfb_ms,omitempty"`
+	// SpeedTestedAt 是该延迟的测速时间（Unix 秒），让用户知道数字有多新鲜。
+	SpeedTestedAt int64 `json:"speed_tested_at,omitempty"`
 }
 
 // plazaViewerDTO 描述"当前查看者以什么身份看广场"。
@@ -682,6 +690,55 @@ type plazaGroupDTO struct {
 	ModelCount  int    `json:"model_count"`
 }
 
+// plazaSpeedByModel 汇总各启用渠道的最新测速结果，按模型取最小首字延迟。
+//
+// 返回两张表：模型 → 最小 TTFB（毫秒）、模型 → 该结果的时间（Unix 秒）。
+// 取 MIN 而不是平均的原因：用户关心的是"最快能多快拿到首字"，
+// 路由层本身也会优先选快的渠道，平均数反而不能代表真实体验。
+// 任一前置条件不满足（仓储缺失 / 开关关闭 / 读库失败 / 无成功记录）
+// 都返回空表，调用方按"没有数据"处理，绝不让测速数据问题拖垮广场。
+func (s *Server) plazaSpeedByModel(ctx context.Context, channels []*model.Channel) (map[string]int, map[string]int64) {
+	ttfb := make(map[string]int)
+	testedAt := make(map[string]int64)
+
+	if s.deps.ModelSpeeds == nil {
+		return ttfb, testedAt
+	}
+	// 公示开关在每次请求时读取：站长在后台关掉后无需重启或等缓存过期。
+	settings, err := model.LoadSiteSettings(ctx, s.deps.Settings)
+	if err != nil || !settings.SpeedTest.Enabled || !settings.SpeedTest.Public {
+		return ttfb, testedAt
+	}
+
+	results, err := s.deps.ModelSpeeds.Latest(ctx)
+	if err != nil {
+		// 读库失败按"没有数据"处理（返回空表）：延迟展示是增强能力，
+		// 宁可这一页没有延迟列，也不能让整个广场 500。
+		return ttfb, testedAt
+	}
+
+	// 只统计【当前启用】渠道的结果：停用渠道的延迟对"现在调用多快"
+	// 是误导（它的模型可能已从路由池摘除）。
+	enabledIDs := make(map[uint64]struct{}, len(channels))
+	for _, channel := range channels {
+		enabledIDs[channel.ID] = struct{}{}
+	}
+
+	for _, result := range results {
+		if _, serving := enabledIDs[result.ChannelID]; !serving {
+			continue
+		}
+		if !result.OK || result.TTFBMS <= 0 {
+			continue
+		}
+		if current, exists := ttfb[result.Model]; !exists || result.TTFBMS < current {
+			ttfb[result.Model] = result.TTFBMS
+			testedAt[result.Model] = result.TestedAt.Unix()
+		}
+	}
+	return ttfb, testedAt
+}
+
 // handleModelPlaza 处理 GET /api/models（公开的模型广场数据）。
 //
 // 参数：
@@ -716,6 +773,10 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 	if viewer != nil {
 		delete(hiddenGroups, viewer.AgentGroup)
 	}
+
+	// 模型测速：各启用渠道最近一次结果 → 每个模型取最小首字延迟。
+	// 在开关关闭 / 未测过 / 读库失败时返回空表，模型卡片自然不带延迟字段。
+	speedTTFB, speedTestedAt := s.plazaSpeedByModel(ctx, channels)
 
 	groupFilter := strings.TrimSpace(c.Query("group"))
 	if hiddenGroups[groupFilter] {
@@ -834,6 +895,10 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 			item.Available = modelGroupChannelCount[modelName][viewer.AgentGroup] > 0
 			item.ChannelCount = modelGroupChannelCount[modelName][viewer.AgentGroup]
 		}
+		if ttfb, ok := speedTTFB[modelName]; ok {
+			item.SpeedTTFBMS = ttfb
+			item.SpeedTestedAt = speedTestedAt[modelName]
+		}
 		items = append(items, item)
 	}
 
@@ -916,8 +981,9 @@ func (s *Server) resolvePlazaViewer(ctx context.Context, c *gin.Context) *plazaV
 // 该分组下没有匹配到规则时返回 (nil, nil)，调用方据此把模型排除出代理清单。
 //
 // 为什么把折后金额直接算进 DTO，而不是只给 ratio 让前端自己乘：
-//   现有前端的价格格式化函数不感知倍率（公开视图展示的就是规则原值），
-//   若此处也给原值，代理视图就会显示成"没打折"，与"拿货 6 折"直接矛盾。
+//
+//	现有前端的价格格式化函数不感知倍率（公开视图展示的就是规则原值），
+//	若此处也给原值，代理视图就会显示成"没打折"，与"拿货 6 折"直接矛盾。
 func plazaAgentPricePair(prices []*model.ModelPrice, modelName, group string, ratio int64) (*plazaPriceDTO, *plazaPriceDTO) {
 	rows := make([]*model.ModelPrice, 0, 4)
 	for _, price := range prices {
