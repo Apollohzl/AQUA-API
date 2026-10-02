@@ -77,7 +77,9 @@ func (r *Relay) FetchModels(ctx context.Context, baseURL, apiKey string) ([]stri
 		return nil, fmt.Errorf("relay: 上游地址必须以 http:// 或 https:// 开头，当前为 %q", baseURL)
 	}
 
-	requestURL := strings.TrimRight(baseURL, "/") + modelsPath
+	// 经 dedupeUpstreamVersionSegment 净化：管理员把 base_url 填成
+	// https://host/v1 时不再拼出 /v1/v1/models（404），与转发链路口径一致。
+	requestURL := dedupeUpstreamVersionSegment(baseURL, modelsPath) + modelsPath
 
 	// 单独设置超时：与全站上游超时保持一致（见 UpstreamTimeout 的说明）。
 	ctx, cancel := context.WithTimeout(ctx, modelListTimeout)

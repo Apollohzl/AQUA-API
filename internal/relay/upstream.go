@@ -280,6 +280,9 @@ func buildUpstreamRequest(in upstreamRequestInput) (*UpstreamRequest, error) {
 	}
 
 	path := upstreamPath(in)
+	// 剪除 base 尾段与 path 首段重复造成的 /v1/v1（管理员最常见误配，
+	// 见 dedupeUpstreamVersionSegment 的说明）。
+	base = dedupeUpstreamVersionSegment(base, path)
 	query := url.Values{}
 	applyUpstreamQuery(in, query)
 
@@ -356,6 +359,54 @@ func resolveUpstreamBaseURL(in upstreamRequestInput) (string, error) {
 	}
 	// 去掉末尾多余的斜杠，避免出现 "//v1/..." 这类路径
 	return strings.TrimRight(base, "/"), nil
+}
+
+// dedupeUpstreamVersionSegment 剪除 base 末尾与 path 首段重复的路径段，返回净化后的 base。
+//
+// 为什么需要它：本项目约定 base_url 只填到域名根、版本前缀由端点路径常量自带
+// （如 oai.ChatCompletionsPath = "/v1/chat/completions"）。但管理员配置时最常见
+// 的错误就是照抄官方文档把版本前缀带上（如 https://api.openai.com/v1），两者叠加
+// 会拼出 /v1/v1/chat/completions，上游一律 404 且从报错看不出原因（历史上踩过：
+// 见 models.go 中 modelsPath 的说明，以及 Anthropic 默认地址与 /messages 的组合）。
+//
+// 剪除规则：base 的最后一个路径段与 path 的第一个路径段完全相同（如都是 v1、
+// v1beta 或 openai）时，把 base 的该段剪掉。对 Anthropic 这类"版本段本来就在
+// base 里"的协议天然安全——其路径首段是 messages，与 base 尾段 v1 不同，不会误剪。
+func dedupeUpstreamVersionSegment(base, path string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	rest := strings.TrimPrefix(path, "/")
+	if base == "" || rest == "" {
+		return base
+	}
+
+	// 用标准库解析而非字符串切分：只有这样才能可靠区分 host 与路径段，
+	// 避免把 "https://v1"（主机名恰为 v1）或 "https://v1.example.com" 误剪。
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
+		// 解析不了或形态异常：原样返回，宁可保持现状也不冒险改写。
+		return base
+	}
+	segs := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(segs) == 0 || segs[0] == "" {
+		// base 只有 host（无路径段可剪）
+		return base
+	}
+	last := segs[len(segs)-1]
+	first := rest
+	if idx := strings.Index(first, "/"); idx >= 0 {
+		first = first[:idx]
+	}
+	if last == "" || last != first {
+		return base
+	}
+
+	// 剪掉 base 的最后一个路径段，保留 scheme://host 与其余路径。
+	trimmedPath := strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/"+last)
+	result := u.Scheme + "://" + u.Host
+	if trimmedPath != "" && trimmedPath != "/" {
+		result += trimmedPath
+	}
+	return result
 }
 
 // upstreamPath 返回上游端点路径：按协议改写调用方给出的 OpenAI 路径。

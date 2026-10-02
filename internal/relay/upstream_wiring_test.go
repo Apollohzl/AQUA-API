@@ -32,6 +32,56 @@ import (
 	"github.com/LTZY-ACU/aqua-api/internal/oai"
 )
 
+// TestDedupeUpstreamVersionSegment_重复版本段剪除 钉住"base 尾段与 path 首段
+// 重复时剪除"的规则，覆盖三类关键场景：该剪的（/v1/v1）、不该剪的（Anthropic
+// 版本段在 base 里）、绝不能剪的（host 恰好叫 v1）。
+func TestDedupeUpstreamVersionSegment_重复版本段剪除(t *testing.T) {
+	cases := []struct {
+		name string
+		base string
+		path string
+		want string
+	}{
+		{"OpenAI 兼容 base 带 v1 尾段", "https://api.openai.com/v1", "/v1/chat/completions", "https://api.openai.com"},
+		{"多级路径只剪最后一段", "https://host/api/v1", "/v1/models", "https://host/api"},
+		{"v1beta 同样处理", "https://host/v1beta", "/v1beta/models/gemini:generateContent", "https://host"},
+		{"带端口", "http://host:8080/v1", "/v1/models", "http://host:8080"},
+		{"尾斜杠先归一化", "https://host/v1/", "/v1/models", "https://host"},
+		{"Anthropic 版本段必须保留", "https://api.anthropic.com/v1", "/messages", "https://api.anthropic.com/v1"},
+		{"主机名恰为 v1 不误剪", "https://v1", "/v1/chat/completions", "https://v1"},
+		{"域名以版本字样开头不误剪", "https://v1.example.com", "/v1/chat/completions", "https://v1.example.com"},
+		{"无路径 base 原样", "https://host", "/v1/chat/completions", "https://host"},
+		{"首段不同不剪", "https://host/api", "/v1/chat/completions", "https://host/api"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := dedupeUpstreamVersionSegment(tc.base, tc.path); got != tc.want {
+				t.Fatalf("dedupe(%q, %q) = %q，期望 %q", tc.base, tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPrepareChannelUpstream_OpenAI兼容Base带V1 钉住端到端效果：管理员把
+// OpenAI 兼容渠道的地址照官方文档填成 https://host/v1 时，最终请求 URL
+// 不再出现 /v1/v1（该误配曾是"渠道测试通过、对话却 404"的根因）。
+func TestPrepareChannelUpstream_OpenAI兼容Base带V1(t *testing.T) {
+	ch := &model.Channel{
+		TypeKey: "openai",
+		BaseURL: "https://api.example.com/v1",
+	}
+	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`)
+
+	_, _, built, err := prepareChannelUpstream(
+		ch, "sk-test", "gpt-4o", oai.ChatCompletionsPath, body, http.Header{}, false)
+	if err != nil {
+		t.Fatalf("组装请求失败: %v", err)
+	}
+	if want := "https://api.example.com/v1/chat/completions"; built.URL != want {
+		t.Errorf("URL = %q，期望 %q（不应出现 /v1/v1）", built.URL, want)
+	}
+}
+
 // TestPrepareChannelUpstream_Azure 验证 type_key=azure_openai 时：
 // 部署名进路径、api-version 进查询、鉴权走 api-key 头。
 func TestPrepareChannelUpstream_Azure(t *testing.T) {
