@@ -8,9 +8,6 @@
 
 自托管 LLM API 网关 · AI 用量管理系统
 
-[![Gitee Star](https://gitee.com/xiaosu4610/AQUA-API/badge/star.svg?theme=dark)](https://gitee.com/xiaosu4610/AQUA-API/stargazers)
-[![Gitee Fork](https://gitee.com/xiaosu4610/AQUA-API/badge/fork.svg?theme=dark)](https://gitee.com/xiaosu4610/AQUA-API/members)
-
 ![License](assets/badges/license.svg)
 ![Go](assets/badges/go.svg)
 ![CGO](assets/badges/cgo.svg)
@@ -31,8 +28,8 @@
 | 渠道 | 地址 |
 | --- | --- |
 | 官方网站（在线演示） | https://aqua.is3.cc |
-| 主仓库（国内） | https://gitee.com/xiaosu4610/AQUA-API |
-| 镜像仓库（海外） | https://github.com/xiaosu4610/AQUA-API（由 Gitee 自动同步） |
+| 代码仓库 | https://github.com/xiaosu4610/AQUA-API |
+| 提交 Issue | https://github.com/xiaosu4610/AQUA-API/issues |
 
 > **本仓库是官方地址的唯一权威来源。** 域名如有变更，会先在这里更新，再同步到其它任何地方。
 > 因此，收藏本仓库比收藏一个域名更可靠。
@@ -40,8 +37,8 @@
 ### 防伪提醒
 
 - 本项目**不提供、也未授权**任何「代充」「代运营」「官方合租」服务。服务端代码完全开源
-  （[木兰宽松许可证 第 2 版](LICENSE)），任何人都可以自建 —— **能跑起来 ≠ 是官方**。
-- 只认上表中的两个地址。其它域名即使界面一模一样，也与本项目无关。
+  （[MIT 许可证](LICENSE)），任何人都可以自建 —— **能跑起来 ≠ 是官方**。
+- 只认上表中的地址。其它域名即使界面一模一样，也与本项目无关。
 - 官方不会私聊索要账号密码、支付口令或验证码。
 - 使用本项目即视为接受[《使用者须知与免责声明》](DISCLAIMER.md)；品牌边界见[《品牌与商标声明》](TRADEMARK.md)。
 - 参与开发前请先读[《贡献指南》](CONTRIBUTING.md)（Fork + PR 模式，`main` 分支受保护）。
@@ -561,7 +558,7 @@ sequenceDiagram
 <img src="assets/icons/sqlite.svg" width="36" title="SQLite" alt="SQLite" />
 <img src="assets/icons/docker.svg" width="36" title="Docker" alt="Docker" />
 <img src="assets/icons/nginx.svg" width="36" title="Nginx / Caddy 反向代理" alt="Nginx" />
-<img src="assets/icons/gitee.svg" width="36" title="Gitee" alt="Gitee" />
+<img src="assets/icons/github.svg" width="36" title="GitHub" alt="GitHub" />
 
 </div>
 
@@ -575,7 +572,7 @@ sequenceDiagram
 ### 方式一：Docker Compose（推荐）
 
 ```bash
-git clone https://gitee.com/xiaosu4610/AQUA-API.git && cd AQUA-API
+git clone https://github.com/xiaosu4610/AQUA-API.git && cd AQUA-API
 cp .env.example .env
 
 docker build -t aqua-api:local .          # 首次构建（前端 + 后端 + 运行镜像）
@@ -1007,16 +1004,16 @@ aqua-api.service       systemd 单元（裸机部署）
 
 ## 许可证
 
-源代码采用[木兰宽松许可证，第 2 版（Mulan PSL v2）](LICENSE)。
+源代码采用 [MIT 许可证](LICENSE)。
 
-> 在遵守该许可证的前提下，你可以自由复制、使用、修改与分发本软件，包括商业用途；
-> 重新分发时须附带 LICENSE 副本，并保留版权、商标、专利及免责声明。该许可证不授予任何商标权利。
+> 在遵守该许可证的前提下，你可以自由使用、复制、修改、合并、发布、分发、再许可及/或销售本软件，
+> 包括商业用途；重新分发时须保留版权声明与许可声明。该许可证**不授予任何商标权利**。
 
 配套文件：
 
 | 文件 | 作用 |
 | --- | --- |
-| [LICENSE](LICENSE) | 开源协议全文（木兰宽松许可证 第 2 版） |
+| [LICENSE](LICENSE) | 开源协议全文（MIT 许可证） |
 | [DISCLAIMER.md](DISCLAIMER.md) | 使用者须知与免责声明 |
 | [TRADEMARK.md](TRADEMARK.md) | 品牌与商标声明 |
 | [NOTICE](NOTICE) | 版权声明、原创性时间锚点与分发义务 |
@@ -1029,6 +1026,6 @@ aqua-api.service       systemd 单元（裸机部署）
 
 **如果这个项目帮你省下了对账的时间，欢迎点个 Star ⭐**
 
-[在线演示](https://aqua.is3.cc) · [提交 Issue](https://gitee.com/xiaosu4610/AQUA-API/issues) · [GitHub 镜像](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
+[在线演示](https://aqua.is3.cc) · [提交 Issue](https://github.com/xiaosu4610/AQUA-API/issues) · [GitHub](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
 
 </div>

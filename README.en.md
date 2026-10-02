@@ -8,9 +8,6 @@
 
 Self-hosted LLM API gateway · AI usage management system
 
-[![Gitee Star](https://gitee.com/xiaosu4610/AQUA-API/badge/star.svg?theme=dark)](https://gitee.com/xiaosu4610/AQUA-API/stargazers)
-[![Gitee Fork](https://gitee.com/xiaosu4610/AQUA-API/badge/fork.svg?theme=dark)](https://gitee.com/xiaosu4610/AQUA-API/members)
-
 ![License](assets/badges/license.svg)
 ![Go](assets/badges/go.svg)
 ![CGO](assets/badges/cgo.svg)
@@ -31,8 +28,8 @@ Self-hosted LLM API gateway · AI usage management system
 | Channel | Address |
 | --- | --- |
 | Official website (live demo) | https://aqua.is3.cc |
-| Primary repository (China) | https://gitee.com/xiaosu4610/AQUA-API |
-| Mirror repository (overseas) | https://github.com/xiaosu4610/AQUA-API (mirrored automatically from Gitee) |
+| Source repository | https://github.com/xiaosu4610/AQUA-API |
+| Issues | https://github.com/xiaosu4610/AQUA-API/issues |
 
 > **This repository is the sole authoritative source of the official address.** If the domain ever changes, it is updated here first and only then propagated anywhere else.
 > As a result, bookmarking this repository is more reliable than bookmarking a domain.
@@ -40,8 +37,8 @@ Self-hosted LLM API gateway · AI usage management system
 ### Anti-Impersonation Notice
 
 - This project **does not provide and has not authorized** any "top-up on your behalf", "managed operation", or "official shared subscription" service. The server code is fully open source
-  ([Mulan Permissive Software License, Version 2](LICENSE)), so anyone can self-host it — **being able to run it does not make it official**.
-- Trust only the two addresses in the table above. Any other domain is unrelated to this project, even if the interface looks identical.
+  ([MIT License](LICENSE)), so anyone can self-host it — **being able to run it does not make it official**.
+- Trust only the addresses in the table above. Any other domain is unrelated to this project, even if the interface looks identical.
 - The official team will never privately message you to ask for your account password, payment credentials, or verification code.
 - Using this project means you accept the [User Notice and Disclaimer](DISCLAIMER.md); for brand boundaries see the [Brand and Trademark Notice](TRADEMARK.md).
 - Before contributing, read the [Contributing Guide](CONTRIBUTING.md) (Fork + PR model, `main` branch protected).
@@ -562,7 +559,7 @@ otherwise that portion of cost counts as 0 and the report skews optimistic.
 <img src="assets/icons/sqlite.svg" width="36" title="SQLite" alt="SQLite" />
 <img src="assets/icons/docker.svg" width="36" title="Docker" alt="Docker" />
 <img src="assets/icons/nginx.svg" width="36" title="Nginx / Caddy reverse proxy" alt="Nginx" />
-<img src="assets/icons/gitee.svg" width="36" title="Gitee" alt="Gitee" />
+<img src="assets/icons/github.svg" width="36" title="GitHub" alt="GitHub" />
 
 </div>
 
@@ -576,7 +573,7 @@ otherwise that portion of cost counts as 0 and the report skews optimistic.
 ### Option 1: Docker Compose (Recommended)
 
 ```bash
-git clone https://gitee.com/xiaosu4610/AQUA-API.git && cd AQUA-API
+git clone https://github.com/xiaosu4610/AQUA-API.git && cd AQUA-API
 cp .env.example .env
 
 docker build -t aqua-api:local .          # First build (frontend + backend + runtime image)
@@ -1008,16 +1005,16 @@ See [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md) for detail
 
 ## License
 
-The source code is licensed under the [Mulan Permissive Software License, Version 2 (Mulan PSL v2)](LICENSE).
+The source code is licensed under the [MIT License](LICENSE).
 
 > Subject to compliance with the license, you may freely copy, use, modify, and distribute this software, including for commercial purposes;
-> redistribution must include a copy of the LICENSE and retain the copyright, trademark, patent, and disclaimer notices. The license grants no trademark rights.
+> redistribution must retain the copyright and license notices. The license grants no trademark rights.
 
 Companion files:
 
 | File | Purpose |
 | --- | --- |
-| [LICENSE](LICENSE) | Full license text (Mulan Permissive Software License, Version 2) |
+| [LICENSE](LICENSE) | Full license text (MIT License) |
 | [DISCLAIMER.md](DISCLAIMER.md) | User notice and disclaimer |
 | [TRADEMARK.md](TRADEMARK.md) | Brand and trademark notice |
 | [NOTICE](NOTICE) | Copyright notice, originality time anchors, and distribution obligations |
@@ -1030,6 +1027,6 @@ Companion files:
 
 **If this project saved you time on reconciliation, a Star is welcome ⭐**
 
-[Live Demo](https://aqua.is3.cc) · [Open an Issue](https://gitee.com/xiaosu4610/AQUA-API/issues) · [GitHub Mirror](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
+[Live Demo](https://aqua.is3.cc) · [Open an Issue](https://github.com/xiaosu4610/AQUA-API/issues) · [GitHub](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
 
 </div>

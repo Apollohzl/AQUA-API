@@ -8,9 +8,6 @@
 
 Passerelle LLM API auto-hébergée · Système de gestion de l'usage de l'IA
 
-[![Gitee Star](https://gitee.com/xiaosu4610/AQUA-API/badge/star.svg?theme=dark)](https://gitee.com/xiaosu4610/AQUA-API/stargazers)
-[![Gitee Fork](https://gitee.com/xiaosu4610/AQUA-API/badge/fork.svg?theme=dark)](https://gitee.com/xiaosu4610/AQUA-API/members)
-
 ![License](assets/badges/license.svg)
 ![Go](assets/badges/go.svg)
 ![CGO](assets/badges/cgo.svg)
@@ -31,8 +28,8 @@ Passerelle LLM API auto-hébergée · Système de gestion de l'usage de l'IA
 | Canal | Adresse |
 | --- | --- |
 | Site officiel (démonstration en ligne) | https://aqua.is3.cc |
-| Dépôt principal (Chine) | https://gitee.com/xiaosu4610/AQUA-API |
-| Dépôt miroir (international) | https://github.com/xiaosu4610/AQUA-API (synchronisé automatiquement par Gitee) |
+| Dépôt de code | https://github.com/xiaosu4610/AQUA-API |
+| Signaler un problème (Issues) | https://github.com/xiaosu4610/AQUA-API/issues |
 
 > **Ce dépôt est la seule source faisant autorité pour les adresses officielles.** En cas de changement de domaine, la mise à jour se fait d'abord ici, avant d'être propagée partout ailleurs.
 > Il est donc plus fiable de mettre ce dépôt en favori que de mettre un nom de domaine en favori.
@@ -40,8 +37,8 @@ Passerelle LLM API auto-hébergée · Système de gestion de l'usage de l'IA
 ### Avertissement anti-contrefaçon
 
 - Ce projet **ne fournit ni n'autorise** aucun service de « recharge pour le compte d'autrui », d'« exploitation déléguée » ou de « partage de compte officiel ». Le code côté serveur est entièrement open source
-  ([licence permissive Mulan, version 2](LICENSE)) et chacun peut le déployer pour son propre compte — **le faire fonctionner ≠ être l'officiel**.
-- Ne reconnaissez que les deux adresses du tableau ci-dessus. Tout autre domaine, même avec une interface identique, n'a aucun lien avec ce projet.
+  ([licence MIT](LICENSE)) et chacun peut le déployer pour son propre compte — **le faire fonctionner ≠ être l'officiel**.
+- Ne reconnaissez que les adresses du tableau ci-dessus. Tout autre domaine, même avec une interface identique, n'a aucun lien avec ce projet.
 - L'équipe officielle ne vous demandera jamais, en message privé, votre identifiant, votre mot de passe, votre code de paiement ou votre code de vérification.
 - L'utilisation de ce projet vaut acceptation de la [Notice d'utilisation et clause de non-responsabilité](DISCLAIMER.md) ; pour les limites de la marque, voir la [Déclaration de marque et de droits](TRADEMARK.md).
 - Avant de contribuer, lisez d'abord le [Guide de contribution](CONTRIBUTING.md) (modèle Fork + PR, la branche `main` est protégée).
@@ -558,7 +555,7 @@ faute de quoi cette part de coût serait comptée à 0 et le rapport serait trop
 <img src="assets/icons/sqlite.svg" width="36" title="SQLite" alt="SQLite" />
 <img src="assets/icons/docker.svg" width="36" title="Docker" alt="Docker" />
 <img src="assets/icons/nginx.svg" width="36" title="Nginx / Caddy 反向代理" alt="Nginx" />
-<img src="assets/icons/gitee.svg" width="36" title="Gitee" alt="Gitee" />
+<img src="assets/icons/github.svg" width="36" title="GitHub" alt="GitHub" />
 
 </div>
 
@@ -572,7 +569,7 @@ faute de quoi cette part de coût serait comptée à 0 et le rapport serait trop
 ### Méthode 1 : Docker Compose (recommandée)
 
 ```bash
-git clone https://gitee.com/xiaosu4610/AQUA-API.git && cd AQUA-API
+git clone https://github.com/xiaosu4610/AQUA-API.git && cd AQUA-API
 cp .env.example .env
 
 docker build -t aqua-api:local .          # première construction (frontend + backend + image d'exécution)
@@ -1004,16 +1001,16 @@ Voir [`AGENTS.md`](AGENTS.md) et [`CONTRIBUTING.md`](CONTRIBUTING.md) pour plus 
 
 ## Licence
 
-Le code source est distribué sous la [licence permissive Mulan, version 2 (Mulan PSL v2)](LICENSE).
+Le code source est distribué sous la [licence MIT](LICENSE).
 
 > Dans le respect de cette licence, vous êtes libre de copier, utiliser, modifier et distribuer ce logiciel, y compris à des fins commerciales ;
-> toute redistribution doit être accompagnée d'une copie de la LICENSE et conserver les mentions de copyright, de marque, de brevet et la clause de non-responsabilité. Cette licence n'accorde aucun droit de marque.
+> toute redistribution doit conserver les mentions de copyright et de licence. Cette licence n'accorde aucun droit de marque.
 
 Documents annexes :
 
 | Fichier | Rôle |
 | --- | --- |
-| [LICENSE](LICENSE) | Texte intégral de la licence (licence permissive Mulan, version 2) |
+| [LICENSE](LICENSE) | Texte intégral de la licence (licence MIT) |
 | [DISCLAIMER.md](DISCLAIMER.md) | Notice d'utilisation et clause de non-responsabilité |
 | [TRADEMARK.md](TRADEMARK.md) | Déclaration de marque et de droits |
 | [NOTICE](NOTICE) | Mentions de copyright, ancrages temporels d'originalité et obligations de distribution |
@@ -1026,6 +1023,6 @@ Documents annexes :
 
 **Si ce projet vous a fait gagner du temps sur la tenue de vos comptes, n'hésitez pas à lui donner une Star ⭐**
 
-[Démonstration en ligne](https://aqua.is3.cc) · [Ouvrir une Issue](https://gitee.com/xiaosu4610/AQUA-API/issues) · [Miroir GitHub](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
+[Démonstration en ligne](https://aqua.is3.cc) · [Ouvrir une Issue](https://github.com/xiaosu4610/AQUA-API/issues) · [GitHub](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
 
 </div>

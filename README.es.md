@@ -8,9 +8,6 @@
 
 Gateway de API LLM autoalojado · Sistema de gestión del uso de IA
 
-[![Gitee Star](https://gitee.com/xiaosu4610/AQUA-API/badge/star.svg?theme=dark)](https://gitee.com/xiaosu4610/AQUA-API/stargazers)
-[![Gitee Fork](https://gitee.com/xiaosu4610/AQUA-API/badge/fork.svg?theme=dark)](https://gitee.com/xiaosu4610/AQUA-API/members)
-
 ![License](assets/badges/license.svg)
 ![Go](assets/badges/go.svg)
 ![CGO](assets/badges/cgo.svg)
@@ -31,8 +28,8 @@ Gateway de API LLM autoalojado · Sistema de gestión del uso de IA
 | Canal | Dirección |
 | --- | --- |
 | Sitio oficial (demostración en línea) | https://aqua.is3.cc |
-| Repositorio principal (China) | https://gitee.com/xiaosu4610/AQUA-API |
-| Repositorio espejo (internacional) | https://github.com/xiaosu4610/AQUA-API (sincronizado automáticamente desde Gitee) |
+| Repositorio de código | https://github.com/xiaosu4610/AQUA-API |
+| Reportar un problema (Issues) | https://github.com/xiaosu4610/AQUA-API/issues |
 
 > **Este repositorio es la única fuente autoritativa de las direcciones oficiales.** Si el dominio cambia,
 > se actualizará aquí primero y después se sincronizará en cualquier otro lugar.
@@ -42,8 +39,8 @@ Gateway de API LLM autoalojado · Sistema de gestión del uso de IA
 
 - Este proyecto **no ofrece ni autoriza** ningún servicio de «recarga por terceros», «gestión delegada»
   o «suscripción compartida oficial». El código del servidor es totalmente abierto
-  ([Licencia de Software Permisiva Mulan, versión 2](LICENSE)) y cualquiera puede autoalojarlo —— **que funcione no significa que sea oficial**.
-- Solo son válidas las dos direcciones de la tabla anterior. Cualquier otro dominio, aunque su interfaz sea idéntica, no tiene relación con este proyecto.
+  ([Licencia MIT](LICENSE)) y cualquiera puede autoalojarlo —— **que funcione no significa que sea oficial**.
+- Solo son válidas las direcciones de la tabla anterior. Cualquier otro dominio, aunque su interfaz sea idéntica, no tiene relación con este proyecto.
 - El equipo oficial nunca solicitará por chat tu contraseña, tu clave de pago ni códigos de verificación.
 - El uso de este proyecto implica la aceptación de la [Guía para el usuario y exención de responsabilidad](DISCLAIMER.md); los límites de marca se detallan en la [Declaración de marca y marcas comerciales](TRADEMARK.md).
 - Antes de contribuir, lee la [Guía de contribución](CONTRIBUTING.md) (modelo Fork + PR, rama `main` protegida).
@@ -567,7 +564,7 @@ ya que de lo contrario su coste se contaría como 0 y el informe sería demasiad
 <img src="assets/icons/sqlite.svg" width="36" title="SQLite" alt="SQLite" />
 <img src="assets/icons/docker.svg" width="36" title="Docker" alt="Docker" />
 <img src="assets/icons/nginx.svg" width="36" title="Nginx / Caddy proxy inverso" alt="Nginx" />
-<img src="assets/icons/gitee.svg" width="36" title="Gitee" alt="Gitee" />
+<img src="assets/icons/github.svg" width="36" title="GitHub" alt="GitHub" />
 
 </div>
 
@@ -581,7 +578,7 @@ ya que de lo contrario su coste se contaría como 0 y el informe sería demasiad
 ### Opción 1: Docker Compose (recomendada)
 
 ```bash
-git clone https://gitee.com/xiaosu4610/AQUA-API.git && cd AQUA-API
+git clone https://github.com/xiaosu4610/AQUA-API.git && cd AQUA-API
 cp .env.example .env
 
 docker build -t aqua-api:local .          # Primera compilación (frontend + backend + imagen de ejecución)
@@ -1023,16 +1020,16 @@ Consulta [`AGENTS.md`](AGENTS.md) y [`CONTRIBUTING.md`](CONTRIBUTING.md) para m�
 
 ## Licencia
 
-El código fuente se distribuye bajo la [Licencia de Software Permisiva Mulan, versión 2 (Mulan PSL v2)](LICENSE).
+El código fuente se distribuye bajo la [Licencia MIT](LICENSE).
 
 > Siempre que cumplas esta licencia, puedes copiar, usar, modificar y distribuir libremente este software, incluido su uso comercial;
-> al redistribuirlo debes incluir una copia de LICENSE y conservar los avisos de derechos de autor, marcas comerciales, patentes y exención de responsabilidad. Esta licencia no concede ningún derecho de marca.
+> al redistribuirlo debes conservar los avisos de derechos de autor y de licencia. Esta licencia no concede ningún derecho de marca.
 
 Archivos complementarios:
 
 | Archivo | Función |
 | --- | --- |
-| [LICENSE](LICENSE) | Texto completo de la licencia de código abierto (Licencia de Software Permisiva Mulan, versión 2) |
+| [LICENSE](LICENSE) | Texto completo de la licencia (Licencia MIT) |
 | [DISCLAIMER.md](DISCLAIMER.md) | Guía para el usuario y exención de responsabilidad |
 | [TRADEMARK.md](TRADEMARK.md) | Declaración de marca y marcas comerciales |
 | [NOTICE](NOTICE) | Aviso de derechos de autor, anclajes temporales de originalidad y obligaciones de distribución |
@@ -1045,6 +1042,6 @@ Archivos complementarios:
 
 **Si este proyecto te ha ahorrado tiempo de conciliación, ¡dale una Star ⭐!**
 
-[Demostración en línea](https://aqua.is3.cc) · [Enviar Issue](https://gitee.com/xiaosu4610/AQUA-API/issues) · [Espejo en GitHub](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
+[Demostración en línea](https://aqua.is3.cc) · [Enviar Issue](https://github.com/xiaosu4610/AQUA-API/issues) · [GitHub](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
 
 </div>

@@ -8,9 +8,6 @@
 
 بوابة LLM API ذاتية الاستضافة · نظام إدارة استهلاك الذكاء الاصطناعي
 
-[![Gitee Star](https://gitee.com/xiaosu4610/AQUA-API/badge/star.svg?theme=dark)](https://gitee.com/xiaosu4610/AQUA-API/stargazers)
-[![Gitee Fork](https://gitee.com/xiaosu4610/AQUA-API/badge/fork.svg?theme=dark)](https://gitee.com/xiaosu4610/AQUA-API/members)
-
 ![License](assets/badges/license.svg)
 ![Go](assets/badges/go.svg)
 ![CGO](assets/badges/cgo.svg)
@@ -31,8 +28,8 @@
 | القناة | العنوان |
 | --- | --- |
 | الموقع الرسمي (عرض حيّ) | https://aqua.is3.cc |
-| المستودع الرئيسي (محلي) | https://gitee.com/xiaosu4610/AQUA-API |
-| مستودع المرآة (خارجي) | https://github.com/xiaosu4610/AQUA-API (تتم المزامنة تلقائيًا من Gitee) |
+| مستودع الكود | https://github.com/xiaosu4610/AQUA-API |
+| الإبلاغ عن مشكلة (Issues) | https://github.com/xiaosu4610/AQUA-API/issues |
 
 > **هذا المستودع هو المصدر الموثوق الوحيد للعنوان الرسمي.** إذا تغيّر النطاق، فسيُحدَّث هنا أولًا ثم يُنقل إلى أي مكان آخر.
 > لذلك، حفظ هذا المستودع أكثر موثوقية من حفظ نطاق.
@@ -40,8 +37,8 @@
 ### تنبيه ضد التقليد
 
 - هذا المشروع **لا يوفّر ولا يصرّح** بأي خدمات «شحن بالوكالة» أو «تشغيل بالوكالة» أو «مشاركة رسمية». كود الخادم مفتوح بالكامل
-  ([رخصة Mulan PSL v2](LICENSE))، ويمكن لأي شخص استضافته ذاتيًا —— **القدرة على تشغيله ≠ كونه رسميًا**.
-- لا تعتمد إلا على العنوانين الواردين في الجدول أعلاه. أي نطاق آخر، حتى لو بدت واجهته متطابقة، لا علاقة له بهذا المشروع.
+  ([رخصة MIT](LICENSE))، ويمكن لأي شخص استضافته ذاتيًا —— **القدرة على تشغيله ≠ كونه رسميًا**.
+- لا تعتمد إلا على العناوين الواردة في الجدول أعلاه. أي نطاق آخر، حتى لو بدت واجهته متطابقة، لا علاقة له بهذا المشروع.
 - لن تطلب الجهة الرسمية أبدًا عبر الرسائل الخاصة كلمة المرور أو رمز الدفع أو رمز التحقق.
 - استخدام هذا المشروع يعني قبول [«إرشادات المستخدم وإخلاء المسؤولية»](DISCLAIMER.md)؛ وحدود العلامة التجارية موضّحة في [«بيان العلامة التجارية»](TRADEMARK.md).
 - قبل المشاركة في التطوير، اقرأ [«دليل المساهمة»](CONTRIBUTING.md) (نموذج Fork + PR، وفرع `main` محميّ).
@@ -558,7 +555,7 @@ sequenceDiagram
 <img src="assets/icons/sqlite.svg" width="36" title="SQLite" alt="SQLite" />
 <img src="assets/icons/docker.svg" width="36" title="Docker" alt="Docker" />
 <img src="assets/icons/nginx.svg" width="36" title="Nginx / Caddy وكيل عكسي" alt="Nginx" />
-<img src="assets/icons/gitee.svg" width="36" title="Gitee" alt="Gitee" />
+<img src="assets/icons/github.svg" width="36" title="GitHub" alt="GitHub" />
 
 </div>
 
@@ -572,7 +569,7 @@ sequenceDiagram
 ### الطريقة 1: Docker Compose (موصى بها)
 
 ```bash
-git clone https://gitee.com/xiaosu4610/AQUA-API.git && cd AQUA-API
+git clone https://github.com/xiaosu4610/AQUA-API.git && cd AQUA-API
 cp .env.example .env
 
 docker build -t aqua-api:local .          # البناء الأول (الواجهة + الخلفية + صورة التشغيل)
@@ -1004,16 +1001,16 @@ aqua-api.service       وحدة systemd (نشر على خادم فعلي)
 
 ## الترخيص
 
-الكود المصدري تحت [رخصة Mulan Permissive، الإصدار 2 (Mulan PSL v2)](LICENSE).
+الكود المصدري تحت [رخصة MIT](LICENSE).
 
 > في ظل الالتزام بهذه الرخصة، يمكنك بحرية نسخ هذا البرنامج واستخدامه وتعديله وتوزيعه، بما في ذلك للأغراض التجارية؛
-> وعند إعادة التوزيع يجب إرفاق نسخة من LICENSE والاحتفاظ بحقوق النشر والعلامة التجارية وبراءات الاختراع وإخلاء المسؤولية. ولا تمنح هذه الرخصة أي حقوق للعلامات التجارية.
+> وعند إعادة التوزيع يجب الاحتفاظ بإشعار حقوق النشر وإشعار الرخصة. ولا تمنح هذه الرخصة أي حقوق للعلامات التجارية.
 
 الملفات المرافقة:
 
 | الملف | الوظيفة |
 | --- | --- |
-| [LICENSE](LICENSE) | النص الكامل للرخصة مفتوحة المصدر (Mulan PSL v2) |
+| [LICENSE](LICENSE) | النص الكامل للرخصة (رخصة MIT) |
 | [DISCLAIMER.md](DISCLAIMER.md) | إرشادات المستخدم وإخلاء المسؤولية |
 | [TRADEMARK.md](TRADEMARK.md) | بيان العلامة التجارية |
 | [NOTICE](NOTICE) | بيان حقوق النشر، والمراسي الزمنية للاصالة، وواجبات التوزيع |
@@ -1026,6 +1023,6 @@ aqua-api.service       وحدة systemd (نشر على خادم فعلي)
 
 **إن كان هذا المشروع قد وفّر عليك وقت المطابقة، فمرحبًا بمنحه Star ⭐**
 
-[عرض حيّ](https://aqua.is3.cc) · [إرسال Issue](https://gitee.com/xiaosu4610/AQUA-API/issues) · [مرآة GitHub](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
+[عرض حيّ](https://aqua.is3.cc) · [إرسال Issue](https://github.com/xiaosu4610/AQUA-API/issues) · [GitHub](https://github.com/xiaosu4610/AQUA-API) · [English](README.en.md)
 
 </div>
