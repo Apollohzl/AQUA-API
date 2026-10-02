@@ -91,6 +91,12 @@ const quotaCleanupInitialDelay = time.Minute
 //     2 分钟足以把"过期后还能用"的窗口压到可忽略。
 const trialReclaimInterval = 2 * time.Minute
 
+// channelHealthInterval 是后台周期检查「渠道成功率」并自动停用不健康渠道的间隔。
+//
+// 取 5 分钟的理由：健康判定基于 15 分钟窗口的调用统计（config.ChannelHealth.WindowMinutes），
+// 检查间隔明显小于窗口才不会被同一批数据反复判定；而过密只会空转查询。
+const channelHealthInterval = 5 * time.Minute
+
 func main() {
 	// 用 run() 承载全部逻辑并统一处理退出码：
 	// 既便于集中做 defer 收尾，也便于将来对 run 做集成测试。
@@ -501,6 +507,12 @@ func run() error {
 
 	logger.Info("HTTP 服务已就绪，等待请求", "addr", cfg.Server.Listen)
 
+	// 后台周期检查渠道健康度：按成功率自动停用不健康渠道。
+	//
+	// 默认关闭（AQUA_CHANNEL_AUTO_DISABLE_MIN_REQUESTS=0）——刻意不设正数默认值，
+	// 避免升级后低峰期的正常抖动把渠道误停。站长开启后本协程才真正生效。
+	go runChannelHealthWatcher(ctx, srv, logger)
+
 	// 续发上次进程退出时未完成的邮件群发（串行，不并发开多条 SMTP 连接）。
 	// 已发过的收件人在明细表里是 sent，不会被再取到——重启导致的重复投递由数据保证不会发生。
 	broadcastSender.ResumeAll(ctx)
@@ -588,6 +600,31 @@ func runTrialGrantReclaimer(ctx context.Context, repo model.TrialGrantRepository
 		case cleaned > 0:
 			logger.Info("已回收到期试用额", "count", cleaned)
 		}
+	}
+}
+
+// runChannelHealthWatcher 周期检查渠道健康度，按成功率自动停用不健康渠道。
+//
+// 为什么放在后台周期而不是请求路径：健康判定要聚合一段窗口的调用统计，
+// 属于"慢查询 + 低频"的运维工作，绝不能挂在热路径上拖慢每一次转发。
+//
+// 行为约定（与其它后台协程一致）：
+//   - 随 ctx 取消（进程退出信号）立即返回，不阻塞关闭；
+//   - 功能默认关闭（MinRequests=0），未启用时每轮空转即返回、不产生日志噪音；
+//   - 单轮失败只打日志、绝不 panic、不退出进程——风控能力的故障不该拖垮主服务。
+//
+// 只停用不删除：停用可人工一键恢复，删除则不可逆；自动化的边界必须停在这里。
+func runChannelHealthWatcher(ctx context.Context, srv *server.Server, logger *slog.Logger) {
+	ticker := time.NewTicker(channelHealthInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		srv.AutoDisableUnhealthyChannels(ctx)
 	}
 }
 
