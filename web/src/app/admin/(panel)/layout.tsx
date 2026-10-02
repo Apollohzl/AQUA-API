@@ -44,6 +44,7 @@ const GROUPS: ShellNavGroup[] = [
       { label: '令牌管理', href: '/admin/tokens', icon: 'key' },
       { label: '用户管理', href: '/admin/users', icon: 'users' },
       { label: '兑换码', href: '/admin/redeem-codes', icon: 'tag' },
+      { label: '群发邮件', href: '/admin/broadcast', icon: 'info' },
     ],
   },
   {
@@ -53,6 +54,7 @@ const GROUPS: ShellNavGroup[] = [
       { label: '操作审计', href: '/admin/audit-logs', icon: 'shield' },
       { label: '站点公告', href: '/admin/announcements', icon: 'info' },
       { label: '内容安全', href: '/admin/sensitive-words', icon: 'filter' },
+      { label: '语料共建', href: '/admin/corpus', icon: 'layers' },
       { label: '运维监控', href: '/admin/maintenance', icon: 'trend' },
       { label: '系统设置', href: '/admin/settings', icon: 'sliders' },
     ],
