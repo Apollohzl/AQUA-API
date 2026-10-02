@@ -20,6 +20,7 @@ Unified protocols · Smart routing · Precise billing · A ready-to-use admin co
 [![License](https://img.shields.io/badge/Trademark-statement-informational.svg)](TRADEMARK.md)
 [![Go](https://img.shields.io/badge/Go-1.27-00ADD8.svg?logo=go&logoColor=white)](https://go.dev)
 [![CGO](https://img.shields.io/badge/CGO-free-success.svg)](#why-aqua-api)
+[![Web](https://img.shields.io/badge/Web-Next.js%2016%20%2B%20React%2019-black.svg)](#tech-stack)
 [![Deploy](https://img.shields.io/badge/Deploy-single%20binary%20%2F%20Docker-informational.svg)](#-quick-start)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)](#-quick-start)
 
@@ -66,41 +67,41 @@ experienced mass reporting ourselves. If a link will not open:
    likely to be blocked, and anyone can confirm the current official address from the repo itself;
 3. If you are sure it is a false positive, file an appeal through the platform's own process.
 
+> Questions or feedback? Join the official chat group: **QQ group `1103667832`**
+> (entry in the top-right of the site's home page).
+
 ---
 
 ## 📖 Table of contents
 
 - [🔗 Official links](#-official-links)
-- [⚠️ Disclaimer](#-disclaimer)
+- [⚠️ Disclaimer](#️-disclaimer)
 - [What is this](#what-is-this)
 - [Why AQUA-API](#why-aqua-api)
 - [Core features](#core-features)
 - [Supported protocols & upstreams](#supported-protocols--upstreams)
+- [Tech stack](#tech-stack)
+- [Full request lifecycle](#full-request-lifecycle)
 - [🚀 Quick start](#-quick-start)
 - [Configuration](#configuration)
 - [Client integration](#client-integration)
+- [Operations guide (groups · agents · billing)](#operations-guide-groups--agents--billing)
 - [FAQ](#faq)
 - [Roadmap](#roadmap)
 - [Development](#development)
+- [Contributing](#contributing)
 - [License](#license)
 
 ---
 
 ## ⚠️ Disclaimer
 
-This project is **vendor-neutral gateway software**. It only provides protocol conversion,
-request routing and usage accounting.
+**Read the [usage notice and disclaimer](DISCLAIMER.md) before using this project.**
+This project is intended for lawful technical research and internal management only; users must
+comply with local laws and the terms of every upstream they connect. The author accepts no
+liability for losses arising from its use.
 
-1. **Compliance is entirely the operator's responsibility** — including each upstream
-   provider's Terms of Service, account policies, local laws and export-control rules.
-2. **Do not use it to circumvent an upstream's billing, quota or regional restrictions.**
-   Whether pooling, reselling or account sharing is permitted depends on each provider's
-   terms. That is your call to make, not a feature promise of this software.
-3. This project **ships no upstream accounts, keys or credits**, and makes no warranty
-   about the availability, stability or legality of any upstream.
-4. The software is provided "as is", without liability for any direct or indirect damages.
-
-**By using it you accept the above.**
+Brand and trademark boundaries: see the [trademark statement](TRADEMARK.md).
 
 ---
 
@@ -116,15 +117,18 @@ Cursor, your own services, scripts, plugins.
 AQUA-API sits in between and turns all of it into **one endpoint, one protocol, one clear bill**:
 
 ```
-                      ┌──────────────────────────────┐
-   Claude Code ─┐     │                              │     ┌─ Official OpenAI keys
-   Codex CLI  ──┤     │          AQUA-API            │     ├─ Azure OpenAI
-   Cursor     ──┼────▶│                              │────▶├─ Anthropic / Gemini
-   Your app   ──┤     │  protocols · routing · billing│     ├─ Cloud vendors / resellers
-   Scripts    ──┘     │  credential pool · console    │     ├─ Subscription accounts
-                      └──────────────────────────────┘     └─ Local Ollama / vLLM
-                        OpenAI / Anthropic / Gemini            adapted by channel type
+                      ┌──────────────────────────────────────────┐
+   Claude Code ─┐     │                                          │     ┌─ Official OpenAI keys
+   Codex CLI  ──┤     │                AQUA-API                  │     ├─ Azure OpenAI
+   Cursor     ──┼────▶│                                          │────▶├─ Anthropic / Gemini
+   Your app   ──┤     │  protocols · routing · billing · groups  │     ├─ Cloud vendors / resellers
+   Scripts    ──┘     │  pool · console · cost reports · notices │     ├─ Subscription accounts
+                      └──────────────────────────────────────────┘     └─ Local Ollama / vLLM
+                        OpenAI / Anthropic / Gemini   adapted by channel type
 ```
+
+It solves exactly three things: **unification** (one protocol, one entry), **reliability**
+(automatic avoidance of failures) and **accountability** (every cent traceable).
 
 ---
 
@@ -137,12 +141,19 @@ Every row below is a decision made after being burned by the alternative:
 |---|---|---|
 | **Upstream keys** | Stored in plaintext, readable in the UI | **AES-256-GCM encrypted at rest**, injected only via env vars — a compromised console yields no usable credentials |
 | **Master key** | Written into the config file | The config field is **ignored outright** — it can never leak through the repo |
-| **Upstream failures** | Permanently disabled after N failures; the pool shrinks | **Cooldown + half-open**: rate limiting is temporary avoidance with automatic recovery; retired only on an explicit "credential revoked" |
-| **Rate limits** | One global threshold | **Per-credential** (weight / priority / RPM / in-flight); over-limit rotates keys instead of punishing them |
+| **Upstream failures** | Permanently disabled after N failures; the pool shrinks | **Failure classification + cooldown/half-open**: rate limiting is temporary avoidance with automatic recovery; retired only on an explicit "credential revoked" |
+| **Retry policy** | Retry everything, or nothing | **Routed by failure type**: 429 → cool down and rotate key; 5xx → switch channel; 401/403 → long cooldown; content filter → switch model; empty 200 → downgrade. **Respects upstream `Retry-After`** |
+| **Rate limits** | One global threshold | **Per-credential** (weight / priority / RPM / in-flight); over-limit rotates keys; groups can carry a **per-minute request plan** |
 | **Quota** | Checked before and after; concurrent requests overspend | **Reserve → settle → refund**: available = quota − used − reserved. No negative balances under concurrency |
+| **Periodic budget** | Only a total quota; you notice when it is spent | Token-level **rolling-window budget** (daily / weekly / monthly) that trips inside the window |
 | **Streaming billing** | Reads only the first N bytes; long answers bill **0** | Incremental SSE parsing — a `usage` frame at the very end of the stream is still captured |
 | **Protocols** | OpenAI-compatible only | **OpenAI / Anthropic / Gemini** downstream, upstream adapted by channel type |
 | **Audience segmentation** | A key is a permission; free and paid cannot be separated | **Groups** decide channels and prices, and **a key picks its group**: same upstream, separate books |
+| **Agent/reseller tiers** | Discounts tracked by hand; books never match | **Agent groups**: the plaza shows the agent "list price struck through + discounted price"; the discount *is* the group multiplier, and **plaza price equals what is actually charged** |
+| **Pricing flexibility** | One price per model, hard to change | Prices configurable per **model × group × channel**; each ledger row stores a **price-version snapshot**, so old bills can be recomputed after a price change |
+| **Cost visibility** | Revenue only, no idea if you profit | **True-cost reconciliation report**: revenue − cost − gross margin by group / channel / model; upstream cost supports per-token and per-call |
+| **Operations** | You watch channels by hand | **Channel health panel** + **auto-disable by success rate**; admin console can be locked down with a **CIDR allowlist** |
+| **Compliance** | One line in the terms and done | **Site-wide compliance notice system**: terms section + model badges + first-visit acknowledgement + top-up page note |
 | **Deployment** | Needs a database, Redis, a compiler | **Single binary + SQLite**, frontend embedded, zero CGO — no gcc required |
 
 ---
@@ -151,41 +162,129 @@ Every row below is a decision made after being burned by the alternative:
 
 ### 🌐 Gateway & forwarding
 
-- **Three downstream protocols**: OpenAI-compatible (`/v1/chat/completions`, `/v1/models`, `/v1/embeddings`), Anthropic, Gemini
-- **Upstream adapters**: OpenAI-compatible, **Azure OpenAI** (deployment + api-version), **Anthropic**, **Gemini**
-- **79 registered channel types**: text / image / video / audio / embedding / aggregator / self-hosted / subscription. The UI **expands only the fields a type needs** (pick Azure and you see *deployment* + *api-version*)
-- **Bidirectional streaming conversion**: Anthropic / Gemini SSE events ↔ OpenAI `chat.completion.chunk`, including tool calls
-- **Canonical intermediate form**: everything converges on the OpenAI protocol (N×1) — adding an upstream means writing one "in", a downstream one "out"
+- **Three downstream protocols**: OpenAI-compatible (`/v1/chat/completions`, `/v1/models`,
+  `/v1/embeddings`), Anthropic (`/v1/messages`), Gemini (`/v1beta`) — each can take over its
+  native clients directly
+- **Upstream adapters**: OpenAI-compatible, **Azure OpenAI** (deployment + api-version),
+  **Anthropic**, **Gemini**, **Codex / Responses**, and subscription accounts
+- **Canonical intermediate form**: everything converges on the OpenAI protocol (N×1) — adding an
+  upstream means writing one "in", a downstream one "out"
+- **Bidirectional streaming conversion**: Anthropic / Gemini SSE events ↔ OpenAI
+  `chat.completion.chunk`, including tool calls
 - **300-second upstream timeout** so long answers are not cut off
 - **Faithful error passthrough** (RFC7807 `detail`, OpenAI `error.message`) — errors are never swallowed
+- **Observable routing headers**: `X-Routed-Via` (channel actually used),
+  `X-Fallback-Attempts` (number of fallback attempts), `X-Upstream` (real upstream model) —
+  fallbacks are transparent without packet captures
 
 ### 🔑 Credential pool & scheduling
 
-- **Five strategies**: sequential / round-robin / weighted random / least recently used / **least in-flight** (default), switchable per channel
+- **Five strategies**: sequential / round-robin / weighted random / least recently used /
+  **least in-flight** (default), switchable per channel
 - **Per-credential tuning**: weight, priority, per-minute limit, in-flight count, cooldown deadline
-- **Graded failure handling**: 429 / 5xx → short cooldown with exponential backoff; 401 / 403 / 402 → long cooldown; **retired only when provably invalid**; transport errors never count
-- **Session affinity**: a session pins to one credential for better cache hits; affinity is dropped cleanly if it goes unavailable
+- **Failure-classified retries**:
+  - `429` → rotate the key and put it into a short cooldown (exponential backoff), honouring `Retry-After`
+  - `5xx` / timeout → switch channel and retry
+  - `401 / 403 / 402` → long cooldown (never retired hastily, so transient risk-control blocks don't kill good keys)
+  - content-filter block → switch model
+  - `200` with empty content → treated as a failure and downgraded
+- **Channel × model cooldown**: a failure cools down only that (channel, model) pair, not every model on the channel
+- **Session affinity**: a session (`X-Session-Id`) pins to one credential for better cache hits;
+  affinity drops cleanly if it goes unavailable
+- **Channel-level circuit break**: when every credential of a channel is out of balance / quota,
+  routing **skips the channel proactively** instead of failing after selection
 - **Multiple entry modes**: single, bulk paste, merged
 
 ### 💰 Billing & accounting
 
 - **Formula**: `quota = (prompt_tokens × prompt_price + completion_tokens × completion_price) / 1,000,000`, plus **per-call pricing**
-- **Price rules**: match by model name or **wildcard**, attachable to groups; in-memory cache with immediate effect
-- **Quota safety**: reserve + settle + refund; **unpriced models skip reservation** so free models are never blocked by a quota wall
+- **Price rules**: match by model name or **wildcard**, attachable to **groups** and to **specific
+  channels** (precedence: channel-specific price → group default price)
+- **Cache price split**: cached tokens bill at a separate unit price (falls back to the input price if unset)
+- **Quota safety**: reserve + settle + refund; `quota_reservations` uses a unique index on
+  `request_id` as an idempotency gate; **unpriced models skip reservation** so free models are
+  never blocked by a quota wall
 - **Semantics**: `-1` means unlimited; the check is "remaining ≤ 0" rather than "== 0", closing an overdraft hole
-- **Payment channels**: manual / Epay / **Stripe** / **Alipay** (RSA2) / **WeChat Pay** (APIv3 + platform cert verification + AES-GCM)
+- **Price-version snapshot**: every request log records the price rule version it was billed
+  against, so **old bills can be recomputed at the old price**
+- **Periodic budget**: a token can be capped at "at most N quota per period" (daily / weekly /
+  monthly); exceeding it inside a window trips the breaker, and the window resets lazily on expiry
+  (no scheduler needed)
+- **Payment channels**: manual / Epay / **Stripe** / **Alipay** (RSA2) /
+  **WeChat Pay** (APIv3 + platform cert verification + AES-GCM)
+- **Order accounting**: callback verification, idempotent crediting, **late-payment recovery**
+  (a payment arriving after the order expired is no longer silently dropped), manual fulfilment /
+  close (no refund endpoint — refunds are handled privately between the operator and the user)
 - **Redeem codes**: bulk generation; redemption is a single atomic transaction (10 concurrent attempts on one code → exactly one wins)
-- **Order accounting**: callback verification, idempotent crediting, manual fulfilment / close (no refund endpoint — refunds are handled privately between the operator and the user)
+
+### 🏷️ Groups, pricing and the agent/reseller system
+
+- **Groups are first-class**: display name, billing multiplier, unlock threshold (unlocked once
+  cumulative top-ups reach a bar), and a per-minute request limit
+- **Admin-only groups**: wholesale / agent tiers are **completely invisible** to ordinary users
+  and can only be assigned by an administrator
+- **Agent tiers**: a user assigned to an agent group sees **their own tier** in the model plaza,
+  rendered as "list price struck through + discounted price", making the discount explicit
+- **Plaza price = charged price**: the agent plaza price comes from the exact same price rules as
+  billing (one matching implementation), so there is no "looks cheap, charged at list" surprise
+- **Group reference counts**: before deleting a group you are told how many channels and price
+  rules it affects
+- **Public quote endpoint**: `GET /api/models/quote` (no login) returns an estimate from token counts
 
 ### 🛠 Operations & console
 
-- **Model plaza**: faceted filters (group / vendor / availability) with **live facet counts**, search, sorting, card & list views, detail modal with pricing and a runnable cURL
-- **Channels**: CRUD, connectivity probes, credential-pool drawer, **one-click model list fetch from upstream**
-- **Groups**: first-class entity with billing multiplier and **reference counts** (deletion tells you what it affects)
-- **Tokens**: quota / expiry / model allowlist / **owning group**; plaintext shown exactly once
-- **Async tasks**: submission, polling, cancellation; per-call billing; automatic refunds on failure
-- **Also included**: users, redeem codes, orders, request logs, subscription accounts (OAuth)
+- **Model plaza**: faceted filters (group / vendor / availability) with **live facet counts**,
+  search, sorting, card & list views, detail modal with pricing, effective date, a runnable cURL,
+  and a cost calculator
+- **Channels**: CRUD, connectivity probes, credential-pool drawer (cooldown countdown, "balance
+  exhausted" markers), **one-click model list fetch from upstream**, upstream cost accounting
+  (per-token / per-call)
+- **Channel health panel**: success rate, cooling-down key count and remaining balance at a glance;
+  **auto-disable** unhealthy channels by success rate (thresholds configurable)
+- **Cost reconciliation report**: revenue − upstream cost − gross profit − margin by group /
+  channel / model; requests without a recorded upstream cost are flagged separately so the report
+  is not silently optimistic
+- **Retry-ratio alerts**: per discounted group, `r = upstream calls / billed requests`, alerting when
+  it crosses the break-even line for that tier
+- **Groups**: multiplier, unlock threshold, per-minute request limit (RPM), admin-only toggle
+- **Tokens**: quota / expiry / model allowlist / **owning group** / **periodic budget**; plaintext is
+  shown exactly once, with an audited "reveal original" recovery entry
+- **Users**: registration (optional email code), **email-code login / password reset**, username or
+  email + password login, time-limited trial credits with expiry reclamation
+- **Referrals & check-in**: invite codes, signup / top-up reward ledger, daily check-in
+- **Announcements**: banner + pinned + scheduled on/off
+- **Audit log**: key admin actions are recorded and searchable
+- **Content safety**: sensitive-word list + master filter toggle (pre-filtering on generation endpoints)
+- **Mail**: SMTP configurable in the console with a test send; hot-reloaded
+- **Async tasks**: submit, poll, cancel; per-call billing; automatic refunds on failure
+- **Also included**: users, redeem codes, orders, request logs, subscription accounts (OAuth), model mappings
+
+### 🔒 Security
+
+- Upstream keys are **AES-256-GCM encrypted at rest**; the master key is env-only (the same-named
+  config field is ignored)
+- Logs **never print upstream keys** — **not even the query string**, so query-param keys cannot leak
+- The admin console supports a **CIDR allowlist** (`AQUA_ADMIN_ALLOW_CIDRS`); anything outside is rejected
+- Revealing a token's plaintext goes through a dedicated endpoint that writes an **audit entry**
+  (who, when, which token)
+- Passwords are salted and hashed; sessions use server-verified signed cookies
+
+### 📜 Compliance notice system
+
+- The terms of service include a "Subscription-account upstream capability" section
+- Subscription-account models carry a "for reference / learning" badge in the plaza
+- The console shows a **one-time acknowledgement dialog** on first visit (stored in localStorage, reviewable)
+- The top-up page shows a short notice before payment
+- In code: the subscription-account adapter files are headed with "for learning/reference only;
+  production commercial use requires upstream authorisation"
+
+### 🎨 Frontend & themes
+
+- **Three themes**: light / dark / **navy**, switchable at any time and persisted locally; navy
+  reuses the dark semantics and overrides colour values
+- **Six languages**: 简体中文 / English / Français / Русский / Español / العربية (with RTL layout)
 - **Mobile**: bottom navigation, tables degrade to cards, safe-area handling, bottom-sheet modals
+- **Componentised**: tables / modals / forms / charts (ECharts) / notices, consistently styled
 
 ---
 
@@ -193,15 +292,70 @@ Every row below is a decision made after being burned by the alternative:
 
 **Downstream** (how your apps connect): `OpenAI-compatible` · `Anthropic` · `Gemini`
 
-**Upstream** (how we connect out):
+**Upstream** (how we connect out): **79 registered channel types** across 8 categories:
 
-| Status | Types |
+| Category | Description |
 |---|---|
-| ✅ **Implemented** | OpenAI-compatible (DeepSeek / Kimi / Zhipu / Qwen / SiliconFlow / OpenRouter / Groq / Together / Mistral / xAI / Ollama / vLLM / resellers), **Azure OpenAI**, **Anthropic**, **Gemini** |
-| 🧭 **Registered, adapter pending** | AWS Bedrock (SigV4), Google Vertex (service-account JWT), plus image / video / audio / embedding upstreams |
+| Text LLMs | OpenAI / Azure / Anthropic / Gemini / DeepSeek / Kimi / Zhipu / Qwen / SiliconFlow / OpenRouter / Groq / Together / Mistral / xAI / Ollama / vLLM and more |
+| Aggregators | Aggregating relay services |
+| Subscription accounts | Claude / Codex / Gemini subscription accounts (OAuth refresh) |
+| Self-hosted | Local / private deployments |
+| Image | Image-generation upstreams |
+| Video | Video-generation upstreams |
+| Audio | Speech upstreams |
+| Embedding | Embedding upstreams |
 
-> **Straight answer**: types whose adapter is not finished are shown as *"coming soon"* and
-> **cannot be selected** — you will never configure half a channel only to find it cannot work.
+> **Straight answer**: of the 79 registered types, **37 already have a finished protocol adapter and
+> authentication implementation** (`Available: true`) and are selectable; the rest are shown as
+> *"coming soon"* and **cannot be selected** — you will never configure half a channel only to find
+> it cannot work. The implemented protocol / auth whitelist is pinned by
+> `internal/channeltype/catalog_test.go` to prevent mislabelling.
+
+---
+
+## Tech stack
+
+| Layer | Choice | Notes |
+|---|---|---|
+| Backend | **Go 1.27** + [Gin](https://github.com/gin-gonic/gin) v1.12 | Single binary, **zero CGO** (SQLite via the pure-Go `modernc.org/sqlite`) |
+| Database | **SQLite** | Embedded, zero maintenance; migrations are per-dialect, leaving an extension seam |
+| Frontend | **Next.js 16.3** (static export) + **React 19** + **Tailwind CSS v4** + TypeScript 5 | Build output `web/dist` is embedded via `go:embed` |
+| Charts | ECharts 5 | Console statistics |
+
+> The frontend uses `output: 'export'` (static). There is **no separate frontend host**: the UI and
+> the API share one origin and one port, so deployment is a single binary.
+
+---
+
+## Full request lifecycle
+
+What a `/v1/chat/completions` call goes through inside the gateway (useful for debugging and for
+extending it):
+
+```
+Client
+  │  ① Auth & rate limiting
+  ├─▶ TokenAuth        validate token (enabled / expiry / model allowlist / owning group)
+  │                    reserve quota (step one of reserve → settle → refund)
+  ├─▶ Group RPM gate   per-group per-minute request cap (zero cost when rpm_limit = 0)
+  ├─▶ Sensitive-word pre-filter
+  │
+  │  ② Routing
+  ├─▶ filter usable channels by group (enabled + model support + time rules)
+  ├─▶ channel circuit check  are all credentials out of balance / quota? → skip
+  ├─▶ pick a credential       failure cooldown + channel×model cooldown + affinity + five strategies
+  │
+  │  ③ Forwarding & adaptation
+  ├─▶ inbound protocol → canonical OpenAI form → upstream adapter (by channel type)
+  ├─▶ bidirectional streaming conversion (frame-level SSE)
+  ├─▶ classified handling: 429 → rotate key; 5xx → switch channel; filter → switch model; empty 200 → downgrade
+  │
+  │  ④ Response & accounting
+  ├─▶ inject observable headers (X-Routed-Via / X-Fallback-Attempts / X-Upstream)
+  ├─▶ settle quota (refund the difference on success; full refund on failure)
+  ├─▶ write the request log (real channel / upstream model / price-version snapshot)
+  └─▶ update credential runtime state (last used / cooldown / failure count / balance)
+```
 
 ---
 
@@ -255,6 +409,9 @@ sudo systemctl daemon-reload && sudo systemctl enable --now aqua-api
 **Upgrading**: replace `/opt/aqua/aqua` and `sudo systemctl restart aqua-api`
 (migrations run automatically on startup).
 
+> Keep the previous binary (e.g. `aqua.bak-<timestamp>`). Rolling back is a `cp` plus a restart;
+> migrations only **add** columns, never drop them, so they are forward-compatible.
+
 ### Option 4 — From source (development)
 
 ```bash
@@ -269,6 +426,12 @@ curl http://127.0.0.1:8787/healthz
 > **The frontend is embedded** via `go:embed`, so **deployment is a single file**.
 > Building without running the frontend build leaves a placeholder page — the API still works.
 
+### First run (install wizard)
+
+Opening the site for the first time leads into the **install wizard**: create the super-admin
+account → fill in site details → (optional) configure payment / mail. You can also sign in to the
+admin panel from its own dedicated entry.
+
 ### Reverse proxy
 
 Put Nginx or Caddy in front for HTTPS. Two things that bite people:
@@ -280,6 +443,7 @@ location / {
 
     # 1) Streaming must not be buffered, or the UI waits for the whole answer
     proxy_buffering off;
+    proxy_cache off;
 
     # 2) Must exceed the gateway's upstream timeout (300s), or long answers get cut
     proxy_read_timeout 600s;
@@ -308,11 +472,28 @@ Priority: **defaults < config file < environment variables**.
 | `AQUA_SERVER_MODE` | | `debug` / `release` / `test` |
 | `AQUA_DATABASE_DRIVER` / `AQUA_DATABASE_DSN` | | `sqlite`, default `./data/aqua.db` |
 | `AQUA_RELAY_GROUP` | | Gateway **default group** (where group-less tokens resolve), default `default` |
-| `AQUA_SMTP_*` | | Outbound mail (signup codes, notifications) |
-| `AQUA_EPAY_KEY`, `AQUA_STRIPE_SECRET_KEY`, `AQUA_STRIPE_WEBHOOK_SECRET`, `AQUA_ALIPAY_PRIVATE_KEY`, `AQUA_ALIPAY_PUBLIC_KEY`, `AQUA_WECHATPAY_APIV3_KEY`, `AQUA_WECHATPAY_PRIVATE_KEY`, `AQUA_WECHATPAY_PLATFORM_PUBLIC_KEY` | | Payment credentials |
+| `AQUA_ADMIN_ALLOW_CIDRS` | | Admin console **allowlist** (comma-separated CIDRs, e.g. `10.0.0.0/8,1.2.3.4/32`). Empty = unrestricted |
+| `AQUA_CHANNEL_AUTO_DISABLE_MIN_REQUESTS` | | Minimum sample size for auto-disable (0 = disabled, the default) |
+| `AQUA_CHANNEL_AUTO_DISABLE_SUCCESS_RATE` | | Success-rate floor (e.g. `0.9`); below it (with enough samples) the channel is disabled |
+| `AQUA_CHANNEL_AUTO_DISABLE_WINDOW_MINUTES` | | Statistics window in minutes |
+| `AQUA_SMTP_HOST` / `AQUA_SMTP_PORT` / `AQUA_SMTP_USERNAME` / `AQUA_SMTP_PASSWORD` / `AQUA_SMTP_FROM` / `AQUA_SMTP_FROM_NAME` | | Outbound mail (signup codes, notifications); also configurable in the console |
+| `AQUA_EPAY_KEY` | | Epay merchant key (MD5 signature) |
+| `AQUA_STRIPE_SECRET_KEY` / `AQUA_STRIPE_WEBHOOK_SECRET` | | Stripe |
+| `AQUA_ALIPAY_PRIVATE_KEY` / `AQUA_ALIPAY_PUBLIC_KEY` | | Official Alipay (RSA2) |
+| `AQUA_WECHATPAY_APIV3_KEY` / `AQUA_WECHATPAY_PRIVATE_KEY` / `AQUA_WECHATPAY_PLATFORM_PUBLIC_KEY` | | Official WeChat Pay (APIv3) |
 | `AQUA_LOG_LEVEL` / `AQUA_LOG_FORMAT` | | `debug`/`info`/`warn`/`error`, `text`/`json` |
 
 Full sample: [`.env.example`](.env.example).
+
+### Config file
+
+```json
+{
+  "server":   { "listen": "127.0.0.1:8787", "mode": "release" },
+  "database": { "driver": "sqlite", "dsn": "./data/aqua.db" },
+  "log":      { "level": "info", "format": "text" }
+}
+```
 
 ### Two security rules
 
@@ -369,6 +550,67 @@ claude
 Cursor, Codex CLI, Cherry Studio, NextChat, LobeChat and similar: choose
 "OpenAI-compatible / custom OpenAI endpoint" and paste the Base URL and token.
 
+### Estimate cost (no token needed)
+
+```bash
+curl "https://your-domain/api/models/quote?model=your-model&prompt_tokens=1000&completion_tokens=500"
+```
+
+---
+
+## Operations guide (groups · agents · billing)
+
+### How groups and channels relate
+
+- A **channel** decides *whether* a request may use that upstream (which models it claims, which
+  groups it belongs to);
+- A **credential** (each key under a channel) decides *which key* is used, and can further restrict
+  the groups / models it serves;
+- A **token** may name its group; otherwise it falls into the **gateway default group**
+  (`AQUA_RELAY_GROUP`).
+
+> ⚠️ **The most common trap**: after moving channels to a new group, if you forget to update the
+> default group, every group-less token immediately reports "no available channel".
+
+### Configuring an agent/reseller tier
+
+1. In **Groups** create an agent tier (e.g. `agent`), set the **billing multiplier** to the wholesale
+   discount (e.g. `60` = 60%), and enable **admin-only**;
+2. In **Prices** configure pricing for that tier (it can differ from the public tier), or reuse the
+   same rules and let the multiplier discount them;
+3. In **Users** assign the reseller account's `agent_group` to that tier;
+4. The agent now sees **their tier** in the model plaza, with "list price struck through +
+   discounted price", and it matches what is actually charged.
+
+### Price precedence
+
+```
+channel-specific price (channel_id = that channel)   ← highest
+        ↓ if absent, fall back to
+group default price (channel_id = 0)
+```
+
+The same model and group can be priced differently per channel, for cases where different upstreams
+have different costs.
+
+### Quota and budget
+
+- **Total quota**: at both token and user level; `-1` means unlimited;
+- **Periodic budget**: set "at most N per period" on a token, with daily / weekly / monthly windows;
+  exceeding it returns 429 and the window resets automatically on expiry.
+
+### Cost and margin
+
+The console's **cost reconciliation** aggregates by group / channel / model:
+
+```
+gross profit = revenue (quota actually charged to users) − upstream cost (per the channel cost rules)
+```
+
+Enter upstream cost per channel either per-token or per-call; **requests with no recorded cost are
+flagged separately** so you remember to fill them in — otherwise that cost is counted as zero and
+the report looks rosier than reality.
+
 ---
 
 ## FAQ
@@ -395,6 +637,16 @@ check whether the group has a **wildcard price rule** (e.g. `*`) — that makes 
 into a short cooldown (exponential backoff, auto-recovery). If it happens a lot, you likely
 have too few keys or a low per-key limit — add keys or lower the per-minute cap.
 
+**A user hit a 429 because of the group's per-minute cap.**
+The response carries `error.code = quota.group_rpm_exceeded` and states the group's per-minute
+limit. Raise the limit or move the user to an uncapped group.
+
+**An agent says "I see the discount but I'm charged list price".**
+Normally impossible: the agent plaza price and billing come from the same price rules. Check
+① the agent account's `agent_group` is indeed that tier, and
+② the agent's **token was created with that group selected** (a token without the right group
+falls back to the default tier). If both are correct and it still mismatches, please open an issue.
+
 **How do I back up?**
 Stop the service (or use `VACUUM INTO` for a hot copy) → copy `aqua.db` → **and back up
 `AQUA_APP_KEY`**. Without the master key the upstream keys in that backup are undecryptable bytes.
@@ -406,12 +658,17 @@ metadata) so adding one later does not require rewriting the business layer.
 
 **How do I add a new upstream type?**
 Register its metadata in `internal/channeltype/catalog.go` (default base URL, auth mode, extra
-required parameters, path template, capability flags). If it belongs to an existing protocol
-family (OpenAI-compatible), that is all. A different protocol needs an adapter in `internal/relay/`.
+required parameters, path template, capability flags) and confirm it against the implemented
+whitelist in `catalog_test.go`. If it belongs to an existing protocol family
+(OpenAI-compatible), that is all. A different protocol needs an adapter in `internal/relay/`.
 
 **Why don't I see my upstream key in the logs?**
 Also by design: logs print whether credentials were injected plus the upstream host and path —
 **not even the query string**, so query-param keys cannot leak.
+
+**How do I see which channel handled a request, and how many fallbacks it took?**
+The response carries `X-Routed-Via` / `X-Fallback-Attempts` / `X-Upstream`; the request log also
+records the real channel and upstream model name.
 
 ---
 
@@ -422,12 +679,19 @@ Also by design: logs print whether credentials were injected plus the upstream h
 - [x] Reserve / settle / refund quota system; incremental streaming usage parsing
 - [x] Groups & multipliers, model plaza, redeem codes, five payment channels, async tasks
 - [x] Single-binary + Docker deployment with an embedded frontend
+- [x] Browser install wizard + dedicated admin entry; admin audit log; announcements
+- [x] Email-code login / password reset; referrals & check-in; time-limited trial credits
+- [x] Failure-classified retries, channel × model cooldown, upstream `Retry-After`
+- [x] Token rolling-window budgets (daily / weekly / monthly)
+- [x] Per-group per-minute request plans (RPM), channel-level balance circuit break
+- [x] Agent tiers with plaza discount display, public quote endpoint
+- [x] True-cost reconciliation (revenue − cost − gross profit), price-version snapshots
+- [x] Channel health panel & auto-disable by success rate, admin CIDR allowlist
+- [x] Three themes (light / dark / navy), site-wide compliance notices
 - [ ] AWS Bedrock / Google Vertex signature auth
-- [ ] Image / video / audio upstream adapters
-- [ ] Model ID mapping wired into the forwarding path (already configurable in the console)
-- [ ] Standalone admin entrypoint + browser-based install wizard
-- [ ] Subscription quota windows (auto-reset every 5h / day / week)
-- [ ] Admin action audit log, announcements & FAQ, proxy pool
+- [ ] Image / video / audio upstream adapters (registered; adapters pending)
+- [ ] UI for per-channel price entry (backend capability is ready)
+- [ ] Subscription quota-window visualisation (auto-reset every 5h / day / week)
 
 ---
 
@@ -441,18 +705,7 @@ gofmt -w .           # format
 cd web && npm ci && npm run type-check && npm run build   # frontend
 ```
 
-### Mandatory conventions
-
-1. **Small commits** — commit each independently describable step immediately; every commit
-   should be buildable and revertible.
-2. **AI-friendly comments** — every source file starts with an **Intent / Flow / Extension**
-   header so anyone (human or AI) understands in 30 seconds what it does, how data flows, and
-   where to extend it.
-3. **Secrets never in the database, on disk, or in logs.**
-
-See [`AGENTS.md`](AGENTS.md) (Chinese).
-
-### Layout
+Layout (this repository *is* the code directory):
 
 ```
 cmd/aqua/              entrypoint (wiring only)
@@ -460,13 +713,30 @@ internal/config/       config loading & validation
 internal/model/        domain models & repository interfaces
 internal/store/        persistence (SQL + versioned migrations, per dialect)
 internal/server/       HTTP layer (routing / middleware / handlers)
-internal/relay/        protocol adaptation & forwarding (core domain)
+internal/relay/        protocol adaptation & forwarding (routing / billing / cooldown)
 internal/payment/      payment channel adapters
-internal/channeltype/  channel type registry
-web/                   frontend (build output embedded into the binary)
+internal/channeltype/  channel type registry (79 types)
+internal/i18n/         server-side localisation
+web/                   frontend (Next.js; build output embedded into the binary)
 Dockerfile             multi-stage: frontend → backend → minimal runtime
 aqua-api.service       systemd unit for bare-metal deployment
 ```
+
+### Mandatory conventions
+
+1. **Small commits** — commit each independently describable step immediately; every commit
+   should be buildable and revertible. The full commit timeline is the project's provenance record;
+   squashing is not allowed.
+2. **Structured comments** — every source file starts with an **Intent / Flow / Extension** header
+   describing what the code does, how data flows and where to extend it; technical reasons only,
+   no personal notes.
+3. **Secrets never in the database, on disk, or in logs.**
+4. **Originality red line** — reading, studying and learning from any public project (including
+   reference implementations) to understand features and algorithms is allowed; **verbatim copying**
+   of code, comments, constant tables or naming conventions is not. The test is simple: can you
+   explain this implementation's design trade-offs without the reference project?
+
+See [`AGENTS.md`](AGENTS.md) (Chinese) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 
@@ -499,6 +769,7 @@ Companion documents:
 | [TRADEMARK.md](TRADEMARK.md) | Brand and trademark statement |
 | [NOTICE](NOTICE) | Copyright, originality record and redistribution duties |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guide (Fork + PR workflow) |
+| [AGENTS.md](AGENTS.md) | Code guide (Chinese, for AI assistants and developers) |
 
 ---
 
@@ -506,6 +777,6 @@ Companion documents:
 
 **If this saved you an afternoon of reconciling invoices, a star is appreciated ⭐**
 
-[🌐 Live demo](https://aqua.is3.cc) ｜ [🐛 Issues](https://gitee.com/xiaosu4610/AQUA-API/issues) ｜ [🌍 Gitee](https://gitee.com/xiaosu4610/AQUA-API) ｜ [📖 简体中文](README.md)
+[🌐 Live demo](https://aqua.is3.cc) ｜ [🐛 Issues](https://gitee.com/xiaosu4610/AQUA-API/issues) ｜ [🌍 GitHub](https://github.com/xiaosu4610/AQUA-API) ｜ [📖 简体中文](README.md)
 
 </div>
