@@ -20,7 +20,7 @@
 ![i18n](assets/badges/i18n.svg)
 ![Platform](assets/badges/platform.svg)
 
-[简体中文](README.md) · [English](README.en.md) · [在线演示](https://aqua.is3.cc)
+[简体中文](README.md) · [English](README.en.md) · [Français](README.fr.md) · [Русский](README.ru.md) · [Español](README.es.md) · [العربية](README.ar.md)
 
 </div>
 
@@ -65,15 +65,25 @@
 - [免责声明](#免责声明)
 - [这是什么](#这是什么)
 - [为什么选择](#为什么选择)
+- [功能总览](#功能总览)
 - [核心特性](#核心特性)
-- [支持的协议与上游](#支持的协议与上游)
-- [技术栈](#技术栈)
+- [系统架构](#系统架构)
+- [核心数据模型](#核心数据模型)
 - [请求的完整生命周期](#请求的完整生命周期)
+- [支持的协议与上游](#支持的协议与上游)
+- [接口一览](#接口一览)
+- [权限与角色](#权限与角色)
+- [计费与账务细则](#计费与账务细则)
+- [技术栈](#技术栈)
 - [快速开始](#快速开始)
 - [配置](#配置)
 - [接入示例](#接入示例)
 - [运营指南](#运营指南)
+- [国际化](#国际化)
+- [安全](#安全)
+- [部署与容量](#部署与容量)
 - [常见问题](#常见问题)
+- [术语表](#术语表)
 - [路线图](#路线图)
 - [开发](#开发)
 - [参与贡献](#参与贡献)
@@ -160,6 +170,31 @@ flowchart LR
 
 ---
 
+## 功能总览
+
+一张表看全能力边界（详细说明见后续章节）。
+
+| 模块 | 能力 |
+| --- | --- |
+| 协议接入 | OpenAI 兼容 · Anthropic · Gemini · Codex / Responses，四类入站可同时开启 |
+| 上游适配 | OpenAI 兼容 · Azure OpenAI · Anthropic · Gemini · Codex · 订阅账号；目录登记 79 种渠道类型，37 种已实现 |
+| 渠道路由 | 分组路由 · 渠道级模型分叉 · 凭据级分组与模型分叉 · 时段规则 · 渠道级熔断跳过 |
+| 凭据调度 | 顺序 / 轮询 / 加权随机 / 最久未用 / 最少在途；权重 · 优先级 · 每分钟上限 · 在途数 · 冷却截止 |
+| 故障处理 | 失败分类重试 · 渠道×模型级冷却 · 指数退避 · 尊重 `Retry-After` · 会话粘性 · 半开恢复 |
+| 计费 | 按量（输入 / 输出 / 缓存三价）· 按次 · 通配匹配 · 渠道专属价 · 分组倍率 · 定价版本快照 |
+| 额度与风控 | 预扣 / 结算 / 退还三段式 · 令牌与用户两级额度 · 令牌周期预算（日 / 周 / 月）· 幂等请求台账 |
+| 分组与代理 | 分组实体 · 计费倍率 · 解锁门槛 · 分组 RPM · 仅后台分发 · 代理拿货档与广场折后价 |
+| 支付与账务 | 人工 / 易支付 / Stripe / 支付宝官方 / 微信支付官方 · 兑换码 · 订单幂等入账 · 迟到支付补记 |
+| 用户体系 | 注册 · 邮箱验证码登录与重置密码 · 会话 Cookie · 限时试用额 · 邀请返利 · 每日签到 |
+| 运营后台 | 模型广场 · 渠道与密钥池 · 分组 · 价格 · 令牌 · 用户 · 订单 · 兑换码 · 调用日志 · 审计 |
+| 增值能力 | 异步任务 · 语料共建 · 群发邮件 · 站点公告 · 敏感词 · 模型映射 · OAuth 订阅账号 |
+| 可观测 | 渠道健康面板 · 重试率告警 · 成本对账报表 · 路由响应头 · 运行维护概览与备份 |
+| 安全 | 密钥加密落库 · 日志脱敏 · CIDR 白名单 · 明文取回审计 · 越权防护 |
+| 国际化 | 服务端与前端各 6 种语言 · 本文档提供联合国六种官方语言版本 |
+| 部署 | 单二进制 · Docker · systemd · 前端内嵌 · SQLite 免运维 |
+
+---
+
 ## 核心特性
 
 ### 网关与转发
@@ -194,123 +229,130 @@ flowchart LR
 
 - **口径**：`额度 = (输入 Token × 输入价 + 输出 Token × 输出价) / 1,000,000`，另支持按次计价
 - **价格规则**：按模型名或通配模式匹配，可挂到分组，也可为特定渠道配专属价
-  （取价优先级：渠道专用价 → 分组默认价）
 - **缓存价分离**：命中上游缓存的 token 按独立单价计费（未配置时回退输入价）
-- **额度安全**：预扣 + 结算 + 退还三段式；`quota_reservations` 以 `request_id` 唯一索引做幂等闸门；
-  不计费模型跳过预扣，免费模型不会被额度墙挡住
-- **额度语义**：`-1` 表示不限；判定用「剩余 ≤ 0」而不是「等于 0」，堵住超额透支
+- **额度安全**：预扣 + 结算 + 退还三段式，幂等台账保证「至多入账一次」
 - **定价版本快照**：每条调用日志记录当时的计价规则版本，改价后旧账仍可按旧价复算
-- **周期预算**：令牌可设「每周期最多花 N 额度」（日 / 周 / 月），窗口内超限直接熔断，
-  窗口到期惰性重置，不依赖定时任务
+- **周期预算**：令牌可设「每周期最多花 N 额度」，窗口到期惰性重置，不依赖定时任务
 - **支付通道**：人工确认 / 易支付 / Stripe / 支付宝官方（RSA2）/ 微信支付官方（APIv3 + 平台证书验签 + AES-GCM）
-- **订单账务**：回调验签、幂等入账、迟到支付补记（订单超时关闭后到账不再静默丢弃）、
-  人工补单与关单（不提供退款入口，退款由站方与用户另行约定）
+- **订单账务**：回调验签、幂等入账、迟到支付补记、人工补单与关单
 - **兑换码**：批量生成；并发兑换是单事务原子扣减，10 个并发抢同一码只会成功一次
 
 ### 分组、定价与代理体系
 
-- **分组是一等实体**：展示名、计费倍率、解锁门槛（累计充值达标才可自选）、每分钟请求上限
+- **分组是一等实体**：展示名、计费倍率、解锁门槛、每分钟请求上限
 - **仅后台分发的分组**：批发价 / 代理档对普通用户完全不可见，只能由管理员指派
 - **代理拿货档**：被指派到代理分组的用户，在模型广场看到的是他自己那一档的模型与价格，
   并以「原价划线 + 橙色折后价」对照展示
-- **广场价 = 实际扣费**：代理广场价与计费取自同一套价格规则，不存在「看着便宜、实际按原价扣」
+- **广场价 = 实际扣费**：代理广场价与计费取自同一套价格规则
 - **分组引用统计**：删除分组前告知影响多少渠道与价格规则
 - **公开定价试算**：`GET /api/models/quote`（无需登录），输入 token 数即返回预估费用
 
 ### 运营与后台
 
-- **模型广场**：分面筛选（分组 / 厂商 / 可用状态）+ 分面计数联动 + 搜索 + 排序 +
-  卡片与列表双视图 + 详情弹窗（价格表、生效时间、可直接运行的 cURL、费用试算器）
-- **渠道管理**：增删改、连通性测活、密钥池抽屉（冷却倒计时、余额耗尽标记）、
-  一键从上游拉取模型列表、上游进价核算（按量 / 按次）
-- **渠道健康面板**：各渠道成功率、冷却中密钥数、剩余余额一屏尽览；可按成功率自动停用不健康渠道
-- **财务对账报表**：按分组 / 渠道 / 模型聚合收入、成本、毛利与毛利率，未录进价的请求单独标注
-- **重试率告警**：按折扣分组统计 `r = 上游调用次数 / 计费请求次数`，越过该档保本线即告警
-- **令牌**：额度 / 过期 / 模型白名单 / 所属分组 / 周期预算；明文仅创建时展示一次，
-  并提供受审计的「查看原文」找回入口
-- **用户体系**：注册（可选邮箱验证码）、邮箱验证码登录与重置密码、用户名或邮箱 + 密码登录、
-  限时试用额发放与到期回收
+- **模型广场**：分面筛选 + 分面计数联动 + 搜索 + 排序 + 卡片与列表双视图 +
+  详情弹窗（价格表、生效时间、可直接运行的 cURL、费用试算器）
+- **渠道管理**：增删改、连通性测活、密钥池抽屉、一键拉取上游模型列表、上游进价核算（按量 / 按次）
+- **渠道健康面板**：成功率、冷却中密钥数、剩余余额一屏尽览；支持按成功率自动停用
+- **财务对账报表**：按分组 / 渠道 / 模型聚合收入、成本、毛利与毛利率
+- **重试率告警**：按折扣分组统计 `r = 上游调用次数 / 计费请求次数`，越过保本线即告警
+- **令牌**：额度 / 过期 / 模型白名单 / 所属分组 / 周期预算 / 明文受审计找回
+- **用户体系**：注册、邮箱验证码登录与重置密码、限时试用额发放与到期回收
 - **邀请与签到**：邀请码、注册与充值奖励台账、每日签到
-- **站点公告**：横幅提醒 + 置顶 + 定时上下线
-- **操作审计**：后台关键操作留痕可查
-- **内容安全**：敏感词词表 + 过滤总开关（生成类接口前置过滤）
-- **邮件通道**：SMTP 后台可视化配置 + 测试发信，支持热更新
-- **异步任务**：提交、轮询、取消；按次计价；失败自动退还
-- **其余后台**：用户、兑换码、订单、调用日志、订阅账号（OAuth）、模型映射
-
-### 安全
-
-- 上游密钥 AES-256-GCM 加密落库，主密钥只能来自环境变量
-- 日志永不输出上游密钥，连 URL 查询串都不输出，避免走查询参数的密钥被打印
-- 管理后台支持 CIDR 白名单（`AQUA_ADMIN_ALLOW_CIDRS`），白名单外一律拒绝
-- 令牌明文取回走独立接口并写审计日志，谁在何时取了哪把可查
-- 密码使用加盐哈希存储；登录会话采用服务端校验的签名 Cookie
-
-### 合规提示体系
-
-- 用户协议新增「订阅账号类上游能力接入声明」章节
-- 订阅账号类模型在广场带「学习参考」徽标
-- 门户控制台首访一次性合规确认弹窗（存 localStorage，可复查）
-- 充值页在支付前给出一行提示
-- 代码层：订阅账号适配层文件头注明「仅供学习参考，生产商用需取得上游授权」
+- **站点公告 / 操作审计 / 敏感词 / SMTP / 异步任务 / 群发邮件 / 语料共建**
+- **其余后台**：模型元数据与映射、OAuth 订阅账号、运行维护概览与数据库备份
 
 ### 前端与主题
 
 - **三套主题**：浅色 / 深色 / 深蓝色，随时切换，偏好本地持久化
-- **六语言**：简体中文、English、Français、Русский、Español、العربية（含 RTL 布局）
+- **六语言界面**：简体中文、English、Français、Русский、Español、العربية（含 RTL 布局）
 - **移动端**：底部导航、表格自动降级为卡片、安全区适配、弹窗底部弹出
-- **组件化**：表格 / 弹窗 / 表单 / 图表（ECharts）/ 提示，风格统一
 
 ---
 
-## 支持的协议与上游
+## 系统架构
 
-**下游（应用如何连接本站）**：OpenAI 兼容 · Anthropic · Gemini
+分层设计，单向依赖，`internal/` 各包之间禁止循环依赖。
 
-**上游（本站如何连接他人）**：目录中已登记 **79 种**渠道类型，按 8 大类组织：
+```mermaid
+flowchart TB
+    subgraph L1["接入层 · internal/server"]
+        R["路由与中间件<br/>鉴权 · 限流 · 分组 RPM · 敏感词 · 审计 · CIDR · 语言"]
+        H["处理器<br/>模型广场 / 渠道 / 分组 / 令牌 / 订单 / 财务 ..."]
+    end
 
-| 大类 | 说明 |
-| --- | --- |
-| 文本大模型 | OpenAI / Azure / Anthropic / Gemini / DeepSeek / Kimi / 智谱 / 通义 / 硅基流动 / OpenRouter / Groq / Together / Mistral / xAI / Ollama / vLLM 等 |
-| 聚合服务 | 各类聚合中转 |
-| 订阅账号 | Claude / Codex / Gemini 等订阅账号（OAuth 刷新） |
-| 自建 | 本地与私有化部署 |
-| 图像 | 图像生成类上游 |
-| 视频 | 视频生成类上游 |
-| 音频 | 语音类上游 |
-| 嵌入 | Embedding 类上游 |
+    subgraph L2["核心域 · internal/relay"]
+        RT["选路编排<br/>分组 → 渠道 → 凭据"]
+        AU["协议适配<br/>OpenAI / Anthropic / Gemini / Codex"]
+        BL["计费与结算<br/>预扣 · 结算 · 退还 · 预算"]
+        FD["失败分类与冷却"]
+    end
 
-> **诚实说明**：79 种类型中，**已有 37 种完成协议适配器与鉴权实现**（`Available: true`），可直接选用；
-> 其余类型在后台标为「即将支持」并禁止选中，不会让你配到一半才发现调不通。
-> 已实现的协议与鉴权白名单由 `internal/channeltype/catalog_test.go` 钉住，防止误标。
+    subgraph L3["领域层 · internal/model"]
+        M["实体与仓储接口<br/>Channel · Key · Group · Price · Token · Order · UsageLog"]
+    end
+
+    subgraph L4["持久化 · internal/store"]
+        S["SQL 实现 + 版本化迁移<br/>SQLite（按方言分目录）"]
+    end
+
+    subgraph L5["支撑 · internal/*"]
+        P["payment 支付通道"]
+        CT["channeltype 渠道目录"]
+        I18N["i18n 多语言"]
+        CFG["config 配置"]
+    end
+
+    L1 --> L2
+    L1 --> L3
+    L2 --> L3
+    L4 --> L3
+    L1 -.-> L5
+    L2 -.-> L5
+```
+
+| 层 | 目录 | 职责 | 不做什么 |
+| --- | --- | --- | --- |
+| 接入层 | `internal/server` | 路由、中间件、请求校验、DTO 转换 | 不直接写 SQL、不实现转发逻辑 |
+| 核心域 | `internal/relay` | 选路、协议转换、转发、计费结算、失败处置 | 不感知 HTTP 细节，只依赖 `model` 接口 |
+| 领域层 | `internal/model` | 实体、规则、仓储接口定义 | 不写 SQL、不感知 HTTP |
+| 持久化 | `internal/store` | 仓储实现、迁移执行、聚合查询 | 不承载业务规则 |
+| 支撑 | `payment` / `channeltype` / `i18n` / `config` | 支付适配、渠道目录、文案、配置 | 不反向依赖上层 |
+
+> 新增上游：在 `internal/channeltype/catalog.go` 登记类型；协议不同则在 `internal/relay/` 增加适配器。
+> 新增数据表：在 `internal/store/migrations/sqlite/` 新开递增编号脚本（只增不改），
+> 再同步 `model` 实体与 `store` 列清单。
 
 ---
 
-## 技术栈
+## 核心数据模型
 
-| 层 | 选型 | 说明 |
+```mermaid
+erDiagram
+    GROUP ||--o{ CHANNEL : "分组路由"
+    CHANNEL ||--o{ CHANNEL_KEY : "一渠道多凭据"
+    GROUP ||--o{ MODEL_PRICE : "分组定价"
+    CHANNEL ||--o{ MODEL_PRICE : "渠道专属价"
+    USER ||--o{ TOKEN : "拥有"
+    TOKEN ||--o{ USAGE_LOG : "产生"
+    CHANNEL ||--o{ USAGE_LOG : "实际命中"
+    CHANNEL ||--o{ CHANNEL_MODEL_COST : "上游进价"
+    USER ||--o{ ORDER : "充值"
+    USER ||--o{ QUOTA_RESERVATION : "预扣台账"
+    GROUP }o--|| USER : "agent_group 指派"
+```
+
+| 实体 | 关键字段 | 说明 |
 | --- | --- | --- |
-| 后端 | Go 1.27 + Gin v1.12 | 单二进制，零 CGO（SQLite 采用纯 Go 的 `modernc.org/sqlite`） |
-| 数据库 | SQLite | 嵌入式、免运维；迁移脚本按方言分目录，已留出扩展接缝 |
-| 前端 | Next.js 16.3（静态导出）+ React 19 + Tailwind CSS v4 + TypeScript 5 | 构建产物 `web/dist` 由 `go:embed` 打进二进制 |
-| 图表 | ECharts 5 | 后台统计图表 |
-
-<div align="center">
-
-<img src="assets/icons/go.svg" width="36" title="Go 1.27" alt="Go" />
-<img src="assets/icons/nextdotjs.svg" width="36" title="Next.js 16" alt="Next.js" />
-<img src="assets/icons/react.svg" width="36" title="React 19" alt="React" />
-<img src="assets/icons/typescript.svg" width="36" title="TypeScript 5" alt="TypeScript" />
-<img src="assets/icons/tailwindcss.svg" width="36" title="Tailwind CSS v4" alt="Tailwind CSS" />
-<img src="assets/icons/sqlite.svg" width="36" title="SQLite" alt="SQLite" />
-<img src="assets/icons/docker.svg" width="36" title="Docker" alt="Docker" />
-<img src="assets/icons/nginx.svg" width="36" title="Nginx / Caddy 反向代理" alt="Nginx" />
-<img src="assets/icons/gitee.svg" width="36" title="Gitee" alt="Gitee" />
-
-</div>
-
-> 前端采用 `output: 'export'` 静态导出，**没有独立的前端托管**：界面与 API 同源同端口，
-> 部署只需一个二进制文件。
+| `model_groups` | `ratio` 倍率 · `rpm_limit` 每分钟上限 · `unlock_min_recharge_cents` 门槛 · `admin_only` 仅后台分发 | 人群与代理档的载体；倍率即折扣 |
+| `channels` | `group_names` 可服务分组 · `models` 支持模型 · `key_strategy` 调度策略 · 重试与冷却策略 | 「能不能走这条上游」 |
+| `channel_keys` | 加密密钥 · `group_names` / `models` 分叉 · `weight` / `priority` / `rpm_limit` / `in_flight` · `cooldown_until` · 订阅额度窗口 | 「走这条上游时用哪把」 |
+| `model_prices` | `model` · `group_name` · `channel_id`（0=不限渠道）· 输入 / 缓存 / 输出 / 按次价 · 计费方式 | 取价优先级：渠道专用价 → 分组默认价 |
+| `tokens` | `remain_quota` / `unlimited_quota` · `group_name` · `budget_quota` / `budget_period` / `budget_window_*` | 下游凭证 + 周期预算 |
+| `quota_reservations` | `request_id` 唯一索引 · `status` 状态机 · `reserved` / `settled` | 幂等闸门，保证至多入账一次 |
+| `usage_logs` | 实际渠道 / 上游模型 · token 明细 · `quota` · `price_version` 定价快照 | 对账与复算的依据 |
+| `channel_model_costs` | 按量 / 按次进价规则 | 成本对账的输入 |
+| `payment_orders` | `trade_no` · 金额 · 状态机 | 充值订单 |
+| `users` | 额度 · `agent_group` 代理分组 · 角色 | 账号与代理归属 |
 
 ---
 
@@ -342,6 +384,186 @@ flowchart TD
     P4b --> P4c["写调用日志（实际渠道 / 上游模型 / 定价版本快照）"]
     P4c --> P4d["更新凭据运行态（最近使用 / 冷却 / 失败计数 / 余额）"]
 ```
+
+---
+
+## 支持的协议与上游
+
+**下游（应用如何连接本站）**：OpenAI 兼容 · Anthropic · Gemini
+
+**上游（本站如何连接他人）**：目录中已登记 **79 种**渠道类型，按 8 大类组织：
+
+| 大类 | 说明 |
+| --- | --- |
+| 文本大模型 | OpenAI / Azure / Anthropic / Gemini / DeepSeek / Kimi / 智谱 / 通义 / 硅基流动 / OpenRouter / Groq / Together / Mistral / xAI / Ollama / vLLM 等 |
+| 聚合服务 | 各类聚合中转 |
+| 订阅账号 | Claude / Codex / Gemini 等订阅账号（OAuth 刷新） |
+| 自建 | 本地与私有化部署 |
+| 图像 | 图像生成类上游 |
+| 视频 | 视频生成类上游 |
+| 音频 | 语音类上游 |
+| 嵌入 | Embedding 类上游 |
+
+> **诚实说明**：79 种类型中，**已有 37 种完成协议适配器与鉴权实现**（`Available: true`），可直接选用；
+> 其余类型在后台标为「即将支持」并禁止选中，不会让你配到一半才发现调不通。
+> 已实现的协议与鉴权白名单由 `internal/channeltype/catalog_test.go` 钉住，防止误标。
+
+---
+
+## 接口一览
+
+### 网关接口（下游协议）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/v1/chat/completions` | OpenAI 兼容对话（支持流式） |
+| POST | `/v1/embeddings` | 向量化 |
+| GET | `/v1/models` | 可用模型列表 |
+| POST | `/v1/messages` | Anthropic 协议（Claude Code 直接对接） |
+| POST | `/v1/responses` | OpenAI Responses / Codex 协议 |
+| POST | `/v1beta/models/*action` | Gemini 协议 |
+| POST | `/v1/tasks` | 提交异步生成任务 |
+| GET | `/v1/tasks` · `/v1/tasks/:ref` | 任务列表与详情 |
+
+### 公开接口（无需登录）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/healthz` | 健康检查（含数据库与迁移版本） |
+| GET | `/api/status` | 站点信息（含额度兑换比例、合规信息） |
+| GET | `/api/models` | 模型广场（带代理视图） |
+| GET | `/api/models/quote` | 公开定价试算 |
+| GET | `/api/announcements` | 站点公告 |
+| GET | `/api/payment/public` | 公开支付参数 |
+| POST/GET | `/api/payments/:method/notify` | 支付回调（按通道验签） |
+| GET | `/sitemap.xml` · `/robots.txt` | SEO |
+
+### 账号接口
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/auth/register` | 注册 |
+| POST | `/api/auth/login` · `/api/auth/admin-login` | 密码登录 / 管理后台登录 |
+| POST | `/api/auth/email-code` · `/api/auth/email-login` | 邮箱验证码与验证码登录 |
+| POST | `/api/auth/password-reset` | 重置密码 |
+| GET | `/api/install/status` · POST `/api/install` | 安装向导 |
+| GET | `/api/auth/me` · POST `/api/auth/logout` | 当前身份 / 登出 |
+
+### 用户门户 `/api/user`
+
+令牌增删改查与明文找回（`/tokens`、`/tokens/:id/key`）、可选分组（`/groups`）、用量与日志
+（`/usage`、`/logs`）、任务（`/tasks`）、订单（`/orders`、`/orders/:tradeNo`）、兑换（`/redeem`）、
+邀请与奖励（`/referral`、`/referral/rewards`）、签到（`/checkin`）、财务概览（`/finance`）、
+试用额（`/trial`）。
+
+### 管理后台 `/api/admin`
+
+| 分组 | 代表端点 |
+| --- | --- |
+| 概览 | `/dashboard` · `/maintenance/overview` · `/maintenance/backup` |
+| 渠道 | `/channels` 增删改查 · `/channels/:id/test` 测活 · `/channels/:id/keys` 密钥池 · `/channels/:id/costs` 进价 · `/channels/:id/mappings` 模型映射 · `/fetch-models` 拉取模型 · `/channel-types` |
+| 分组与定价 | `/groups` 增删改查 · `/prices` 增删改查 · `/prices/quote` 试算 |
+| 令牌与用户 | `/tokens` 增删改查与明文 · `/users` 增删改查 |
+| 内容与运营 | `/announcements` · `/broadcasts` 群发 · `/sensitive-words` · `/corpus/*` 语料 · `/trial-grants` |
+| 账务 | `/orders` · `mark-paid` / `close` · `/redeem-codes` · `/finance/reconciliation` 成本对账 |
+| 系统 | `/settings` · `/smtp` 与测试发信 · `/oauth-providers` · `/audit-logs` · `/logs` · `/tasks` |
+
+> 完整 140+ 端点以 `internal/server/router.go` 为准；管理端点默认受会话鉴权保护，
+> 可再叠加 CIDR 白名单。
+
+---
+
+## 权限与角色
+
+| 角色 | 身份判定 | 可见范围 | 典型能力 |
+| --- | --- | --- | --- |
+| 游客 | 未登录 | 模型广场（公开价）、公开试算、公告 | 了解价格、试算费用 |
+| 普通用户 | 会话 Cookie | 自己的令牌 / 用量 / 订单 / 邀请 / 签到 | 建令牌、充值、查看账单 |
+| 代理用户 | 用户被指派 `agent_group` | 广场按**自己那一档**展示模型与折扣价 | 以拿货折扣调用，账目按折扣计 |
+| 管理员 | 管理员角色 | 全部后台（可叠加 CIDR 白名单） | 渠道、定价、用户、订单、财务 |
+| 超级管理员 | 安装向导创建 | 全部后台 + 系统设置与维护 | 站点配置、备份、SMTP、OAuth |
+
+> 越权防护：令牌明文取回需归属校验 + 写审计；代理档仅对本人可见；
+> 令牌分组切换需校验「分组存在 + 用户已达解锁门槛」。
+
+---
+
+## 计费与账务细则
+
+### 额度口径
+
+```
+按量：额度 = (输入 Token × 输入价 + 缓存 Token × 缓存价 + 输出 Token × 输出价) / 1,000,000
+按次：额度 = 单次价 × 次数
+实际入账 = 额度 × 分组倍率 / 100
+```
+
+金额全程使用 **int64 整数「额度」**，展示层才按站点兑换比例换算成人民币，杜绝浮点漂移。
+免费模型 / 未定价模型**跳过预扣**，不会被额度墙挡住。
+
+### 三段式结算
+
+```mermaid
+sequenceDiagram
+    participant C as 客户端
+    participant G as 网关
+    participant U as 上游
+    C->>G: 请求（带令牌）
+    G->>G: 预扣（写 quota_reservations，request_id 唯一）
+    G->>U: 转发（可能重试 / 换渠道）
+    U-->>G: 响应 + usage
+    alt 成功
+        G->>G: 结算（按实际用量多退少补）
+    else 失败
+        G->>G: 退还（全额回滚预扣）
+    end
+    G-->>C: 响应（含路由响应头）
+```
+
+### 定价优先级
+
+```
+渠道专用价（channel_id = 该渠道）   ← 最高
+        ↓ 没有则回退
+分组默认价（channel_id = 0）
+```
+
+### 成本与毛利
+
+```
+毛利 = 售价收入（用户实扣额度） − 上游成本（按渠道进价规则核算）
+```
+
+成本对账报表按分组 / 渠道 / 模型聚合；**没录进价的请求会单独标注**，
+否则那部分成本按 0 计，报表会偏乐观。
+
+---
+
+## 技术栈
+
+| 层 | 选型 | 说明 |
+| --- | --- | --- |
+| 后端 | Go 1.27 + Gin v1.12 | 单二进制，零 CGO（SQLite 采用纯 Go 的 `modernc.org/sqlite`） |
+| 数据库 | SQLite | 嵌入式、免运维；迁移脚本按方言分目录，已留出扩展接缝 |
+| 前端 | Next.js 16.3（静态导出）+ React 19 + Tailwind CSS v4 + TypeScript 5 | 构建产物 `web/dist` 由 `go:embed` 打进二进制 |
+| 图表 | ECharts 5 | 后台统计图表 |
+
+<div align="center">
+
+<img src="assets/icons/go.svg" width="36" title="Go 1.27" alt="Go" />
+<img src="assets/icons/nextdotjs.svg" width="36" title="Next.js 16" alt="Next.js" />
+<img src="assets/icons/react.svg" width="36" title="React 19" alt="React" />
+<img src="assets/icons/typescript.svg" width="36" title="TypeScript 5" alt="TypeScript" />
+<img src="assets/icons/tailwindcss.svg" width="36" title="Tailwind CSS v4" alt="Tailwind CSS" />
+<img src="assets/icons/sqlite.svg" width="36" title="SQLite" alt="SQLite" />
+<img src="assets/icons/docker.svg" width="36" title="Docker" alt="Docker" />
+<img src="assets/icons/nginx.svg" width="36" title="Nginx / Caddy 反向代理" alt="Nginx" />
+<img src="assets/icons/gitee.svg" width="36" title="Gitee" alt="Gitee" />
+
+</div>
+
+> 前端采用 `output: 'export'` 静态导出，**没有独立的前端托管**：界面与 API 同源同端口，
+> 部署只需一个二进制文件。
 
 ---
 
@@ -579,32 +801,58 @@ curl "https://你的域名/api/models/quote?model=你的模型名&prompt_tokens=
 3. 在「用户」里把代理商账号的 `agent_group` 指派为该档；
 4. 代理登录后，模型广场会自动切换为他的那一档，展示「原价划线 + 折后价」，且与实际扣费同源。
 
-### 价格如何取值
-
-```
-渠道专用价（channel_id = 该渠道）   ← 最高优先级
-        ↓ 没有则回退
-分组默认价（channel_id = 0）
-```
-
-同一模型、同一分组可为不同渠道配不同价，用于「不同渠道成本不同，售价也应不同」的场景。
-
 ### 额度与预算
 
 - **总额度**：令牌与用户两级，`-1` 表示不限；
 - **周期预算**：在令牌上设「每周期最多花 N 元」，周期可选日 / 周 / 月；窗口内超限返回 429，
   窗口到期自动重置。
 
-### 成本与毛利
+### 渠道治理建议
 
-后台「财务对账」按分组 / 渠道 / 模型聚合：
+- 单渠道密钥 ≥ 3 把，避免单点限流；
+- 对易限流的上游调低单密钥每分钟上限，交给调度器换 key；
+- 打开渠道健康面板关注成功率；必要时启用按成功率自动停用；
+- 定期核对「未录进价」的请求，保证成本报表可信。
 
-```
-毛利 = 售价收入（用户实扣额度） − 上游成本（按渠道进价规则核算）
-```
+---
 
-上游进价在「渠道成本」里按量或按次录入。没录进价的请求会在报表里单独标注，
-提醒你补录，否则那部分成本会被按 0 计，报表会偏乐观。
+## 国际化
+
+| 层面 | 支持 | 说明 |
+| --- | --- | --- |
+| 前端界面 | 简体中文 · English · Français · Русский · Español · العربية | 六种语言，含 RTL 布局 |
+| 服务端文案 | 同上六种 | 错误信息按 `Accept-Language` 本地化 |
+| 本文档 | 同上六种 | 见页眉语言切换 |
+
+> 本文档覆盖**联合国六种官方语言**（中文、英文、法文、俄文、西班牙文、阿拉伯文）。
+> 若你只需要其中若干种，删除对应 `README.<语言>.md` 即可，其余不受影响。
+
+---
+
+## 安全
+
+- **密钥加密落库**：上游密钥 AES-256-GCM 加密，主密钥只从环境变量注入（配置文件同名字段被忽略）
+- **日志脱敏**：日志只输出「是否已注入凭据」与上游主机、路径，连查询串都不输出
+- **CIDR 白名单**：`AQUA_ADMIN_ALLOW_CIDRS` 限制管理后台来源，白名单外一律拒绝
+- **明文取回审计**：令牌明文走独立接口并写审计日志（谁、何时、取了哪把）
+- **越权防护**：代理档仅本人可见；令牌分组切换校验存在性与解锁门槛；归属不符统一返回 404
+- **幂等防重**：请求台账以 `request_id` 唯一索引做闸门，重试 / 断连 / 双回调至多入账一次
+- **密码与会话**：密码加盐哈希；会话使用服务端校验的签名 Cookie
+- **内容安全**：敏感词前置过滤 + 词表管理
+- **备份**：提供数据库备份与备份文件校验入口
+
+---
+
+## 部署与容量
+
+| 场景 | 建议 |
+| --- | --- |
+| 本机试用 | 单二进制直接运行，SQLite 落 `./data` |
+| 单机生产 | systemd 托管 + Nginx/Caddy 反代 + HTTPS；保留上一版二进制用于回滚 |
+| 容器化 | 多阶段 Dockerfile；数据卷挂载 `/data`；环境变量注入密钥 |
+| 备份 | 停服拷贝或用 `VACUUM INTO` 热备 `aqua.db`，**同时备份 `AQUA_APP_KEY`** |
+| 容量 | 单机 SQLite 足以支撑中小规模；存储层已留方言接缝，后续可平滑接入外部数据库 |
+| 扩容 | 网关无状态可多实例，但**会话粘性为进程内**，多实例下退化为尽力而为 |
 
 ---
 
@@ -635,28 +883,47 @@ curl "https://你的域名/api/models/quote?model=你的模型名&prompt_tokens=
 
 **代理说「看到折扣价但扣的是原价」？**
 正常情况下不会：代理广场价与计费取自同一套价格规则。请确认两点：
-一是代理账号的 `agent_group` 确实指派为该代理档；二是该代理创建令牌时选择的分组是这个代理档
-（令牌没选对分组就会走默认档）。两者都正确仍不一致，请提 Issue。
+一是代理账号的 `agent_group` 确实指派为该代理档；二是该代理创建令牌时选择的分组是这个代理档。
+两者都正确仍不一致，请提 Issue。
 
 **数据怎么备份？**
 SQLite 场景下：停服务（或用 `VACUUM INTO` 热备）→ 拷贝 `aqua.db` → 同时备份 `AQUA_APP_KEY`。
 少了主密钥，备份里的上游密钥就是一堆无法解密的字节。
 
 **支持 MySQL 或 PostgreSQL 吗？**
-当前默认且仅支持 SQLite，已能覆盖自托管与中小规模场景。存储层已经留出方言接缝
-（迁移目录按方言分目录、驱动注册表带字段元数据），后续接入不需要重写业务层。
+当前默认且仅支持 SQLite，已能覆盖自托管与中小规模场景。存储层已经留出方言接缝，
+后续接入不需要重写业务层。
 
 **怎么新增一个上游渠道类型？**
-在 `internal/channeltype/catalog.go` 登记类型元数据（默认地址、鉴权方式、额外必填参数、
-请求路径模板、能力位），并确认它落在 `catalog_test.go` 的已实现白名单内。
-若属于已有协议族（如 OpenAI 兼容），登记完即可用；协议不同则需在 `internal/relay/` 增加适配器。
+在 `internal/channeltype/catalog.go` 登记类型元数据，并确认它落在 `catalog_test.go`
+的已实现白名单内。协议不同则需在 `internal/relay/` 增加适配器。
 
 **为什么日志里看不到我配置的上游密钥？**
-同样是刻意设计：日志只输出「是否已注入凭据」与上游主机和路径，连 URL 的查询串都不输出，
-防止走查询参数的密钥被打印出来。
+同样是刻意设计：日志只输出「是否已注入凭据」与上游主机和路径，连 URL 的查询串都不输出。
 
 **怎么知道某次请求走了哪个渠道、降级了几次？**
 响应头里有 `X-Routed-Via`、`X-Fallback-Attempts`、`X-Upstream`；调用日志里也记录了实际渠道与上游模型名。
+
+---
+
+## 术语表
+
+| 术语 | 含义 |
+| --- | --- |
+| 渠道 / Channel | 一条上游服务（含 base_url、协议、鉴权与可用模型） |
+| 凭据 / Channel Key | 渠道下的一把上游密钥；可独立设置权重、限速与可用范围 |
+| 分组 / Group | 人群与价格的载体；决定可用渠道与计费倍率 |
+| 代理档 | 仅后台分发的分组，用倍率表示拿货折扣 |
+| 额度 / Quota | 站内记账单位（整数）；展示时按兑换比例换算成人民币 |
+| 令牌 / Token | 发给下游使用的 API Key（`sk-` 开头） |
+| 预扣 · 结算 · 退还 | 三段式额度流程，用于并发下防止透支 |
+| 周期预算 | 令牌在日 / 周 / 月内的额度上限，超限熔断 |
+| 冷却 / Cooldown | 凭据临时不可用状态，到期自动恢复 |
+| 摘除 / Retire | 凭据永久不可用（仅在上游明确声明吊销时） |
+| 熔断跳过 | 渠道整体不可用时，路由主动跳过该渠道 |
+| 定价版本快照 | 记账时记录的计价规则版本，用于事后复算 |
+| 进价 / Cost | 上游采购成本，用于毛利对账 |
+| 路由响应头 | `X-Routed-Via` 等，用于观测实际路由与降级 |
 
 ---
 
@@ -706,6 +973,7 @@ internal/payment/      支付通道适配
 internal/channeltype/  上下游类型注册表（79 种）
 internal/i18n/         服务端多语言文案
 web/                   前端（Next.js，构建产物内嵌进二进制）
+assets/                文档徽章与图标
 Dockerfile             多阶段构建：前端 → 后端 → 极简运行镜像
 aqua-api.service       systemd 单元（裸机部署）
 ```
