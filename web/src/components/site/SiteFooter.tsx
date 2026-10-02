@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react'
 
 import { AppIcon } from '@/components/AppIcon'
 import { BrandLogo } from '@/components/BrandMark'
+import { QqGroupEntry } from '@/components/site/QqGroupEntry'
 import { useSite } from '@/lib/site/site-context'
 
 const REPO_URL = 'https://gitee.com/xiaosu4610/AQUA-API'
@@ -65,6 +66,9 @@ export function SiteFooter() {
             <p className="mt-3 max-w-xs text-[13px] leading-relaxed text-ink-3">
               OpenAI 兼容的 LLM API 网关：多协议上游统一、精细计费、全量日志，单二进制可自托管。
             </p>
+            <div className="mt-4">
+              <QqGroupEntry />
+            </div>
           </div>
 
           {COLUMNS.map((col) => (

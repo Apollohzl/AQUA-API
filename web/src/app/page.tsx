@@ -29,6 +29,7 @@ import { Button } from '@/components/ui/Button'
 import { CodeBlock } from '@/components/ui/Display'
 import { SiteFooter } from '@/components/site/SiteFooter'
 import { SiteHeader } from '@/components/site/SiteHeader'
+import { QqGroupEntry } from '@/components/site/QqGroupEntry'
 import { useAuth } from '@/lib/auth/auth-context'
 import { useSite } from '@/lib/site/site-context'
 import { formatDiscountLabel, formatYuanPerCall, formatYuanPerMillion } from '@/utils/money'
@@ -451,7 +452,7 @@ function Cta() {
               : '注册免费，先跑通一个请求，再决定要不要留下。'}
           </p>
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Link href={isLoggedIn ? '/console' : '/register'}>
             <Button variant="primary" size="lg">
               {isLoggedIn ? '进入控制台' : '注册并获取令牌'}
@@ -463,6 +464,7 @@ function Cta() {
               阅读源码 <AppIcon name="external" size={15} />
             </Button>
           </a>
+          <QqGroupEntry variant="card" className="w-full lg:w-72" />
         </div>
       </div>
     </section>
