@@ -569,6 +569,8 @@ sequenceDiagram
 
 ## 快速开始
 
+> 本节只给最短路径。**完整部署教程**（systemd 生产部署、Nginx/Caddy 反代与 HTTPS、升级与回滚、CLI 与环境变量速查、常见问题）见 [DEPLOYMENT.md](DEPLOYMENT.md)。
+
 ### 方式一：Docker Compose（推荐）
 
 ```bash

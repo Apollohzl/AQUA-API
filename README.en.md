@@ -570,6 +570,8 @@ otherwise that portion of cost counts as 0 and the report skews optimistic.
 
 ## Quick Start
 
+> This section only covers the shortest path. **The complete deployment guide** (production systemd setup, Nginx/Caddy reverse proxy with HTTPS, upgrade & rollback, CLI and environment variable reference, FAQ) is available in [DEPLOYMENT.md](DEPLOYMENT.md) (in Chinese).
+
 ### Option 1: Docker Compose (Recommended)
 
 ```bash

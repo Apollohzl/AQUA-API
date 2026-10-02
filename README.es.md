@@ -575,6 +575,8 @@ ya que de lo contrario su coste se contaría como 0 y el informe sería demasiad
 
 ## Inicio rápido
 
+> Esta sección solo cubre el camino más corto. **La guía de despliegue completa** (instalación systemd en producción, proxy inverso Nginx/Caddy con HTTPS, actualización y reversión, referencia de CLI y variables de entorno, preguntas frecuentes) está disponible en [DEPLOYMENT.md](DEPLOYMENT.md) (en chino).
+
 ### Opción 1: Docker Compose (recomendada)
 
 ```bash

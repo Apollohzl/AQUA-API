@@ -566,6 +566,8 @@ faute de quoi cette part de coût serait comptée à 0 et le rapport serait trop
 
 ## Démarrage rapide
 
+> Cette section ne couvre que le chemin le plus court. **Le guide de déploiement complet** (installation systemd en production, reverse proxy Nginx/Caddy avec HTTPS, mise à niveau et retour arrière, référence CLI et variables d'environnement, FAQ) est disponible dans [DEPLOYMENT.md](DEPLOYMENT.md) (en chinois).
+
 ### Méthode 1 : Docker Compose (recommandée)
 
 ```bash
