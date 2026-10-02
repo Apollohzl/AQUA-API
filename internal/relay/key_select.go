@@ -18,13 +18,14 @@
 //
 // 流转（Flow）：
 //
-//	resolveChatKey → Relay.SelectKey → keyPicker.pick
-//	  ├─ filterUsableKeys：状态 / 冷却 / 限速
+//	resolveChatKey → Relay.selectKey → keyPicker.pick
+//	  ├─ filterUsableKeysWithModel：运行态（状态 / 限速 / 余额 / 额度）+ 整把与 (凭据,模型) 级冷却
 //	  ├─ 粘性命中（LRU + TTL，进程内）
 //	  ├─ 按策略挑选（round_robin 会写回 channels.key_cursor）
 //	  └─ 回写粘性绑定
 //	失败时：forwardChat → Relay.applyCredentialFailure
-//	  └─ classifyCredentialFailure → SetCooldown（冷却）或 MarkPermanentFailure（摘除）
+//	  ├─ classifyCredentialFailure → SetCooldown（冷却）或 MarkPermanentFailure（摘除）
+//	  └─ Relay.markModelCooldown → (凭据, 模型) 级冷却表（见 credential_cooldown.go）
 //
 // 扩展（Extend）：
 //
@@ -103,10 +104,21 @@ var credentialStickyBook = newStickyBook(defaultStickyTTL, defaultStickyCapacity
 //
 // 返回 ErrNoUsableCredential 表示过滤后没有任何可用凭据。
 func (r *Relay) SelectKey(ctx context.Context, ch *model.Channel, keys []*model.ChannelKey, sessionHash string) (*model.ChannelKey, error) {
+	return r.selectKey(ctx, ch, keys, sessionHash, "")
+}
+
+// selectKey 是 SelectKey 的模型感知版本：额外携带本次请求的模型名，
+// 以便选取器与请求级预过滤共用同一套 (凭据, 模型) 冷却语义。
+func (r *Relay) selectKey(ctx context.Context, ch *model.Channel, keys []*model.ChannelKey, sessionHash, modelName string) (*model.ChannelKey, error) {
 	if ch == nil {
 		return nil, ErrNoUsableCredential
 	}
-	picker := keyPicker{repo: r.keys, sticky: credentialStickyBook}
+	picker := keyPicker{
+		repo:           r.keys,
+		sticky:         credentialStickyBook,
+		model:          modelName,
+		modelCooldowns: modelCooldownsFor(r),
+	}
 	return picker.pick(ctx, ch.ID, keys, sessionHash)
 }
 
@@ -114,6 +126,10 @@ func (r *Relay) SelectKey(ctx context.Context, ch *model.Channel, keys []*model.
 type keyPicker struct {
 	repo   model.ChannelKeyRepository
 	sticky *stickyBook
+	// model 是本次请求的模型名；非空时启用 (凭据, 模型) 级冷却语义。
+	model string
+	// modelCooldowns 是 (凭据, 模型) 级冷却表（见 credential_cooldown.go）；可为 nil。
+	modelCooldowns *credentialModelCooldownBook
 	// now 返回当前时间；为 nil 时使用 time.Now（测试可注入固定时钟）。
 	now func() time.Time
 	// inFlightStaleAfter 覆盖默认的在途陈旧阈值（测试用）。
@@ -140,7 +156,7 @@ func (p *keyPicker) staleAfter() time.Duration {
 func (p *keyPicker) pick(ctx context.Context, channelID uint64, keys []*model.ChannelKey, sessionHash string) (*model.ChannelKey, error) {
 	now := p.clock()
 
-	usable := filterUsableKeys(keys, now)
+	usable := filterUsableKeysWithModel(keys, now, p.model, p.modelCooldowns)
 	if len(usable) == 0 {
 		return nil, fmt.Errorf("%w（渠道 %d）", ErrNoUsableCredential, channelID)
 	}
@@ -199,43 +215,71 @@ func (p *keyPicker) selectByStrategy(ctx context.Context, channelID uint64, stra
 	}
 }
 
-// filterUsableKeys 过滤出当前可参与选择的凭据。
+// filterUsableKeysWithModel 过滤出当前可参与选择的凭据。
 //
-// 四类排除：
-//   - 状态不是"启用"（手动禁用 / 已摘除）；
-//   - 处于冷却期（时间语义，到点自动恢复）；
-//   - 限速窗口内已用满（rpm_limit > 0 且当前窗口计数已达上限）；
-//   - 余额已知且已耗尽（BalanceExhausted）。
+// 当 modelName 非空时启用 (凭据, 模型) 级冷却语义：
+//   - 命中 (凭据, model) 冷却 → 排除（该模型在这个凭据上不可用）；
+//   - 凭据处于整把冷却，但存在模型级记录（说明失败是模型维度的）→ 其他模型不牵连。
 //
-// 关于"余额耗尽"为什么不算失败、也不改状态：
-//
-//	余额是站长人工维护的运营数据，耗尽只说明"这把凭据暂时没额度了"，
-//	而不是凭据本身失效。因此这里只把它排除在本轮选择之外，
-//	既不记失败计数也不改 status——站长把余额补录成正数后，
-//	它会在下一次选择时自然重新参与，无需任何额外的人工恢复动作。
-func filterUsableKeys(keys []*model.ChannelKey, now time.Time) []*model.ChannelKey {
+// modelName 为空（无模型上下文）时退化为整把冷却语义，行为与引入冷却表之前一致。
+// 请求级选择走 filterUsableKeysForRequest，它在此之上再叠加分组/模型分叉过滤。
+func filterUsableKeysWithModel(keys []*model.ChannelKey, now time.Time, modelName string, cooldowns *credentialModelCooldownBook) []*model.ChannelKey {
 	usable := make([]*model.ChannelKey, 0, len(keys))
 	for _, k := range keys {
-		if k == nil || !k.IsUsable() {
-			continue
-		}
-		if k.CoolingDown(now) {
-			continue
-		}
-		if rpmExhausted(k, now) {
-			continue
-		}
-		if k.BalanceExhausted() {
-			continue
-		}
-		// 订阅账号的额度窗口用满：与"余额耗尽"同理，只是不选它，不改状态。
-		// 窗口重置时间一到（或下一次探测刷新快照）它就自动回到候选里。
-		if k.QuotaExhausted(now) {
+		if !keyUsableForRequest(k, now, modelName, cooldowns) {
 			continue
 		}
 		usable = append(usable, k)
 	}
 	return usable
+}
+
+// keyUsableForRequest 判断单把凭据在"运行态 + 冷却（模型感知）"上是否可用。
+//
+// 为什么把冷却判定集中在这里：选凭据分两道（resolveChatCredential 的请求级预过滤、
+// keyPicker.pick 的再次幂等过滤），两处必须用完全一致的冷却语义——
+// 否则会出现"预过滤放行、选取器又剔除"的自相矛盾（表现为模型级冷却失效）。
+func keyUsableForRequest(k *model.ChannelKey, now time.Time, modelName string, cooldowns *credentialModelCooldownBook) bool {
+	if !keyRunnable(k, now) {
+		return false
+	}
+	if modelName == "" {
+		return !k.CoolingDown(now)
+	}
+	if cooldowns.cooling(k.ID, modelName) {
+		return false
+	}
+	// 整把冷却若可被模型级记录解释，则说明它源于模型维度的失败，不牵连同凭据的其他模型。
+	if k.CoolingDown(now) && !cooldowns.hasLiveEntry(k.ID) {
+		return false
+	}
+	return true
+}
+
+// keyRunnable 判断凭据在"运行态"（不含冷却）上是否可用。
+//
+// 覆盖四类排除：状态非启用、RPM 窗口用满、余额已知且耗尽、订阅额度窗口用满。
+// 把它单独抽出，是为了让整把冷却语义与模型级冷却语义共用同一套运行态判据，避免两处漂移。
+//
+// 关于"余额耗尽 / 额度用满"为什么不算失败、也不改状态：
+//
+//	余额是站长人工维护的运营数据，耗尽只说明"这把凭据暂时没额度了"，
+//	而不是凭据本身失效。因此这里只把它排除在本轮选择之外，
+//	既不记失败计数也不改 status——补录/窗口重置后它会在下一次选择时自然重新参与。
+func keyRunnable(k *model.ChannelKey, now time.Time) bool {
+	if k == nil || !k.IsUsable() {
+		return false
+	}
+	if rpmExhausted(k, now) {
+		return false
+	}
+	if k.BalanceExhausted() {
+		return false
+	}
+	if k.QuotaExhausted(now) {
+		return false
+	}
+	return true
 }
 
 // credentialScope 描述"本次请求要从池里挑什么样的凭据"（迁移 0038 的凭据级分叉）。
@@ -249,24 +293,26 @@ type credentialScope struct {
 	Model string
 }
 
-// filterUsableKeysForRequest 在 filterUsableKeys 的基础上叠加"分组 + 模型"两个维度。
+// filterUsableKeysForRequest 在运行态可用性之上叠加"分组 + 模型 + (凭据,模型)冷却"三个维度。
 //
 // 为什么要单独一层而不是把参数并进 filterUsableKeys：
 // 后者是纯粹的"运行态可用性"判断（状态 / 冷却 / 限速 / 余额 / 额度窗口），
 // 与请求内容无关且被多处复用；把请求维度混进去，会让"这把凭据现在能不能用"
 // 变成依赖调用上下文，日后很容易在某个调用点漏传而静默改变调度行为。
-func filterUsableKeysForRequest(keys []*model.ChannelKey, now time.Time, scope credentialScope) []*model.ChannelKey {
-	usable := filterUsableKeys(keys, now)
-	if scope.Group == "" && scope.Model == "" {
-		// 未提供请求维度（或未配置分叉的部署）时不做任何额外过滤，
-		// 保持与迁移前完全一致的调度结果。
-		return usable
-	}
-	filtered := make([]*model.ChannelKey, 0, len(usable))
-	for _, k := range usable {
-		if k.MatchesScope(scope.Group, scope.Model) {
-			filtered = append(filtered, k)
+//
+// 参数 cooldowns 是 (凭据, 模型) 级冷却表（见 credential_cooldown.go），可为 nil，
+// 此时退化为仅按整把冷却处理，行为与引入该表之前一致。
+func filterUsableKeysForRequest(keys []*model.ChannelKey, now time.Time, scope credentialScope, cooldowns *credentialModelCooldownBook) []*model.ChannelKey {
+	filtered := make([]*model.ChannelKey, 0, len(keys))
+	for _, k := range keys {
+		// 冷却判定统一走 keyUsableForRequest（模型感知），与 keyPicker.pick 保持一致。
+		if !keyUsableForRequest(k, now, scope.Model, cooldowns) {
+			continue
 		}
+		if !k.MatchesScope(scope.Group, scope.Model) {
+			continue
+		}
+		filtered = append(filtered, k)
 	}
 	return filtered
 }
@@ -548,9 +594,12 @@ func backoff(base time.Duration, failCount int, max time.Duration) time.Duration
 // 站长的意图是"进冷却池多久由我决定"，此时继续套用内部分级会与界面上的承诺不符。
 //
 // 刻意忽略仓储错误：这是自愈与统计用途，不应影响对客户端的响应。
-func (r *Relay) applyCredentialFailure(ctx context.Context, ch *model.Channel, keyID uint64, failCount, status int, body []byte) {
+//
+// 返回值是本次实际设置的冷却时长（0 表示未冷却或已摘除）：
+// 调用方据此把同一次失败登记到 (凭据, 模型) 级冷却表，实现"模型维度的失败不牵连同渠道其他模型"。
+func (r *Relay) applyCredentialFailure(ctx context.Context, ch *model.Channel, keyID uint64, failCount, status int, body []byte) time.Duration {
 	if r.keys == nil || keyID == 0 {
-		return
+		return 0
 	}
 	policy, cooldownSeconds := channelKeyFailurePolicy(ch)
 	action := classifyCredentialFailure(status, body, failCount)
@@ -576,9 +625,24 @@ func (r *Relay) applyCredentialFailure(ctx context.Context, ch *model.Channel, k
 	switch {
 	case action.Remove:
 		_ = r.keys.MarkPermanentFailure(ctx, keyID, truncateReason(action.Reason))
+		return 0
 	case action.Cooldown > 0:
 		_ = r.keys.SetCooldown(ctx, keyID, time.Now().Add(action.Cooldown), truncateReason(action.Reason))
+		return action.Cooldown
 	}
+	return 0
+}
+
+// applyCredentialCooldown 按给定时长冷却凭据（用于"尊重上游 retry-after"这类显式时长）。
+//
+// 与 applyCredentialFailure 的分工：后者内部按状态码分级退避并受渠道策略影响；
+// 本函数只负责"用这个时长冷却这把凭据"，用于上游已明确给出恢复时间的场景——
+// 此时上游的指示比内置退避更准确，不应再被分级退避或策略改写。
+func (r *Relay) applyCredentialCooldown(ctx context.Context, keyID uint64, cooldown time.Duration, reason string) {
+	if r.keys == nil || keyID == 0 || cooldown <= 0 {
+		return
+	}
+	_ = r.keys.SetCooldown(ctx, keyID, time.Now().Add(cooldown), truncateReason(reason))
 }
 
 // markCredentialHardFailure 处理"凭据本身不可用"的失败（OAuth 刷新失败、凭据内容为空）。

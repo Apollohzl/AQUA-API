@@ -478,20 +478,22 @@ func (r *Relay) resolveChatCredential(ctx context.Context, ch *model.Channel, us
 				}
 
 				// 先按"当前是否可用"过滤（状态/冷却/限速/余额/额度窗口），再按本次请求的
-				// 分组与模型过滤（凭据可声明只服务某些分组/模型），最后交给策略挑选。
+				// 分组与模型过滤（凭据可声明只服务某些分组/模型），并叠加 (凭据, 模型)
+				// 级冷却（同一把密钥在模型 A 上失败，不牵连模型 B/C），最后交给策略挑选。
 				//
 				// 为什么要在这里提前过滤而不是只靠 SelectKey：下面的 hasSpareKey
 				// 直接由本切片的长度推断，若不过滤，一批"余额已耗尽"或"不支持该模型"的
 				// 凭据会让 hasSpareKey 误判为 true，进而触发无意义的密钥级重试。
-				usable := filterUsableKeysForRequest(available, time.Now(), scope)
+				usable := filterUsableKeysForRequest(available, time.Now(), scope, modelCooldownsFor(r))
 				if len(usable) == 0 {
 					// 过滤后无可用凭据（全部冷却/限速/禁用/余额耗尽/额度用满，
 					// 或都不服务本次的分组/模型）：让上层换渠道
 					return resolvedCredential{}, false, false
 				}
 
-				// 策略选择：五策略择优 + 会话粘性（内部会再做一次幂等的可用性过滤）。
-				picked, err := r.SelectKey(ctx, ch, usable, sessionHash)
+				// 策略选择：五策略择优 + 会话粘性；带模型名以便与预过滤共用
+				// (凭据, 模型) 级冷却语义（内部会再做一次幂等的可用性过滤）。
+				picked, err := r.selectKey(ctx, ch, usable, sessionHash, scope.Model)
 				if err != nil {
 					return resolvedCredential{}, false, false
 				}
@@ -887,13 +889,40 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 	if r.billing != nil {
 		r.billing.recordUpstreamCall(group, false)
 	}
-	switch kind, _, snippet := r.classifyKeyFailure(resp); kind {
-	case keyFailureCredential:
-		// 凭据不可用（失效/受限/被限流）：按失败类型决定"冷却"还是"摘除"。
-		//   - 429 走冷却、401/403/402 走长冷却（都【不】摘除，等待自动恢复）；
-		//   - 仅当上游明确表示凭据永久无效（如已吊销）才摘除。
-		// 注意：升级为 channel_keys 的临时状态，绝不因一次 429 把好凭据移出池子。
-		r.applyCredentialFailure(req.Context(), ch, target.keyID, target.keyFailCount, resp.StatusCode, snippet)
+	// 失败语义分类：决定"这次失败该往哪个方向重试"（见 failure_classify.go）。
+	//
+	// kind 沿用既有 classifyKeyFailure 的判定（区分"凭据 / 授权范围 / 无关"并读出响应体）；
+	// class 在此之上叠加"内容审核 / 限流 / 鉴权 / 渠道故障"的语义，作为重试方向的唯一依据。
+	kind, _, snippet := r.classifyKeyFailure(resp)
+	class, classBody := classifyUpstreamFailure(resp, snippet)
+	if len(classBody) > 0 {
+		snippet = classBody
+	}
+
+	switch class {
+	case failureClassContentFilter:
+		// 内容审核拦截：换密钥、换渠道都会被同样拦截，因此【既不重试也不换渠道】，
+		// 直接落到下方统一脱敏出口回传，避免白烧上游额度。
+		saveFailure(lastFailure, resp, snippet)
+
+	case failureClassRateLimited, failureClassCredential:
+		// 凭据级失败（429 限流 / 401·403·402 鉴权欠费）：
+		//   1) 走既有冷却（DB）与渠道策略（只冷却 / 自动摘除），并登记 (凭据, 模型) 级冷却；
+		//   2) 只换【同渠道的另一把凭据】——换渠道对限流无意义（只会把限流扩散到别的上游），
+		//      对鉴权失败同样无意义（错误来自凭据本身，而非上游整体），因此【禁止换渠道】。
+		//
+		// 注意：绝不因一次 429 把好凭据移出池子——冷却到期会自动回到调度。
+		cooldown := r.applyCredentialFailure(req.Context(), ch, target.keyID, target.keyFailCount, resp.StatusCode, snippet)
+		if class == failureClassRateLimited {
+			// 尊重上游 retry-after：429 若带该头，按上游给的时长冷却，而不是固定退避。
+			if hint := retryAfterCooldown(resp.Header, time.Now()); hint > 0 {
+				cooldown = hint
+				r.applyCredentialCooldown(req.Context(), target.keyID, hint,
+					fmt.Sprintf("上游限流（HTTP %d），按 retry-after 冷却约 %s",
+						resp.StatusCode, hint.Round(time.Second)))
+			}
+		}
+		r.markModelCooldown(target.keyID, modelName, cooldown)
 		// 留存响应，供所有重试用尽后写入本站调用日志（不再透传给下游）
 		saveFailure(lastFailure, resp, snippet)
 
@@ -902,46 +931,50 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 			drainAndClose(resp)
 			return forwardRetryKey
 		}
-		if target.hasSpareChannel {
-			drainAndClose(resp)
-			return forwardRetryChannel
-		}
 		// 已无退路（或该渠道/模型已关闭重试）：落到下方统一脱敏出口
 
-	case keyFailureEntitlement:
-		// 该账号没有这个模型 / 无权访问：不是密钥坏了，而是"这个模型不在可用范围内"。
+	case failureClassChannel:
+		// 上游 5xx / 超时属渠道级故障：给本次使用的凭据一个短冷却
+		// （故障期间不要反复把同一把凭据推到上游；冷却会自动到期、不改变凭据状态），
+		// 并优先换下一个渠道。
+		r.applyCredentialFailure(req.Context(), ch, target.keyID, target.keyFailCount, resp.StatusCode, nil)
+		// 留存本次失败：重试预算耗尽时用它决定回给下游的语义化错误码
+		// （上游 5xx → 本站 503），否则只能退化成含义模糊的 502。
 		//
-		// 为什么不换密钥重试：实测本部署的密钥池来自同质的免费账号，
-		// 授权集合完全一致，换多少把结果都一样，只会白白多花几秒。
-		// 因此只在"还有别的渠道"时才继续；否则落到下方统一脱敏出口。
-		saveFailure(lastFailure, resp, snippet)
+		// 这里才补读响应体：classifyKeyFailure 对 5xx 不读体（它与凭据无关），
+		// 但 5xx 恰是最需要留下证据的一类（"上游整体挂了"还是"该模型不存在"）。
+		// 读取上限 4KiB，且本响应随后就会被 drainAndClose 或整段读走，不会多占内存。
+		peek, _ := peekBody(resp, keyLevelPeekBytes)
+		saveFailure(lastFailure, resp, peek)
 
-		if target.hasSpareChannel {
-			// 但另一个渠道可能是别的上游，值得一试
-			drainAndClose(resp)
-			return forwardRetryChannel
-		}
-		// 无退路（或该渠道/模型已关闭重试）：落到下方统一脱敏出口
-
-	default:
-		if isRetryableStatus(resp.StatusCode) {
-			// 上游 5xx / 超时属渠道级故障，但也给本次使用的凭据一个短冷却：
-			// 故障期间不要反复把同一把凭据推到上游。冷却会自动到期，不改变凭据状态。
-			r.applyCredentialFailure(req.Context(), ch, target.keyID, target.keyFailCount, resp.StatusCode, nil)
-			// 留存本次失败：重试预算耗尽时用它决定回给下游的语义化错误码
-			// （上游 5xx → 本站 503），否则只能退化成含义模糊的 502。
-			//
-			// 这里才补读响应体：classifyKeyFailure 对 5xx 不读体（它与凭据无关），
-			// 但 5xx 恰是最需要留下证据的一类（"上游整体挂了"还是"该模型不存在"）。
-			// 读取上限 4KiB，且本响应随后就会被 drainAndClose 或整段读走，不会多占内存。
-			peek, _ := peekBody(resp, keyLevelPeekBytes)
-			saveFailure(lastFailure, resp, peek)
-		}
 		if isRetryableStatus(resp.StatusCode) && target.hasSpareChannel {
 			// 上游故障/过载，且还有别的渠道可试
 			drainAndClose(resp)
 			return forwardRetryChannel
 		}
+
+	default:
+		// 与凭据、渠道都无关：可能是授权范围问题（该账号没有这个模型），也可能是请求本身有误。
+		if kind == keyFailureEntitlement {
+			// 该账号没有这个模型 / 无权访问：不是密钥坏了，而是"这个模型不在可用范围内"。
+			//
+			// 为什么不换密钥重试：实测本部署的密钥池来自同质的免费账号，
+			// 授权集合完全一致，换多少把结果都一样，只会白白多花几秒。
+			// 因此只在"还有别的渠道"时才继续；否则落到下方统一脱敏出口。
+			saveFailure(lastFailure, resp, snippet)
+			if target.hasSpareChannel {
+				// 但另一个渠道可能是别的上游，值得一试
+				drainAndClose(resp)
+				return forwardRetryChannel
+			}
+		}
+	}
+
+	// 200 但空内容：视为可降级的失败（推理模型吃满 token 预算的真实坑），走渠道级重试。
+	// 仅对非流式判定：流式正文是 SSE 分片，无法在不破坏"逐字输出"的前提下判定空内容。
+	if resp.StatusCode == http.StatusOK && !wantStream && target.hasSpareChannel && isEmptyCompletion(resp) {
+		drainAndClose(resp)
+		return forwardRetryChannel
 	}
 
 	// 上游协议入站转换：Anthropic / Gemini / Codex 渠道的响应需改写回内部 OpenAI 协议
