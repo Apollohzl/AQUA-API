@@ -6,7 +6,7 @@
 
 **Bring every AI upstream you own into a single entry point.**
 
-Self-hosted LLM API gateway · AI usage management system
+Self-hosted LLM Gateway · OpenAI-compatible API · AI usage management system
 
 ![License](assets/badges/license.svg)
 ![Go](assets/badges/go.svg)

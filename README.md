@@ -8,6 +8,8 @@
 
 自托管 LLM API 网关 · AI 用量管理系统
 
+Self-hosted LLM Gateway · OpenAI-compatible API
+
 ![License](assets/badges/license.svg)
 ![Go](assets/badges/go.svg)
 ![CGO](assets/badges/cgo.svg)

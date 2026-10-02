@@ -8,6 +8,8 @@
 
 Gateway de API LLM autoalojado · Sistema de gestión del uso de IA
 
+Self-hosted LLM Gateway · OpenAI-compatible API
+
 ![License](assets/badges/license.svg)
 ![Go](assets/badges/go.svg)
 ![CGO](assets/badges/cgo.svg)

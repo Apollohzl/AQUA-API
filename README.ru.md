@@ -8,6 +8,8 @@
 
 Самостоятельно размещаемый шлюз LLM API · Система управления использованием AI
 
+Self-hosted LLM Gateway · OpenAI-compatible API
+
 ![License](assets/badges/license.svg)
 ![Go](assets/badges/go.svg)
 ![CGO](assets/badges/cgo.svg)

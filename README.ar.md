@@ -8,6 +8,8 @@
 
 بوابة LLM API ذاتية الاستضافة · نظام إدارة استهلاك الذكاء الاصطناعي
 
+Self-hosted LLM Gateway · OpenAI-compatible API
+
 ![License](assets/badges/license.svg)
 ![Go](assets/badges/go.svg)
 ![CGO](assets/badges/cgo.svg)
