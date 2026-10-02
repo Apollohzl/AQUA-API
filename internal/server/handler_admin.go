@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -790,6 +791,8 @@ type speedTestItem struct {
 	TotalMS int `json:"total_ms"`
 	// Message 是给人看的结论或失败原因。
 	Message string `json:"message,omitempty"`
+	// Blocked 表示该模型因无权限（403/404）被自动从渠道清单移除。
+	Blocked bool `json:"blocked,omitempty"`
 }
 
 // speedTestResponse 是一次测速请求的汇总结果。
@@ -802,6 +805,8 @@ type speedTestResponse struct {
 	ElapsedMS int `json:"elapsed_ms"`
 	// Message 是整批级别的失败说明（如凭据不可用）；为空表示逐模型结果可信。
 	Message string `json:"message,omitempty"`
+	// BlockedModels 是本次被自动屏蔽（无权限）并从渠道清单移除的模型。
+	BlockedModels []string `json:"blocked_models,omitempty"`
 
 	// 凭据来路与池内状况（与测活同口径，便于解释"这次测速用的是哪把钥匙"）
 	KeyMasked     string `json:"key_masked,omitempty"`
@@ -968,7 +973,83 @@ func (s *Server) handleSpeedTestChannel(c *gin.Context) {
 	}
 
 	resp.ElapsedMS = int(time.Since(start).Milliseconds())
+
+	// 测速的"第二步收益"：顺手清掉上游明确拒绝的模型（可在设置中关闭）。
+	resp.BlockedModels = s.applySpeedTestAutoBlock(ctx, channel, resp.Items, settings.SpeedTest.AutoBlock)
+
 	c.JSON(http.StatusOK, resp)
+}
+
+// applySpeedTestAutoBlock 把测速中「上游明确拒绝」的模型从渠道清单移除，
+// 返回被移除的模型名（关闭或无需移除时返回 nil）。
+//
+// 判据见 model.ModelSpeedResult.NoPermission：只有 403/404 这种确定性失败
+// 才屏蔽；超时与 5xx 属于暂时性故障，移除它们会在偶发抖动时误伤健康模型。
+//
+// 两条安全边界（违反任何一条都宁可不动）：
+//  1. 只移除【本次实测过】且当前仍在渠道清单里的模型——没测到的不动，
+//     避免一次部分测速就把整份清单清掉大半；
+//  2. 若移除后清单会变空，放弃本次移除——空清单在本系统的语义是
+//     "支持全部模型"，恰好与屏蔽的初衷相反。
+func (s *Server) applySpeedTestAutoBlock(
+	ctx context.Context, ch *model.Channel, items []speedTestItem, enabled bool,
+) []string {
+	if !enabled || len(items) == 0 {
+		return nil
+	}
+
+	blocked := make(map[string]struct{})
+	for i := range items {
+		verdict := model.ModelSpeedResult{OK: items[i].OK, StatusCode: items[i].StatusCode}
+		if verdict.NoPermission() {
+			blocked[items[i].Model] = struct{}{}
+		}
+	}
+	if len(blocked) == 0 {
+		return nil
+	}
+
+	remaining := make([]string, 0, len(ch.Models))
+	for _, name := range ch.Models {
+		if _, hit := blocked[name]; hit {
+			continue
+		}
+		remaining = append(remaining, name)
+	}
+	if len(remaining) == len(ch.Models) {
+		// 被屏蔽的模型都不在当前清单里（例如测速名单是手输的）：无需写库。
+		return nil
+	}
+	if len(remaining) == 0 {
+		slog.Warn("测速自动屏蔽：渠道全部模型均无权限，为避免空清单被当作「支持全部模型」而跳过移除",
+			"channel_id", ch.ID, "blocked", len(blocked))
+		return nil
+	}
+
+	before := ch.Models
+	ch.Models = remaining
+	if err := s.deps.Channels.Update(ctx, ch); err != nil {
+		// 写回失败必须回滚内存副本并留痕：调用方随后可能继续使用该渠道对象。
+		ch.Models = before
+		slog.Warn("测速自动屏蔽：写回渠道失败", "channel_id", ch.ID, "error", err)
+		return nil
+	}
+
+	names := make([]string, 0, len(blocked))
+	for i := range items {
+		if _, hit := blocked[items[i].Model]; !hit {
+			continue
+		}
+		items[i].Blocked = true
+		if items[i].Message == "" {
+			items[i].Message = "上游拒绝（403/404），已自动从渠道移除"
+		} else {
+			items[i].Message += "；已自动从渠道移除"
+		}
+		names = append(names, items[i].Model)
+	}
+	slog.Info("测速自动屏蔽：已从渠道移除无权限模型", "channel_id", ch.ID, "count", len(names))
+	return names
 }
 
 // ---------------------------------------------------------------------------
@@ -2271,6 +2352,7 @@ func (s *Server) handleGetSettings(c *gin.Context) {
 			"public":          settings.SpeedTest.Public,
 			"timeout_seconds": settings.SpeedTest.TimeoutSeconds,
 			"max_models":      settings.SpeedTest.MaxModels,
+			"auto_block":      settings.SpeedTest.AutoBlock,
 			"min_timeout":     model.MinSpeedTestTimeoutSeconds,
 			"max_timeout":     model.MaxSpeedTestTimeoutSeconds,
 			"max_model_limit": model.MaxSpeedTestModels,
@@ -2524,6 +2606,7 @@ type speedTestSettingsDTO struct {
 	Public         *bool `json:"public"`
 	TimeoutSeconds *int  `json:"timeout_seconds"`
 	MaxModels      *int  `json:"max_models"`
+	AutoBlock      *bool `json:"auto_block"`
 }
 
 // mergeSpeedTestSettings 校验并合并测速设置。
@@ -2545,6 +2628,9 @@ func mergeSpeedTestSettings(target *model.SpeedTestSettings, req *speedTestSetti
 	}
 	if req.MaxModels != nil {
 		target.MaxModels = *req.MaxModels
+	}
+	if req.AutoBlock != nil {
+		target.AutoBlock = *req.AutoBlock
 	}
 	return model.ValidateSpeedTestSettings(*target)
 }

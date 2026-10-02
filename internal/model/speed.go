@@ -57,6 +57,19 @@ type ModelSpeedResult struct {
 	TestedAt time.Time
 }
 
+// NoPermission 判断该结果是否为「上游明确拒绝此模型」。
+//
+// 只认两个状态码（刻意不引入 net/http，保持 model 层不感知 HTTP 细节）：
+//   - 403：账号无权访问该模型（套餐未包含 / 分组未授权）；
+//   - 404：上游不存在该模型。
+//
+// 它们是【确定性】失败——重试不会变好，因此可以作为"测速后自动屏蔽"的依据。
+// 其余失败（超时、429、5xx、网络错误）是暂时性的，绝不构成屏蔽理由：
+// 一次抖动就移除健康模型，比留着无权限模型的代价更大。
+func (r ModelSpeedResult) NoPermission() bool {
+	return !r.OK && (r.StatusCode == 403 || r.StatusCode == 404)
+}
+
 // Normalize 清洗并校验一条测速结果，供仓储写入前调用。
 //
 // 导出（而非仓储私有）的原因：校验规则属于领域层——无论从哪条路径写入

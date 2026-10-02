@@ -196,6 +196,11 @@ const (
 	// 上限的意义：测速是逐模型串行的真实上游请求，一个声明了几百个模型的
 	// 渠道若不设限，一次点击就可能把接口挂住几十分钟。
 	SettingKeySpeedTestMaxModels = "speedtest_max_models"
+	// SettingKeySpeedTestAutoBlock 测速后是否自动屏蔽无权限模型，默认开启。
+	//
+	// "无权限"指上游对探测请求明确回 403/404（详见 ModelSpeedResult.NoPermission）；
+	// 开启时这些模型会被自动从渠道清单移除，省去管理员逐个比对再手删。
+	SettingKeySpeedTestAutoBlock = "speedtest_auto_block"
 
 	// ── 合规信息（对外公示）──────────────────────────────────────
 	//
@@ -294,6 +299,11 @@ type SpeedTestSettings struct {
 	TimeoutSeconds int
 	// MaxModels 是单次测速请求允许测的模型数上限。
 	MaxModels int
+	// AutoBlock 控制测速后是否自动屏蔽无权限模型（403/404），默认开启。
+	//
+	// 关闭它适合"清单是合同"的场景：模型清单由人工核对过，测速失败也只记录
+	// 不改动，避免自动化触碰配置。
+	AutoBlock bool
 }
 
 // 测速参数的合法区间。
@@ -597,16 +607,20 @@ func DefaultSiteSettings() SiteSettings {
 		Safeguard: SafeguardSettings{
 			SensitiveFilterEnabled: false,
 		},
-		// 模型测速默认值：功能开启、广场公开展示、单模型 20 秒、单次最多 50 个模型。
+		// 模型测速默认值：功能开启、广场公开展示、单模型 20 秒、单次最多 50 个模型、
+		// 自动屏蔽无权限模型。
 		//
 		// 为什么默认开启：测速只由管理员显式触发，开着不产生任何后台流量；
 		// 公开展示默认开启是因为"用户在模型页看到延迟"正是本功能的主诉求，
-		// 需要收敛的站长在后台把 speedtest_public 关掉即可。
+		// 需要收敛的站长在后台把 speedtest_public 关掉即可；
+		// 自动屏蔽同理——"测完顺手清掉没权限的模型"是测速的主要收益之一，
+		// 且判据（403/404）是确定性的，不会误伤暂时性失败。
 		SpeedTest: SpeedTestSettings{
 			Enabled:        true,
 			Public:         true,
 			TimeoutSeconds: 20,
 			MaxModels:      50,
+			AutoBlock:      true,
 		},
 		// 合规信息默认全空：备案号与主体名称只能由站长填入（我们无从得知），
 		// 前台在各字段为空时优雅降级（不展示该项），后台表单会提示"必填以符合公示要求"。
@@ -662,6 +676,7 @@ func (s SiteSettings) ToMap() map[string]string {
 		SettingKeySpeedTestPublic:         strconv.FormatBool(s.SpeedTest.Public),
 		SettingKeySpeedTestTimeoutSeconds: strconv.Itoa(s.SpeedTest.TimeoutSeconds),
 		SettingKeySpeedTestMaxModels:      strconv.Itoa(s.SpeedTest.MaxModels),
+		SettingKeySpeedTestAutoBlock:      strconv.FormatBool(s.SpeedTest.AutoBlock),
 
 		SettingKeySiteOperatorName:  s.Compliance.OperatorName,
 		SettingKeySiteICPLicense:    s.Compliance.ICPLicense,
@@ -753,6 +768,11 @@ func loadSpeedTestSettings(target *SpeedTestSettings, values map[string]string) 
 	if v, ok := values[SettingKeySpeedTestMaxModels]; ok {
 		if parsed, err := strconv.Atoi(v); err == nil {
 			target.MaxModels = parsed
+		}
+	}
+	if v, ok := values[SettingKeySpeedTestAutoBlock]; ok {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			target.AutoBlock = parsed
 		}
 	}
 	// 区间兜底：直接跑 Validate 并在越界时整体回退默认，
