@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -317,7 +318,7 @@ func buildUpstreamRequest(in upstreamRequestInput) (*UpstreamRequest, error) {
 	}
 
 	rawQuery := query.Encode()
-	req.URL = base + path
+	req.URL = joinUpstreamURL(base, path)
 	if rawQuery != "" {
 		req.URL += "?" + rawQuery
 	}
@@ -356,6 +357,30 @@ func resolveUpstreamBaseURL(in upstreamRequestInput) (string, error) {
 	}
 	// 去掉末尾多余的斜杠，避免出现 "//v1/..." 这类路径
 	return strings.TrimRight(base, "/"), nil
+}
+
+// versionSegmentPattern 匹配形如 v1、v4、v1beta 的"版本段"路径组件。
+var versionSegmentPattern = regexp.MustCompile(`^v\d+[a-z0-9]*$`)
+
+// joinUpstreamURL 拼接上游基础地址与端点路径，必要时去掉路径里的 /v1 版本段。
+//
+// 为什么需要：渠道目录里大量 OpenAI 兼容类型的默认地址自带版本段
+// （api.openai.com/v1、智谱的 /api/paas/v4、百炼的 compatible-mode/v1），
+// 而端点常量也带 /v1 前缀（/v1/chat/completions），直接拼接会得到
+// /v1/v1/chat/completions 这类重复地址——上游一律 404。
+//
+// 约定：基础地址以"版本段"结尾时，视为管理员显式指定的版本，端点路径的
+// /v1 前缀不再重复携带。触发条件收紧为"路径以 /v1/ 开头"，因此
+// Anthropic 的 /messages、Gemini 的 /v1beta/...、Azure 的部署路径均不受影响。
+func joinUpstreamURL(base, path string) string {
+	if !strings.HasPrefix(path, "/v1/") {
+		return base + path
+	}
+	idx := strings.LastIndex(base, "/")
+	if idx < 0 || !versionSegmentPattern.MatchString(base[idx+1:]) {
+		return base + path
+	}
+	return base + path[len("/v1"):]
 }
 
 // upstreamPath 返回上游端点路径：按协议改写调用方给出的 OpenAI 路径。
