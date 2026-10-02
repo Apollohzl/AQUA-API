@@ -169,6 +169,8 @@ func (s *Server) registerRoutes() {
 	portal.GET("/logs", s.handleMyLogs)
 	// 用量排行榜（付费榜 / 免费榜）：登录可见；管理员带 ?all=1 可看完整榜
 	portal.GET("/leaderboard", s.handleLeaderboard)
+	// 模型实时指标（tokens/s / 平均耗时 / TTFB）：模型详情页使用
+	portal.GET("/models/:model/stats", s.handleModelStats)
 	// 异步任务（用户只能看自己的）
 	portal.GET("/tasks", s.handleMyListTasks)
 
