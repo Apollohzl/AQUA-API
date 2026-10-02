@@ -82,7 +82,7 @@ export default function InstallPage() {
       <div className="flex min-h-screen flex-col bg-surface">
         <header className="flex h-14 items-center border-b border-line bg-card px-4 sm:px-6">
           <div className="flex items-center gap-2">
-            <BrandLogo name={siteName || 'AQUA-API'} />
+            <BrandLogo name={siteName || 'LTZY-API'} />
           </div>
         </header>
         <main className="flex flex-1 items-center justify-center px-4">
@@ -115,7 +115,7 @@ export default function InstallPage() {
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             <Field label="站点名称" help="显示在页面标题与页脚">
-              <Input value={siteName} onChange={(e) => setSiteName(e.target.value)} placeholder="例如：AQUA-API 网关" />
+              <Input value={siteName} onChange={(e) => setSiteName(e.target.value)} placeholder="例如：LTZY-API 网关" />
             </Field>
             <Field label="管理员用户名">
               <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="admin" autoComplete="username" />

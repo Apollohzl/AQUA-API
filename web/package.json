@@ -1,8 +1,8 @@
 {
-  "name": "aqua-api-web",
+  "name": "ltzy-api-web",
   "version": "2.0.0",
   "private": true,
-  "description": "AQUA-API 前端（Next.js 16 + React 19 + TypeScript + Tailwind CSS v4）",
+  "description": "LTZY-API 前端（Next.js 16 + React 19 + TypeScript + Tailwind CSS v4）",
   "scripts": {
     "dev": "next dev -H 127.0.0.1 -p 5173",
     "build": "next build && node scripts/sync-dist.mjs",

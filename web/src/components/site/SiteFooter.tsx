@@ -19,7 +19,7 @@ import { BrandLogo } from '@/components/BrandMark'
 import { QqGroupEntry } from '@/components/site/QqGroupEntry'
 import { useSite } from '@/lib/site/site-context'
 
-const REPO_URL = 'https://github.com/LTZY-ACU/AQUA-API'
+const REPO_URL = 'https://github.com/LTZY-ACU/LTZY-API'
 
 /** 页脚链接矩阵：三栏，标题走等宽小字 */
 const COLUMNS: { title: string; links: { label: string; href: string; external?: boolean }[] }[] = [
