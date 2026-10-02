@@ -32,8 +32,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LTZY-ACU/aqua-api/internal/model"
-	"github.com/LTZY-ACU/aqua-api/internal/reqctx"
+	"github.com/LTZY-ACU/ltzy-api/internal/model"
+	"github.com/LTZY-ACU/ltzy-api/internal/reqctx"
 )
 
 // fakeUsageLogRepo 是内存版调用日志仓储，用于断言"计费落了多少"。

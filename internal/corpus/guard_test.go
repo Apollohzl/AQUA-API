@@ -22,7 +22,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/LTZY-ACU/aqua-api/internal/model"
+	"github.com/LTZY-ACU/ltzy-api/internal/model"
 )
 
 var errFake = errors.New("fake repo failure")

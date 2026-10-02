@@ -24,8 +24,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LTZY-ACU/aqua-api/internal/crypto"
-	"github.com/LTZY-ACU/aqua-api/internal/model"
+	"github.com/LTZY-ACU/ltzy-api/internal/crypto"
+	"github.com/LTZY-ACU/ltzy-api/internal/model"
 )
 
 // newTestKeyRepo 构造基于临时数据库的密钥池仓储，并返回底层连接用于安全断言。

@@ -46,18 +46,18 @@ import (
 	"syscall"
 	"time"
 
-	aqua "github.com/LTZY-ACU/aqua-api"
-	"github.com/LTZY-ACU/aqua-api/internal/broadcast"
-	"github.com/LTZY-ACU/aqua-api/internal/config"
-	"github.com/LTZY-ACU/aqua-api/internal/corpus"
-	"github.com/LTZY-ACU/aqua-api/internal/crypto"
-	"github.com/LTZY-ACU/aqua-api/internal/mailer"
-	"github.com/LTZY-ACU/aqua-api/internal/model"
-	"github.com/LTZY-ACU/aqua-api/internal/payment"
-	"github.com/LTZY-ACU/aqua-api/internal/relay"
-	"github.com/LTZY-ACU/aqua-api/internal/server"
-	"github.com/LTZY-ACU/aqua-api/internal/store"
-	"github.com/LTZY-ACU/aqua-api/internal/version"
+	ltzy "github.com/LTZY-ACU/ltzy-api"
+	"github.com/LTZY-ACU/ltzy-api/internal/broadcast"
+	"github.com/LTZY-ACU/ltzy-api/internal/config"
+	"github.com/LTZY-ACU/ltzy-api/internal/corpus"
+	"github.com/LTZY-ACU/ltzy-api/internal/crypto"
+	"github.com/LTZY-ACU/ltzy-api/internal/mailer"
+	"github.com/LTZY-ACU/ltzy-api/internal/model"
+	"github.com/LTZY-ACU/ltzy-api/internal/payment"
+	"github.com/LTZY-ACU/ltzy-api/internal/relay"
+	"github.com/LTZY-ACU/ltzy-api/internal/server"
+	"github.com/LTZY-ACU/ltzy-api/internal/store"
+	"github.com/LTZY-ACU/ltzy-api/internal/version"
 )
 
 // 默认配置文件路径。
@@ -502,7 +502,7 @@ func run() error {
 		Corpus:        corpusGuard,
 		CorpusSamples: corpusRepo,
 		// 前端构建产物（web/dist）已通过根包的 go:embed 嵌入二进制
-		WebFS: aqua.WebDist,
+		WebFS: ltzy.WebDist,
 	})
 
 	logger.Info("HTTP 服务已就绪，等待请求", "addr", cfg.Server.Listen)

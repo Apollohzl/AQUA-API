@@ -1,4 +1,4 @@
-module github.com/LTZY-ACU/aqua-api
+module github.com/LTZY-ACU/ltzy-api
 
 go 1.27
 

@@ -29,9 +29,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/LTZY-ACU/aqua-api/internal/oai"
-	"github.com/LTZY-ACU/aqua-api/internal/store"
-	"github.com/LTZY-ACU/aqua-api/internal/version"
+	"github.com/LTZY-ACU/ltzy-api/internal/oai"
+	"github.com/LTZY-ACU/ltzy-api/internal/store"
+	"github.com/LTZY-ACU/ltzy-api/internal/version"
 )
 
 // 运维接口相关常量。
