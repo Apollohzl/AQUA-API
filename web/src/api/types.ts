@@ -302,6 +302,37 @@ export interface LeaderboardStats {
   updated_at: number
 }
 
+/* ── 模型实时指标与连通性测试（模型详情页）────────────────── */
+
+/** GET /api/user/models/{model}/stats?minutes=15 响应 */
+export interface ModelStats {
+  model: string
+  /** 是否至少有一个启用渠道支持该模型（false = 离线） */
+  available: boolean
+  /** 支持该模型的启用渠道数量（0 = 离线） */
+  channel_count: number
+  /** 窗口内该模型的成功请求数 */
+  requests: number
+  /** 窗口内平均输出速率（tokens/s；0 = 无样本） */
+  avg_tokens_per_second: number
+  /** 窗口内平均总耗时（毫秒；0 = 无请求） */
+  avg_latency_ms: number
+  /** 窗口内平均首字延迟 TTFB（毫秒；0 = 无样本） */
+  avg_first_token_ms: number
+}
+
+/** 模型连通性测试结果（前端直连 /v1/chat/completions 测得） */
+export interface ModelTestResult {
+  /** 是否连通（成功拿到首个数据块） */
+  connected: boolean
+  /** 首字延迟 TTFB（毫秒；未连通为 0） */
+  ttfb_ms: number
+  /** 未连通时的错误信息 */
+  error?: string
+  /** 测试实际使用的模型名 */
+  model: string
+}
+
 /** 调用日志对象（契约四节） */
 export interface UsageLog {
   id: number
