@@ -24,6 +24,7 @@ import type {
   OrderQuery,
   Paged,
   PaymentOrder,
+  RedeemResult,
   Task,
   TaskQuery,
   TrialGrant,
@@ -107,6 +108,16 @@ export function listMyOrders(query: OrderQuery = {}): Promise<Paged<PaymentOrder
 /** POST /api/user/orders：下单（只传金额与通道，额度由服务端计算） */
 export function createOrder(payload: CreateOrderPayload): Promise<PaymentOrder> {
   return api.post<PaymentOrder>('/user/orders', payload)
+}
+
+/**
+ * POST /api/user/redeem：兑换码兑换额度。
+ *
+ * 失败原因（不存在 / 已使用 / 已过期 / 已作废）由后端按界面语言返回精确文案，
+ * 调用方 catch 后直接展示 err.message 即可，无需本地映射。
+ */
+export function redeemMyCode(code: string): Promise<RedeemResult> {
+  return api.post<RedeemResult>('/user/redeem', { code })
 }
 
 /* ── 财务记录 ───────────────────────────────────────────── */

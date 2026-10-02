@@ -1567,6 +1567,21 @@ export interface CreateOrderPayload {
   remark?: string
 }
 
+/**
+ * POST /api/user/redeem 响应：兑换码兑换结果。
+ *
+ * total_quota / remaining_quota 可选的原因：后端在"兑换已入账、但回显余额查询失败"时
+ * 只返回 quota（少一个展示字段，不影响入账结果），前端不能把它们当作必有字段。
+ */
+export interface RedeemResult {
+  /** 本次兑换获得的额度（站内整数单位） */
+  quota: number
+  /** 兑换后的总充值额度（尽力回显，可能缺失） */
+  total_quota?: number
+  /** 兑换后的剩余额度（尽力回显，可能缺失） */
+  remaining_quota?: number
+}
+
 /** 公开的充值参数（GET /api/payment/public） */
 export interface PublicPaymentInfo {
   enabled: boolean
