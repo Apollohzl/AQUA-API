@@ -943,10 +943,10 @@ Les en-têtes de réponse contiennent `X-Routed-Via`, `X-Fallback-Attempts` et `
 - [x] Rapport de rapprochement des coûts réels (revenus − coûts − marge brute), instantané de version tarifaire
 - [x] Tableau de santé des canaux et désactivation automatique selon le taux de réussite, liste blanche CIDR de la console
 - [x] Trois thèmes (clair / sombre / bleu profond), système d'avertissement de conformité à l'échelle du site
-- [ ] Authentification par signature AWS Bedrock et Google Vertex
-- [ ] Adaptateurs amont pour l'image / la vidéo / l'audio (types déjà référencés, adaptateurs à implémenter)
-- [ ] Interface de saisie du prix propre au canal (capacité backend déjà prête)
-- [ ] Visualisation de la fenêtre de quota des comptes d'abonnement (rétablissement automatique sur 5 heures / jour / semaine)
+- [x] Authentification par signature AWS Bedrock et Google Vertex (SigV4 / JWT de compte de service)
+- [x] Adaptateur amont asynchrone générique (piloté par configuration, compatible avec tout service de génération d'images / vidéos / musique) ; les adaptateurs propres à chaque fournisseur restent à ajouter au besoin
+- [x] Interface de saisie du prix propre au canal (modèle × groupe × canal)
+- [x] Visualisation de la fenêtre de quota des comptes d'abonnement (double fenêtre 5 heures / hebdomadaire)
 
 ---
 

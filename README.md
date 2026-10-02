@@ -177,7 +177,7 @@ flowchart LR
 | 模块 | 能力 |
 | --- | --- |
 | 协议接入 | OpenAI 兼容 · Anthropic · Gemini · Codex / Responses，四类入站可同时开启 |
-| 上游适配 | OpenAI 兼容 · Azure OpenAI · Anthropic · Gemini · Codex · 订阅账号；目录登记 79 种渠道类型，37 种已实现 |
+| 上游适配 | OpenAI 兼容 · Azure OpenAI · Anthropic · Gemini · Codex · 订阅账号；目录登记 80 种渠道类型，39 种已实现 |
 | 渠道路由 | 分组路由 · 渠道级模型分叉 · 凭据级分组与模型分叉 · 时段规则 · 渠道级熔断跳过 |
 | 凭据调度 | 顺序 / 轮询 / 加权随机 / 最久未用 / 最少在途；权重 · 优先级 · 每分钟上限 · 在途数 · 冷却截止 |
 | 故障处理 | 失败分类重试 · 渠道×模型级冷却 · 指数退避 · 尊重 `Retry-After` · 会话粘性 · 半开恢复 |
@@ -391,7 +391,7 @@ flowchart TD
 
 **下游（应用如何连接本站）**：OpenAI 兼容 · Anthropic · Gemini
 
-**上游（本站如何连接他人）**：目录中已登记 **79 种**渠道类型，按 8 大类组织：
+**上游（本站如何连接他人）**：目录中已登记 **80 种**渠道类型，按 8 大类组织：
 
 | 大类 | 说明 |
 | --- | --- |
@@ -404,7 +404,7 @@ flowchart TD
 | 音频 | 语音类上游 |
 | 嵌入 | Embedding 类上游 |
 
-> **诚实说明**：79 种类型中，**已有 37 种完成协议适配器与鉴权实现**（`Available: true`），可直接选用；
+> **诚实说明**：80 种类型中，**已有 39 种完成协议适配器与鉴权实现**（`Available: true`），可直接选用；
 > 其余类型在后台标为「即将支持」并禁止选中，不会让你配到一半才发现调不通。
 > 已实现的协议与鉴权白名单由 `internal/channeltype/catalog_test.go` 钉住，防止误标。
 
@@ -422,6 +422,9 @@ flowchart TD
 | POST | `/v1/messages` | Anthropic 协议（Claude Code 直接对接） |
 | POST | `/v1/responses` | OpenAI Responses / Codex 协议 |
 | POST | `/v1beta/models/*action` | Gemini 协议 |
+| POST | `/v1/images/generations` | 图像生成（OpenAI 兼容透传） |
+| POST | `/v1/audio/speech` | 语音合成（二进制音频流透传） |
+| POST | `/v1/audio/transcriptions` · `/v1/audio/translations` | 语音识别 / 翻译（multipart 透传） |
 | POST | `/v1/tasks` | 提交异步生成任务 |
 | GET | `/v1/tasks` · `/v1/tasks/:ref` | 任务列表与详情 |
 
@@ -943,10 +946,10 @@ SQLite 场景下：停服务（或用 `VACUUM INTO` 热备）→ 拷贝 `aqua.db
 - [x] 真实成本对账报表（收入 − 成本 − 毛利）、定价版本快照
 - [x] 渠道健康面板与按成功率自动停用、管理面 CIDR 白名单
 - [x] 三套主题（浅色 / 深色 / 深蓝）、全站合规提示体系
-- [ ] AWS Bedrock 与 Google Vertex 签名鉴权
-- [ ] 图像 / 视频 / 音频类上游适配器（目录已登记，适配器待实现）
-- [ ] 渠道专属价的录入界面（后端能力已就绪）
-- [ ] 订阅账号配额窗口可视化（按 5 小时 / 日 / 周自动恢复）
+- [x] AWS Bedrock 与 Google Vertex 签名鉴权（SigV4 / 服务账号 JWT）
+- [x] 通用异步任务上游适配器（模板驱动，可接入任意图像 / 视频 / 音乐生成服务）；厂商私有适配器按需接入
+- [x] 渠道专属价的录入界面（模型 × 分组 × 渠道）
+- [x] 订阅账号配额窗口可视化（5 小时 / 每周双窗口）
 
 ---
 
@@ -970,7 +973,7 @@ internal/store/        持久化实现（SQL + 版本化迁移，按方言分目
 internal/server/       HTTP 层（路由 / 中间件 / 处理器）
 internal/relay/        协议适配与转发（核心域：选路 / 计费 / 冷却）
 internal/payment/      支付通道适配
-internal/channeltype/  上下游类型注册表（79 种）
+internal/channeltype/  上下游类型注册表（80 种）
 internal/i18n/         服务端多语言文案
 web/                   前端（Next.js，构建产物内嵌进二进制）
 assets/                文档徽章与图标

@@ -178,7 +178,7 @@ The full capability boundary in one table (details follow in later sections).
 | Module | Capability |
 | --- | --- |
 | Protocol ingress | OpenAI-compatible · Anthropic · Gemini · Codex / Responses; all four inbound types can be enabled at once |
-| Upstream adaptation | OpenAI-compatible · Azure OpenAI · Anthropic · Gemini · Codex · subscription accounts; 79 channel types are registered in the catalog, 37 of them implemented |
+| Upstream adaptation | OpenAI-compatible · Azure OpenAI · Anthropic · Gemini · Codex · subscription accounts; 80 channel types are registered in the catalog, 39 of them implemented |
 | Channel routing | Group routing · channel-level model branching · credential-level group and model branching · time-window rules · channel-level circuit-breaker skipping |
 | Credential scheduling | Sequential / round-robin / weighted random / least-recently-used / fewest-in-flight; weight · priority · per-minute cap · in-flight count · cooldown deadline |
 | Failure handling | Failure-classified retries · channel × model cooldown · exponential backoff · honoring `Retry-After` · session stickiness · half-open recovery |
@@ -392,7 +392,7 @@ flowchart TD
 
 **Downstream (how applications connect to this site)**: OpenAI-compatible · Anthropic · Gemini
 
-**Upstream (how this site connects to others)**: **79** channel types are registered in the catalog, organized into 8 categories:
+**Upstream (how this site connects to others)**: **80** channel types are registered in the catalog, organized into 8 categories:
 
 | Category | Description |
 | --- | --- |
@@ -405,7 +405,7 @@ flowchart TD
 | Audio | Speech upstreams |
 | Embedding | Embedding upstreams |
 
-> **Honest disclosure**: of the 79 types, **37 already have a completed protocol adapter and authentication implementation** (`Available: true`) and can be selected directly;
+> **Honest disclosure**: of the 80 types, **39 already have a completed protocol adapter and authentication implementation** (`Available: true`) and can be selected directly;
 > the rest are marked "coming soon" in the console and cannot be selected, so you never configure halfway only to find it will not work.
 > The whitelist of implemented protocols and authentication methods is pinned by `internal/channeltype/catalog_test.go` to prevent mislabeling.
 
@@ -423,6 +423,9 @@ flowchart TD
 | POST | `/v1/messages` | Anthropic protocol (Claude Code connects directly) |
 | POST | `/v1/responses` | OpenAI Responses / Codex protocol |
 | POST | `/v1beta/models/*action` | Gemini protocol |
+| POST | `/v1/images/generations` | Image generation (OpenAI-compatible passthrough) |
+| POST | `/v1/audio/speech` | Text-to-speech (binary audio stream passthrough) |
+| POST | `/v1/audio/transcriptions` · `/v1/audio/translations` | Speech recognition / translation (multipart passthrough) |
 | POST | `/v1/tasks` | Submit an async generation task |
 | GET | `/v1/tasks` · `/v1/tasks/:ref` | Task list and detail |
 
@@ -944,10 +947,10 @@ The response headers carry `X-Routed-Via`, `X-Fallback-Attempts`, and `X-Upstrea
 - [x] True-cost reconciliation reports (revenue − cost − margin) and price-version snapshots
 - [x] Channel health panel with automatic disabling by success rate and an admin-side CIDR whitelist
 - [x] Three themes (light / dark / navy) and a site-wide compliance notice system
-- [ ] AWS Bedrock and Google Vertex signature authentication
-- [ ] Image / video / audio upstream adapters (registered in the catalog, adapters pending)
-- [ ] A UI for entering channel-specific prices (backend support is ready)
-- [ ] Visualization of subscription-account quota windows (auto-recovering on a 5-hour / daily / weekly basis)
+- [x] AWS Bedrock and Google Vertex signature authentication (SigV4 / service-account JWT)
+- [x] A generic async task upstream adapter (template-driven, works with any image / video / music generation service); vendor-specific adapters are added on demand
+- [x] A UI for entering channel-specific prices (model × group × channel)
+- [x] Visualization of subscription-account quota windows (dual 5-hour / weekly windows)
 
 ---
 
@@ -971,7 +974,7 @@ internal/store/        Persistence implementation (SQL + versioned migrations, s
 internal/server/       HTTP layer (routing / middleware / handlers)
 internal/relay/        Protocol adaptation and forwarding (core domain: routing / billing / cooldown)
 internal/payment/      Payment channel adapters
-internal/channeltype/  Upstream/downstream type registry (79 types)
+internal/channeltype/  Upstream/downstream type registry (80 types)
 internal/i18n/         Server-side multilingual copy
 web/                   Frontend (Next.js; build output embedded into the binary)
 assets/                Documentation badges and icons

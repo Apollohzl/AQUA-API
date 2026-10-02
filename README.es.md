@@ -959,10 +959,10 @@ En las cabeceras de respuesta están `X-Routed-Via`, `X-Fallback-Attempts` y `X-
 - [x] Informe de conciliación de costes reales (ingresos − costes − margen bruto), instantánea de versión de precios
 - [x] Panel de salud de canales y desactivación automática según la tasa de éxito, lista blanca CIDR en el plano de administración
 - [x] Tres temas (claro / oscuro / azul oscuro), sistema de avisos de cumplimiento en todo el sitio
-- [ ] Autenticación por firma de AWS Bedrock y Google Vertex
-- [ ] Adaptadores de proveedores de imagen / vídeo / audio (registrados en el directorio, adaptadores pendientes)
-- [ ] Interfaz de entrada del precio exclusivo del canal (la capacidad de backend ya está lista)
-- [ ] Visualización de la ventana de cuota de las cuentas por suscripción (recuperación automática por 5 horas / día / semana)
+- [x] Autenticación por firma de AWS Bedrock y Google Vertex (SigV4 / JWT de cuenta de servicio)
+- [x] Adaptador asíncrono genérico (guiado por configuración; sirve para cualquier servicio de generación de imagen / vídeo / audio); los adaptadores específicos de cada proveedor se añaden según necesidad
+- [x] Interfaz de entrada del precio exclusivo del canal (modelo × grupo × canal)
+- [x] Visualización de la ventana de cuota de las cuentas por suscripción (doble ventana: 5 horas / semanal)
 
 ---
 
