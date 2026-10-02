@@ -44,6 +44,13 @@ import (
 const (
 	defaultPageSize = 20
 	maxPageSize     = 100
+	// maxPageNumber 是 page 的上限。
+	//
+	// 为什么需要它：offset = (page-1)*size，page 由客户端任意传入，
+	// 不设上限时（如 page=10^18）乘积会整型溢出为负值，SQLite 对负
+	// OFFSET 的行为未定义（报错或静默错乱），还可能放大异常查询成本。
+	// 夹在 100 万页 × 每页 100 条 = 1 亿条之后，业务上不可能不够用。
+	maxPageNumber = 1_000_000
 )
 
 // nameLookupLimit 是批量解析名称时一次加载的最大记录数。
@@ -2785,6 +2792,10 @@ func parsePagination(c *gin.Context) (page, size, offset int) {
 	page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
 	if page < 1 {
 		page = 1
+	}
+	// page 夹上限：防 (page-1)*size 整型溢出为负 OFFSET（见 maxPageNumber 的说明）。
+	if page > maxPageNumber {
+		page = maxPageNumber
 	}
 	size, _ = strconv.Atoi(c.DefaultQuery("size", strconv.Itoa(defaultPageSize)))
 	if size < 1 {
