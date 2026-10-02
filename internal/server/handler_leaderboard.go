@@ -28,7 +28,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 // leaderboardDefaultDays 是排行榜默认统计窗口（近 30 天）。

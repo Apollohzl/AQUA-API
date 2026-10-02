@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/model"
 )
 
 func TestPeakConcurrency_Basic(t *testing.T) {
