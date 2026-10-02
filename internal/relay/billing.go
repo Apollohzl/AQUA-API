@@ -27,12 +27,18 @@
 //	       ├─ tokens.ConsumeQuota      扣令牌额度（原子）
 //	       └─ users.AddUsedQuota       累加用户已用额度（原子）
 //
+//	放行前（鉴权阶段，见交付说明）→ Billing.BudgetExceeded(ctx, tokenID)
+//	  └─ model.Token.EvaluateBudget → 需要翻篇时 tokens.ResetBudgetWindow（惰性重置）
+//	  └─ 供后台巡检 → Billing.GroupSpendToday(ctx, group)（只读，不参与扣费）
+//
 // 扩展（Extend）：
 //
 //	新增计价维度（缓存命中价、按次计费、图片张数）时：
 //	  在 Charge 里扩展入参并同步 model.ModelPrice 的计算函数与迁移脚本。
 //	新增缓存维度时：务必保持"按分组隔离"这一前提——缓存键必须能区分分组，
 //	  否则不同分组会互相串价（见 Billing.rules 上的说明）。
+//	新增"按用户/按分组"的周期预算时：复用 model.Token 的窗口判定思路
+//	  （相对窗口 + 惰性重置 + 基线差），并把闸门判定放到鉴权放行前调用。
 package relay
 
 import (
@@ -724,6 +730,84 @@ func (b *Billing) PendingReserved(ctx context.Context, userID uint64) (int64, er
 		return 0, nil
 	}
 	return b.quota.PendingAmount(ctx, userID)
+}
+
+// ---------------------------------------------------------------------------
+// 周期预算闸门（令牌级）
+// ---------------------------------------------------------------------------
+//
+// 与"预扣/结算"的分工（重要）：
+//   - 预算是否超限必须【在放行之前】就知道，否则请求已经打到上游再后悔没有意义；
+//     因此它被做成可提前查询的 BudgetExceeded，由鉴权层在放行前调用。
+//   - Charge 系列"不能影响客户端响应"（错误只记录不返回），因此本方法【不在
+//     Charge 内部做拦截】，只负责判定与惰性重置窗口；扣费记账仍由 Charge/ConsumeQuota 完成。
+//
+// 为什么窗口重置放在这里（惰性重置）而不放定时任务：
+//   定时任务要额外引入调度器、持久化"上次重置时间"、还要处理进程重启漏跑；
+//   而"每次判定顺手检查是否过期"几乎零成本，且永远不会有"整点没跑"的窗口。
+//   代价只是"某令牌在窗口过期后第一次被调用时才翻篇"——这正是我们想要的语义。
+
+// BudgetExceeded 判断某令牌的周期预算是否已用尽。
+//
+// 返回值语义：
+//   - (false, nil)：未启用预算（默认 0 / 不限额度 / 周期非法）、令牌不存在、
+//     或窗口刚翻篇 —— 均应放行；
+//   - (true, nil)：当前窗口已消耗达到 budget_quota，鉴权层应拒绝本次请求；
+//   - (_, err)：读取令牌或重置窗口失败。由调用方决定如何处理（本项目约定：
+//     不要把存储故障当成"超限"直接拒绝用户，也不静默忽略——如实上报）。
+//
+// 参数 tokenID 为 0 或未注入令牌仓储时返回 (false, nil)，保证降级部署与测试场景行为不变。
+func (b *Billing) BudgetExceeded(ctx context.Context, tokenID uint64) (bool, error) {
+	if b == nil || b.tokens == nil || tokenID == 0 {
+		return false, nil
+	}
+
+	tk, err := b.tokens.GetByID(ctx, tokenID)
+	if err != nil {
+		if errors.Is(err, model.ErrTokenNotFound) {
+			// 令牌已被删除：交给鉴权层按"令牌不存在"处理，不在此处误判为预算超限。
+			return false, nil
+		}
+		return false, fmt.Errorf("relay: 读取令牌 %d 的预算状态失败: %w", tokenID, err)
+	}
+
+	decision := tk.EvaluateBudget(time.Now())
+	if !decision.Enabled {
+		// 未启用预算：与引入本能力前逐字一致地放行（存量令牌走的就是这条路）。
+		return false, nil
+	}
+	if decision.NeedReset {
+		// 窗口尚未锚定或已过期：先惰性重置（起点=now、基线对齐当前 used_quota），
+		// 新窗口从零开始，本次放行。重置失败如实上报，绝不静默吞错。
+		if err := b.tokens.ResetBudgetWindow(ctx, tokenID, decision.WindowStart); err != nil {
+			return false, fmt.Errorf("relay: 重置令牌 %d 的预算窗口失败: %w", tokenID, err)
+		}
+		return false, nil
+	}
+	return decision.Exceeded, nil
+}
+
+// GroupSpendToday 返回某分组在【今天】已消耗的额度（只读，供后台展示/巡检）。
+//
+// 口径：以本地时区的自然日为区间 [今日零点, 明日零点)，按请求命中的渠道所属分组聚合
+// （判定语义与路由一致，详见 model.TokenRepository.GroupSpendToday）。
+// 只读，不参与扣费，也不做任何自动熔断——自动禁用渠道由渠道治理链路负责。
+//
+// 未注入令牌仓储时返回 0，不报错。
+func (b *Billing) GroupSpendToday(ctx context.Context, group string) (int64, error) {
+	if b == nil || b.tokens == nil {
+		return 0, nil
+	}
+	start := startOfDay(time.Now())
+	return b.tokens.GroupSpendToday(ctx, group, start, start.AddDate(0, 0, 1))
+}
+
+// startOfDay 返回 t 所在自然日的零点（保持 t 的时区）。
+//
+// 刻意按本地时区切分：站长看的是"我这边今天烧了多少"，
+// 若按 UTC 切分，东八区凌晨的消耗会被算到前一天，与直觉不符。
+func startOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
 // estimatePromptTokens 由请求体字节数估算 prompt token 数（保守上界）。
