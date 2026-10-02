@@ -30,6 +30,27 @@ func testSender() *Sender {
 	})
 }
 
+// TestValidateRecipient_头注入防御 收件人是唯一同时进入 SMTP 信封与
+// 邮件头的用户可控字段，CR/LF/NUL 必须被拒绝，否则可注入任意邮件头（如 Bcc）。
+func TestValidateRecipient_头注入防御(t *testing.T) {
+	if err := validateRecipient("user@example.com"); err != nil {
+		t.Errorf("正常地址不应报错，实际: %v", err)
+	}
+	if err := validateRecipient(""); err == nil {
+		t.Error("空收件人应报错")
+	}
+	for _, evil := range []string{
+		"user@example.com\r\nBcc: victim@evil.com",
+		"user@example.com\nBcc: victim@evil.com",
+		"user@example.com\rBcc: victim@evil.com",
+		"user\x00@example.com",
+	} {
+		if err := validateRecipient(evil); err == nil {
+			t.Errorf("含控制字符的地址 %q 应被拒绝", evil)
+		}
+	}
+}
+
 func TestConfigured_缺口令_应判为未配置(t *testing.T) {
 	cases := []struct {
 		name string

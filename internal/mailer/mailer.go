@@ -151,8 +151,8 @@ func (s *Sender) Send(ctx context.Context, to, subject, htmlBody string) error {
 	}
 
 	to = strings.TrimSpace(to)
-	if to == "" {
-		return errors.New("mailer: 收件人不能为空")
+	if err := validateRecipient(to); err != nil {
+		return err
 	}
 
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
@@ -230,6 +230,23 @@ func (s *Sender) Send(ctx context.Context, to, subject, htmlBody string) error {
 	// 主动 QUIT：让服务端立即确认接收，否则连接关闭时才知道对方是否拒收
 	if err := client.Quit(); err != nil {
 		return fmt.Errorf("mailer: 结束 SMTP 会话失败: %w", err)
+	}
+	return nil
+}
+
+// validateRecipient 校验收件人地址是否可安全进入 SMTP 信封与邮件头。
+//
+// 为什么必须在这里再查一遍（注册链路已有 model.ValidateEmailFormat）：
+// 收件人是唯一同时进入「SMTP 信封（RCPT TO）」与「邮件头（To:）」的用户可控
+// 字段，携带 CR/LF 即可在邮件头里注入任意新行（如追加 Bcc 抄送、伪造主题）。
+// 调用方（找回密码、验证码、广播、告警）各自的前提不同，邮件模块必须自守，
+// 而不是假设上游都做了校验——防御纵深的基本要求。
+func validateRecipient(to string) error {
+	if to == "" {
+		return errors.New("mailer: 收件人不能为空")
+	}
+	if strings.ContainsAny(to, "\r\n\x00") {
+		return errors.New("mailer: 收件人地址含非法控制字符（疑似邮件头注入）")
 	}
 	return nil
 }
