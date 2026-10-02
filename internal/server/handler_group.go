@@ -695,9 +695,12 @@ type plazaGroupDTO struct {
 // 返回两张表：模型 → 最小 TTFB（毫秒）、模型 → 该结果的时间（Unix 秒）。
 // 取 MIN 而不是平均的原因：用户关心的是"最快能多快拿到首字"，
 // 路由层本身也会优先选快的渠道，平均数反而不能代表真实体验。
+// viewerIsAdmin 为真时豁免「广场公示」开关：公示只约束给普通用户看的数据，
+// 站长自己（后台内嵌广场 / 登录态）不应被自己的开关挡在门外，
+// 否则关掉公示就失去了核对测速数据的入口；测速总开关仍生效（关了就是没数据）。
 // 任一前置条件不满足（仓储缺失 / 开关关闭 / 读库失败 / 无成功记录）
 // 都返回空表，调用方按"没有数据"处理，绝不让测速数据问题拖垮广场。
-func (s *Server) plazaSpeedByModel(ctx context.Context, channels []*model.Channel) (map[string]int, map[string]int64) {
+func (s *Server) plazaSpeedByModel(ctx context.Context, channels []*model.Channel, viewerIsAdmin bool) (map[string]int, map[string]int64) {
 	ttfb := make(map[string]int)
 	testedAt := make(map[string]int64)
 
@@ -706,7 +709,7 @@ func (s *Server) plazaSpeedByModel(ctx context.Context, channels []*model.Channe
 	}
 	// 公示开关在每次请求时读取：站长在后台关掉后无需重启或等缓存过期。
 	settings, err := model.LoadSiteSettings(ctx, s.deps.Settings)
-	if err != nil || !settings.SpeedTest.Enabled || !settings.SpeedTest.Public {
+	if err != nil || !settings.SpeedTest.Enabled || (!settings.SpeedTest.Public && !viewerIsAdmin) {
 		return ttfb, testedAt
 	}
 
@@ -776,7 +779,7 @@ func (s *Server) handleModelPlaza(c *gin.Context) {
 
 	// 模型测速：各启用渠道最近一次结果 → 每个模型取最小首字延迟。
 	// 在开关关闭 / 未测过 / 读库失败时返回空表，模型卡片自然不带延迟字段。
-	speedTTFB, speedTestedAt := s.plazaSpeedByModel(ctx, channels)
+	speedTTFB, speedTestedAt := s.plazaSpeedByModel(ctx, channels, s.plazaViewerIsAdmin(c))
 
 	groupFilter := strings.TrimSpace(c.Query("group"))
 	if hiddenGroups[groupFilter] {
@@ -970,6 +973,15 @@ func (s *Server) resolvePlazaViewer(ctx context.Context, c *gin.Context) *plazaV
 		return nil
 	}
 	return &plazaViewerDTO{AgentGroup: group.Name, Label: group.Label(), Ratio: group.Ratio}
+}
+
+// plazaViewerIsAdmin 判断当前广场查看者是否管理员（未登录 / 非管理员为 false）。
+//
+// 用途：测速数据的「广场公示」开关只约束普通用户，管理员始终可见——
+// 复用会话中间件解析出的当前用户（与 resolvePlazaViewer 同一来源）。
+func (s *Server) plazaViewerIsAdmin(c *gin.Context) bool {
+	user, ok := middleware.CurrentUser(c)
+	return ok && user != nil && user.IsAdmin()
 }
 
 // plazaAgentPricePair 返回代理视图下的两档价格：代理价与原价。
