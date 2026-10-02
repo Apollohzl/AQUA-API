@@ -1,8 +1,8 @@
-# AQUA-API 部署指南
+# LTZY-API 部署指南
 
 > 适用版本：v1.0.0 及以上 · 更新日期：2026-10-03
 >
-> AQUA-API 是**单二进制**程序（前端已通过 `go:embed` 打进可执行文件，SQLite 零外部依赖、
+> LTZY-API 是**单二进制**程序（前端已通过 `go:embed` 打进可执行文件，SQLite 零外部依赖、
 > 不需要 CGO），因此部署只需要三样东西：**一个二进制 + 一个环境变量文件 + 一条 systemd 单元**。
 > 没有数据库要装、没有 Node 要装、没有前端要单独托管。
 
@@ -35,12 +35,12 @@
 ## 二、方式一：Docker Compose（最快）
 
 ```bash
-git clone https://github.com/LTZY-ACU/AQUA-API.git
-cd AQUA-API
+git clone https://github.com/LTZY-ACU/LTZY-API.git
+cd LTZY-API
 
 # 1) 准备环境变量（唯一必填项是加密主密钥）
 cp .env.example .env
-docker run --rm aqua-api:local -gen-key > /dev/null 2>&1 || \
+docker run --rm ltzy-api:local -gen-key > /dev/null 2>&1 || \
   ./aqua -gen-key          # 若本机无二进制，先用下一步构建出的镜像生成
 
 # 2) 构建并启动（首次构建约 1-3 分钟）
@@ -65,13 +65,13 @@ docker compose up -d --build
 
 **途径 A：直接下载官方 Release（推荐）**
 
-到 [Releases](https://github.com/LTZY-ACU/AQUA-API/releases) 下载
+到 [Releases](https://github.com/LTZY-ACU/LTZY-API/releases) 下载
 `aqua-linux-amd64`（Linux）或 `aqua-windows-amd64.exe`（Windows），重命名为 `aqua`。
 
 **途径 B：自行构建（本机无 gcc 也行，必须 CGO_ENABLED=0）**
 
 ```bash
-git clone https://github.com/LTZY-ACU/AQUA-API.git && cd AQUA-API
+git clone https://github.com/LTZY-ACU/LTZY-API.git && cd LTZY-API
 
 # 1) 构建前端（dist 会被 go:embed 打进二进制，必须先做）
 cd web && npm install && npm run build && cd ..
@@ -81,10 +81,10 @@ VER=v1.0.0
 COMMIT=$(git rev-parse --short HEAD)
 BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 go build -trimpath -ldflags "-s -w \
-  -X github.com/LTZY-ACU/aqua-api/internal/version.Version=$VER \
-  -X github.com/LTZY-ACU/aqua-api/internal/version.GitCommit=$COMMIT \
-  -X github.com/LTZY-ACU/aqua-api/internal/version.BuildTime=$BUILD_TIME" \
-  -o aqua ./cmd/aqua
+  -X github.com/LTZY-ACU/ltzy-api/internal/version.Version=$VER \
+  -X github.com/LTZY-ACU/ltzy-api/internal/version.GitCommit=$COMMIT \
+  -X github.com/LTZY-ACU/ltzy-api/internal/version.BuildTime=$BUILD_TIME" \
+  -o aqua ./cmd/ltzy
 ```
 
 > 版本注入后 `./aqua -version`、`/healthz`、页脚都会显示真实版本号；

@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="favicon.ico" width="88" alt="AQUA-API" />
+<img src="favicon.ico" width="88" alt="LTZY-API" />
 
-# AQUA-API
+# LTZY-API
 
 **把你的所有 AI 上游，收进一个入口。**
 
@@ -21,6 +21,8 @@ Self-hosted LLM Gateway · OpenAI-compatible API
 
 [简体中文](README.md) · [English](README.en.md) · [Français](README.fr.md) · [Русский](README.ru.md) · [Español](README.es.md) · [العربية](README.ar.md)
 
+> 本项目前身为 **AQUA-API**，2026-10 起更名为 **LTZY-API**；旧地址自动重定向，无需更新收藏。
+
 </div>
 
 ---
@@ -29,9 +31,9 @@ Self-hosted LLM Gateway · OpenAI-compatible API
 
 | 渠道 | 地址 |
 | --- | --- |
-| 官方网站（在线演示） | https://aqua.is3.cc |
-| 代码仓库 | https://github.com/LTZY-ACU/AQUA-API |
-| 提交 Issue | https://github.com/LTZY-ACU/AQUA-API/issues |
+| 官方网站（在线演示） | https://ltzy.top |
+| 代码仓库 | https://github.com/LTZY-ACU/LTZY-API |
+| 提交 Issue | https://github.com/LTZY-ACU/LTZY-API/issues |
 
 > **本仓库是官方地址的唯一权威来源。** 域名如有变更，会先在这里更新，再同步到其它任何地方。
 > 因此，收藏本仓库比收藏一个域名更可靠。
@@ -102,13 +104,13 @@ Self-hosted LLM Gateway · OpenAI-compatible API
 
 ## 这是什么
 
-AQUA-API 是一个**自托管的 LLM API 网关**，同时是一套 **AI 用量管理系统**。
+LTZY-API 是一个**自托管的 LLM API 网关**，同时是一套 **AI 用量管理系统**。
 
 你手上的上游通常是一团互不兼容的东西：OpenAI 官方 Key、Azure、Claude、Gemini、各家云厂商、
 各类 OpenAI 兼容服务、订阅来的账号（Claude / Codex / Gemini），以及本地跑的 Ollama / vLLM。
 而你的下游是各种应用：Claude Code、Codex CLI、Cursor、自研 App、脚本、插件。
 
-AQUA-API 站在中间，把这一团整理成**一个入口、一套协议、一本清楚的账**。
+LTZY-API 站在中间，把这一团整理成**一个入口、一套协议、一本清楚的账**。
 
 ```mermaid
 flowchart LR
@@ -119,7 +121,7 @@ flowchart LR
         C4["自研应用 / 脚本 / 插件"]
     end
 
-    AQUA["AQUA-API<br/>统一协议 · 智能调度 · 精确计费<br/>分组 · 凭据池 · 运营后台"]
+    AQUA["LTZY-API<br/>统一协议 · 智能调度 · 精确计费<br/>分组 · 凭据池 · 运营后台"]
 
     subgraph U["上游服务"]
         U1["OpenAI / Azure"]
@@ -148,7 +150,7 @@ flowchart LR
 
 同类网关不少，缺的是**能安心托付账目**的那一个。下面每一条都是踩过坑之后的设计。
 
-| 关注点 | 常见做法 | AQUA-API |
+| 关注点 | 常见做法 | LTZY-API |
 | --- | --- | --- |
 | 上游密钥 | 明文存库，后台可看回明文 | AES-256-GCM 加密落库，主密钥只从环境变量注入；后台被攻破也导不出明文 |
 | 加密主密钥 | 一并写进配置文件 | 配置文件中的同名字段直接被忽略，只能走环境变量，不会随仓库泄露 |
@@ -576,11 +578,11 @@ sequenceDiagram
 ### 方式一：Docker Compose（推荐）
 
 ```bash
-git clone https://github.com/LTZY-ACU/AQUA-API.git && cd AQUA-API
+git clone https://github.com/LTZY-ACU/LTZY-API.git && cd LTZY-API
 cp .env.example .env
 
-docker build -t aqua-api:local .          # 首次构建（前端 + 后端 + 运行镜像）
-docker run --rm aqua-api:local -gen-key   # 打印一个主密钥，填进 .env 的 AQUA_APP_KEY
+docker build -t ltzy-api:local .          # 首次构建（前端 + 后端 + 运行镜像）
+docker run --rm ltzy-api:local -gen-key   # 打印一个主密钥，填进 .env 的 AQUA_APP_KEY
 
 docker compose up -d
 ```
@@ -590,21 +592,21 @@ docker compose up -d
 ### 方式二：docker run（不使用 compose）
 
 ```bash
-docker build -t aqua-api:local .
+docker build -t ltzy-api:local .
 
-docker run -d --name aqua-api \
+docker run -d --name ltzy-api \
   -p 8787:8787 \
   -e AQUA_APP_KEY="<你的主密钥>" \
   -e AQUA_SERVER_LISTEN=0.0.0.0:8787 \
   -v "$PWD/data:/data" \
   --restart unless-stopped \
-  aqua-api:local
+  ltzy-api:local
 ```
 
 ### 方式三：单二进制（Linux 服务器 / systemd）
 
 ```bash
-go build -o aqua ./cmd/aqua           # 纯 Go，零 CGO，不需要 gcc
+go build -o aqua ./cmd/ltzy           # 纯 Go，零 CGO，不需要 gcc
 
 ./aqua -gen-key                        # 生成加密主密钥（只生成，不落盘）
 
@@ -631,7 +633,7 @@ sudo systemctl status aqua-api
 # 前端（可选：仓库中的 web/dist 为占位，正式界面需构建后才会内嵌）
 cd web && npm ci && npm run build && cd ..
 
-go build -o bin/aqua ./cmd/aqua
+go build -o bin/aqua ./cmd/ltzy
 export AQUA_APP_KEY="<你的主密钥>"      # Windows: $env:AQUA_APP_KEY="..."
 ./bin/aqua -config ./aqua.json          # 不加 -config 则使用默认值与环境变量
 curl http://127.0.0.1:8787/healthz
@@ -697,7 +699,7 @@ location / {
 | `AQUA_SMTP_USERNAME` | 否 | SMTP 用户名 |
 | `AQUA_SMTP_PASSWORD` | 否 | SMTP 密码，只能走环境变量 |
 | `AQUA_SMTP_FROM` | 否 | 发件人地址 |
-| `AQUA_SMTP_FROM_NAME` | 否 | 发件人显示名，默认 `AQUA-API` |
+| `AQUA_SMTP_FROM_NAME` | 否 | 发件人显示名，默认 `LTZY-API` |
 | `AQUA_EPAY_KEY` | 否 | 易支付商户密钥（MD5 签名） |
 | `AQUA_STRIPE_SECRET_KEY` | 否 | Stripe Secret Key |
 | `AQUA_STRIPE_WEBHOOK_SECRET` | 否 | Stripe Webhook 签名密钥 |
@@ -732,7 +734,7 @@ location / {
 
 ## 接入示例
 
-任何 OpenAI 兼容客户端，把 Base URL 指过来、Key 换成 AQUA-API 的令牌即可。
+任何 OpenAI 兼容客户端，把 Base URL 指过来、Key 换成 LTZY-API 的令牌即可。
 
 ### curl
 
@@ -765,7 +767,7 @@ print(resp.choices[0].message.content)
 
 ### Claude Code / Anthropic 客户端
 
-AQUA-API 原生支持 Anthropic 协议，可直接接管 Claude Code 的流量：
+LTZY-API 原生支持 Anthropic 协议，可直接接管 Claude Code 的流量：
 
 ```bash
 export ANTHROPIC_BASE_URL=https://你的域名
@@ -1030,6 +1032,6 @@ aqua-api.service       systemd 单元（裸机部署）
 
 **如果这个项目帮你省下了对账的时间，欢迎点个 Star ⭐**
 
-[在线演示](https://aqua.is3.cc) · [提交 Issue](https://github.com/LTZY-ACU/AQUA-API/issues) · [GitHub](https://github.com/LTZY-ACU/AQUA-API) · [English](README.en.md)
+[在线演示](https://ltzy.top) · [提交 Issue](https://github.com/LTZY-ACU/LTZY-API/issues) · [GitHub](https://github.com/LTZY-ACU/LTZY-API) · [English](README.en.md)
 
 </div>
