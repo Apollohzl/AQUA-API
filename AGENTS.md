@@ -29,7 +29,7 @@ D:\AQUA-API\                （工作区，不是仓库）
 设计意图：把隐私与参考资料放在**仓库之外**，从物理上杜绝误提交，
 而不是仅依赖 `.gitignore` 规则（`.gitignore` 仅作防御性冗余保留）。
 
-提交约定：每次提交后由 `.git/hooks/post-commit` 自动推送到远程仓库（仅 Gitee，GitHub 由镜像同步）。
+提交约定：每次提交后由 `.git/hooks/post-commit` 自动推送到远程仓库（GitHub）。
 
 ## 二、代码地图（按数据流向）
 

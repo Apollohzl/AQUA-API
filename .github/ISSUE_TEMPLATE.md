@@ -1,5 +1,5 @@
 <!--
-  Gitee Issue 模板：新建 Issue 时默认填入。
+  Issue 模板：新建 Issue 时默认填入（GitHub）。
   分节提问，避免"只有一句话的 Issue"无法定位。
 -->
 
