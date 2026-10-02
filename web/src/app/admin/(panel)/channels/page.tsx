@@ -3,6 +3,10 @@
  * 意图（Why）：
  *   渠道是网关的「上游接入点」。列表 + 新建/编辑弹层 + 测活 + 启停/删除。
  *   表单按渠道类型目录（fetchChannelTypes）做触发式渲染，密钥池支持批量粘贴。
+ *   编辑弹层还挂载三块渠道专属能力（后端早已就绪、此前前端零入口的断链）：
+ *     ① 上游进价（列表「进价」按钮 → ChannelCostModal）——/admin/finance 对账页成本列的数据来源；
+ *     ② 模型映射（弹层内 ChannelModelMappings 分区）——平台模型 ID ↔ 上游模型 ID 的改写规则；
+ *     ③ 从上游拉取模型（模型列表旁按钮）——按已存渠道或裸地址拉清单，避免手抄模型名出错。
  */
 'use client'
 
@@ -12,18 +16,21 @@ import {
   createChannel,
   deleteChannel,
   fetchChannelTypes,
+  fetchUpstreamModels,
   listChannels,
   testChannel,
   updateChannel,
 } from '@/api/admin'
-import type { Channel, ChannelPayload, ChannelTestResult, ChannelType } from '@/api/types'
+import type { Channel, ChannelPayload, ChannelTestResult, ChannelType, FetchModelsPayload } from '@/api/types'
+import { ChannelCostModal } from '@/components/admin/ChannelCostModal'
 import { ChannelHealthPanel } from '@/components/admin/ChannelHealthPanel'
 import { ChannelKeyPool } from '@/components/admin/ChannelKeyPool'
+import { ChannelModelMappings } from '@/components/admin/ChannelModelMappings'
 import { Badge, Card, EmptyState, Tabs } from '@/components/ui/Display'
 import { DataTable, Pagination, type Column } from '@/components/ui/Table'
 import { Button } from '@/components/ui/Button'
 import { Field, Input, Select, Switch, Textarea } from '@/components/ui/Form'
-import { Modal, ConfirmDialog } from '@/components/ui/Modal'
+import { Modal, ConfirmDialog, CopyButton } from '@/components/ui/Modal'
 import { useToast } from '@/lib/toast/toast-context'
 import { channelStatusLabel, channelStatusBadgeClass } from '@/utils/display'
 import { formatDateTime } from '@/utils/format'
@@ -40,6 +47,8 @@ export default function AdminChannelsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Channel | null>(null)
   const [testResult, setTestResult] = useState<ChannelTestResult | null>(null)
   const [testing, setTesting] = useState(false)
+  // 「上游进价」编辑弹层的目标渠道：/admin/finance 对账页的成本数据全靠它录入
+  const [costTarget, setCostTarget] = useState<Channel | null>(null)
 
   const { toast, toastError } = useToast()
 
@@ -137,6 +146,7 @@ export default function AdminChannelsPage() {
       render: (row) => (
         <span className="flex items-center justify-end gap-2 text-[13px]">
           <button type="button" onClick={() => handleTest(row)} className="text-ink-3 hover:text-brand" disabled={testing}>测活</button>
+          <button type="button" onClick={() => setCostTarget(row)} className="text-ink-3 hover:text-brand">进价</button>
           <button type="button" onClick={() => setEditing(row)} className="text-ink-3 hover:text-brand">编辑</button>
           <button type="button" onClick={() => handleToggle(row)} className="text-ink-3 hover:text-brand">{row.status === 1 ? '停用' : '启用'}</button>
           <button type="button" onClick={() => setDeleteTarget(row)} className="text-ink-3 hover:text-err">删除</button>
@@ -192,6 +202,13 @@ export default function AdminChannelsPage() {
         onSaved={() => { setEditing(null); void load() }}
       />
 
+      {/* 上游进价管理：渠道 × 模型的成本录入 + 按密钥用量估算（财务对账页的成本来源） */}
+      <ChannelCostModal
+        open={Boolean(costTarget)}
+        channel={costTarget}
+        onClose={() => setCostTarget(null)}
+      />
+
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         title="删除渠道"
@@ -230,6 +247,9 @@ function ChannelFormModal({
   const [keysText, setKeysText] = useState('')
   const [status, setStatus] = useState(1)
   const [loading, setLoading] = useState(false)
+  // 「从上游拉取模型」结果与进行中标记：拉取回来的清单可直接填入模型列表
+  const [fetchingModels, setFetchingModels] = useState(false)
+  const [fetchedModels, setFetchedModels] = useState<string[] | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -244,9 +264,44 @@ function ChannelFormModal({
     setModelsText((channel?.models ?? []).join('\n'))
     setKeysText('')
     setStatus(channel?.status ?? 1)
+    // 每次打开弹层都清空上次拉取的清单：渠道可能已换地址，旧清单会误导
+    setFetchedModels(null)
   }, [open, channel, types])
 
   const selectedType = types.find((t) => t.key === typeKey) ?? types[0]
+
+  /** 向上游拉取可用模型清单：模型名（如 meta/llama-3.1-70b-instruct）手抄必错一个字符整条路由就失效。 */
+  async function handleFetchModels() {
+    // 编辑已有渠道时用库中地址与密钥（后端语义：以库中数据为准，避免半修改的表单值拉回与实际配置不一致的清单）；
+    // 新建时用表单里刚填的地址与密钥（还没保存，谈不上"用已存渠道"）
+    if (!channel && !baseUrl.trim()) {
+      toastError('请先填写上游地址')
+      return
+    }
+    setFetchingModels(true)
+    try {
+      const payload: FetchModelsPayload = channel
+        ? { channel_id: channel.id }
+        : { base_url: baseUrl.trim(), api_key: apiKey.trim() }
+      const data = await fetchUpstreamModels(payload)
+      setFetchedModels(data.models ?? [])
+      toast(`拉取到 ${data.count} 个模型`)
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : '拉取失败')
+    } finally {
+      setFetchingModels(false)
+    }
+  }
+
+  /** 把拉取结果合并进模型列表（去重保序），而不是覆盖：站长可能已手填了部分模型。 */
+  function applyFetchedModels() {
+    if (!fetchedModels || fetchedModels.length === 0) return
+    const existing = modelsText.split('\n').map((s) => s.trim()).filter(Boolean)
+    const seen = new Set(existing)
+    const added = fetchedModels.filter((m) => !seen.has(m))
+    setModelsText([...existing, ...added].join('\n'))
+    toast(`已填入：新增 ${added.length} 个，当前共 ${existing.length + added.length} 个`)
+  }
 
   async function handleSubmit() {
     if (!name.trim()) {
@@ -331,11 +386,54 @@ function ChannelFormModal({
           <Textarea value={modelsText} onChange={(e) => setModelsText(e.target.value)} rows={5} placeholder="gpt-4o\nclaude-3-5-sonnet" />
         </Field>
 
+        {/* 从上游拉取模型：NIM 这类平台上架几百个模型，人工抄写必然出错 */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" size="sm" loading={fetchingModels} onClick={handleFetchModels}>
+            从上游拉取模型
+          </Button>
+          <span className="text-xs text-ink-3">
+            {channel ? '使用该渠道已保存的地址与密钥' : '使用上方填写的地址与密钥'}
+          </span>
+        </div>
+        {fetchedModels && (
+          <div className="rounded-md border border-line bg-surface p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="text-ink-2">拉取到 {fetchedModels.length} 个模型</span>
+              <span className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={applyFetchedModels}
+                  disabled={fetchedModels.length === 0}
+                  className="text-brand hover:underline disabled:pointer-events-none disabled:opacity-50"
+                >
+                  填入模型列表
+                </button>
+                <CopyButton text={fetchedModels.join('\n')} label="复制清单" />
+              </span>
+            </div>
+            <div className="mt-2 max-h-40 overflow-y-auto font-mono text-xs leading-5 text-ink-2">
+              {fetchedModels.length > 0 ? (
+                fetchedModels.map((m) => <div key={m}>{m}</div>)
+              ) : (
+                <span className="text-ink-3">上游返回了空清单</span>
+              )}
+            </div>
+          </div>
+        )}
+
         <label className="flex items-center justify-between text-[13px] text-ink-2">
           <span>启用渠道</span>
           <Switch checked={status === 1} onChange={(v) => setStatus(v ? 1 : 2)} />
         </label>
       </div>
+
+      {/* 模型映射维护：/admin/model-mappings 总览页注释写明「映射在渠道详情中维护」，
+          本分区就是那个「渠道详情中的维护入口」。仅编辑已有渠道时展示（新建时还没有渠道 ID 可挂载）。 */}
+      {channel && (
+        <div className="mt-5 border-t border-line pt-4">
+          <ChannelModelMappings channelId={channel.id} />
+        </div>
+      )}
 
       {/* 密钥池运行态：仅编辑已有渠道时展示（新建时还没有渠道 ID，没有明细可查）。
           放在表单下方独立分区，既不打乱"填表"的主线，又能就近观察凭据健康状况。 */}
