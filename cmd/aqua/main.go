@@ -809,6 +809,11 @@ func resetPasswordAndReport(
 	}
 
 	if generated {
+		// 说明：这里把随机生成的密码打印到 stdout 是刻意的——CLI 子命令没有
+		// 其他交付渠道，且这是"仅此一次"的展示（与 gh auth login 同类做法）。
+		// 密钥/密码绝不写日志（服务端铁律），本处是管理员手动执行的本地 CLI，
+		// 不属于日志落盘路径。下面的消警注释用于告知 CodeQL 这是设计行为。
+		// codeql[go/clear-text-logging]
 		fmt.Printf(`已重置用户密码（随机生成）：
 
   用户名：%s
