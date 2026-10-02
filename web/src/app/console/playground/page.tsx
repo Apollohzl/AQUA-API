@@ -13,7 +13,7 @@ import { Card, CodeBlock } from '@/components/ui/Display'
 import { Field, Input, Select } from '@/components/ui/Form'
 import { fetchModelPlaza } from '@/api/site'
 import { useToast } from '@/lib/toast/toast-context'
-import { getSessionToken } from '@/api/client'
+import Link from 'next/link'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -31,10 +31,10 @@ export default function ConsolePlaygroundPage() {
   const abortRef = useRef<AbortController | null>(null)
   const { toastError } = useToast()
 
-  // 预填本机会话令牌（用户可改），并加载模型名
+  // 只加载模型名。令牌刻意不预填：/v1 网关认的是「访问令牌」（sk- 开头，
+  // 存于 tokens 表），登录会话令牌走的是另一套鉴权，填进去只会得到 401，
+  // 反而让人误以为网关坏了——所以宁可让用户去令牌页复制一次。
   useEffect(() => {
-    const session = getSessionToken()
-    if (session) setToken(session)
     void fetchModelPlaza().then((data) => {
       const names = data.items.map((item) => item.model)
       setModels(names)
@@ -65,7 +65,10 @@ export default function ConsolePlaygroundPage() {
     setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
 
     try {
-      const response = await fetch('/api/v1/chat/completions', {
+      // 直连 /v1 网关（相对路径）：生产环境前端与 API 同源由 go:embed 伺服，
+      // 开发环境由 next.config.ts 的 rewrites 代理到本机后端。
+      // 不能走 /api 前缀——网关路由只注册在 /v1 下，多一层前缀会 404。
+      const response = await fetch('/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token.trim()}` },
         body: JSON.stringify({
@@ -185,8 +188,13 @@ export default function ConsolePlaygroundPage() {
 
         <Card>
           <div className="space-y-3">
-            <Field label="访问令牌">
-              <Input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="sk-..." />
+            <Field label="访问令牌" help="sk- 开头的 API 访问令牌，不是登录密码">
+              <Input
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="填入 sk- 开头的 API 访问令牌（在令牌页创建）"
+              />
             </Field>
             <Field label="模型">
               <Select value={model} onChange={(e) => setModel(e.target.value)}>
@@ -198,6 +206,11 @@ export default function ConsolePlaygroundPage() {
             </Field>
             <div className="text-xs leading-relaxed text-ink-3">
               令牌只保存在本页内存，刷新即消失。调用走 <code className="rounded bg-ink/5 px-1">/v1</code> 网关。
+              <br />
+              还没有令牌？
+              <Link href="/console/tokens" className="text-brand hover:underline">
+                去令牌页创建
+              </Link>
             </div>
           </div>
         </Card>
