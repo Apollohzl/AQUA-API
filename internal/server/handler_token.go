@@ -122,6 +122,63 @@ func (s *Server) handleMyDeleteToken(c *gin.Context) {
 	s.deleteToken(c, user.ID)
 }
 
+// handleMyTokenKey 返回当前用户某把令牌的【明文密钥】（用于创建后复制/找回）。
+//
+// 为什么需要它：令牌列表出于安全只回掩码（masked_key），但库里其实存了
+// 可解密的 key_enc——"明文只能创建时看一次"是产品取舍，不是技术限制。
+// 当用户在创建弹层没来得及复制、或复制失败时，必须有一个正式的找回入口，
+// 否则他只能删除重建（而重建会换掉 key，旧代码立刻失效）。
+//
+// 安全边界（三条都必须成立，缺一拒绝对外暴露明文）：
+//  1) 必须登录且令牌归属当前用户（loadOwnedToken 已校验归属）；
+//  2) 仅在请求明确表达"我要看明文"时才返回（本接口的存在本身就是该表达）；
+//  3) 每次取明文都写一条审计日志（谁、取了哪把），让"明文被看过"可查。
+func (s *Server) handleMyTokenKey(c *gin.Context) {
+	user, ok := s.requireCurrentUser(c)
+	if !ok {
+		return
+	}
+	id, ok := parseIDParam(c)
+	if !ok {
+		return
+	}
+
+	token, ok := s.loadOwnedToken(c, id, user.ID)
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(token.Key) == "" {
+		// 密钥在库中无法解密（如 AQUA_APP_KEY 已变更）时，给出一个能定位问题的提示，
+		// 而不是返回一个空 key 让前端误以为"拿到了"。
+		writeUserError(c, http.StatusInternalServerError,
+			"token.key_unavailable", oai.TypeServer, "key_unavailable")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": token.ID, "key": token.Key})
+}
+
+// handleAdminTokenKey 返回任意令牌的【明文密钥】（管理员专用）。
+//
+// 与门户的 handleMyTokenKey 的区别仅在归属校验：管理员传 0 给 loadOwnedToken，
+// 可查看任意用户的令牌明文——这是后台"代客户复制/找回密钥"的合法能力。
+// 该接口已在 /admin 分组内、挂在 RequireAdmin 之后，天然是管理员专属。
+func (s *Server) handleAdminTokenKey(c *gin.Context) {
+	id, ok := parseIDParam(c)
+	if !ok {
+		return
+	}
+	token, ok := s.loadOwnedToken(c, id, 0)
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(token.Key) == "" {
+		writeUserError(c, http.StatusInternalServerError,
+			"token.key_unavailable", oai.TypeServer, "key_unavailable")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": token.ID, "key": token.Key})
+}
+
 // createTokenAndRespond 创建令牌并返回（含一次性明文）。
 //
 // 参数 ownerID 为令牌归属；expiresInDays 为 0 表示永不过期；

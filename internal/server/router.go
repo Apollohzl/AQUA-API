@@ -149,6 +149,8 @@ func (s *Server) registerRoutes() {
 	portal := authed.Group("/user")
 	portal.GET("/tokens", s.handleMyListTokens)
 	portal.POST("/tokens", s.handleMyCreateToken)
+	// 取明文密钥（创建弹层没复制/复制失败时的正式找回入口）；归属校验在处理器内。
+	portal.GET("/tokens/:id/key", s.handleMyTokenKey)
 	portal.PATCH("/tokens/:id", s.handleMyUpdateToken)
 	portal.DELETE("/tokens/:id", s.handleMyDeleteToken)
 	// 可选分组（带"当前用户是否已解锁"标记）：令牌页的"所属分组"下拉据此置灰未解锁项。
@@ -236,6 +238,8 @@ func (s *Server) registerRoutes() {
 
 	admin.GET("/tokens", s.handleAdminListTokens)
 	admin.POST("/tokens", s.handleAdminCreateToken)
+	// 取明文密钥（后台代客户复制/找回）；RequireAdmin 已挂在 /admin 分组上。
+	admin.GET("/tokens/:id/key", s.handleAdminTokenKey)
 	admin.PUT("/tokens/:id", s.handleAdminUpdateToken)
 	admin.DELETE("/tokens/:id", s.handleAdminDeleteToken)
 
