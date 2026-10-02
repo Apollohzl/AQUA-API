@@ -22,13 +22,13 @@ package server
 
 import (
 	"net/http"
-	"sort"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/xiaosu4610/aqua-api/internal/score"
 )
 
 // leaderboardDefaultDays 是排行榜默认统计窗口（近 30 天）。
@@ -42,18 +42,18 @@ const leaderboardTopN = 20
 
 // leaderboardEntryDTO 是排行榜中一行的对外表示。
 type leaderboardEntryDTO struct {
-	Rank        int     `json:"rank"`
-	UserID      uint64  `json:"user_id"`
-	Username    string  `json:"username"`
-	Requests    int64   `json:"requests"`
-	Tokens      int64   `json:"tokens"`
-	Score       float64 `json:"score"`
+	Rank     int     `json:"rank"`
+	UserID   uint64  `json:"user_id"`
+	Username string  `json:"username"`
+	Requests int64   `json:"requests"`
+	Tokens   int64   `json:"tokens"`
+	Score    float64 `json:"score"`
 	// SuccessRate 是该用户窗口内的请求成功率（0~1），与"综合分数"是两个独立维度：
 	// 分数衡量用得多不多（请求数 + Token 各半），成功率衡量用得稳不稳。
 	// 早期版本只有分数一列，导致用户无法区分"量大"与"稳定"，
 	// 因此成功率独立成列。
-	SuccessRate   float64 `json:"success_rate"`
-	AvgLatencyMS  float64 `json:"avg_latency_ms"`
+	SuccessRate  float64 `json:"success_rate"`
+	AvgLatencyMS float64 `json:"avg_latency_ms"`
 	// PeakConcurrency 是窗口内峰值并发请求数（估算口径见 model.LeaderboardEntry）。
 	PeakConcurrency int64 `json:"peak_concurrency"`
 	// IsMe 标记这一行是否属于当前登录用户（前端据此高亮并标注"我"）。
@@ -163,7 +163,11 @@ func (s *Server) handleLeaderboard(c *gin.Context) {
 	})
 }
 
-// buildLeaderboardSection 对一组成绩排序、打分、截断并计算当前用户名次。
+// buildLeaderboardSection 对一组成绩评分、排序、截断并计算当前用户名次。
+//
+// 评分委托给 score.ScoreBoard（动态综合评分算法 v2.3）：
+// 锚点由本榜全员数据实时算出的分位数决定，因此任何人的用量变化都会
+// 重新标定全榜分数——分数是"相对位置"，不是可累加的累计量。
 func (s *Server) buildLeaderboardSection(entries []model.LeaderboardEntry, myUserID uint64, topN int) leaderboardSectionDTO {
 	section := leaderboardSectionDTO{
 		Items: make([]leaderboardEntryDTO, 0),
@@ -173,56 +177,48 @@ func (s *Server) buildLeaderboardSection(entries []model.LeaderboardEntry, myUse
 		return section
 	}
 
-	// 榜内归一化分母：各自取最大请求数 / 最大 token 数。
-	maxRequests := int64(0)
-	maxTokens := int64(0)
+	// 组装评分输入（ID 传用户名：榜单展示的就是账号 ID）。
+	inputs := make([]score.Entry, 0, len(entries))
 	for _, entry := range entries {
-		if entry.Requests > maxRequests {
-			maxRequests = entry.Requests
-		}
-		if entry.Tokens > maxTokens {
-			maxTokens = entry.Tokens
-		}
+		inputs = append(inputs, score.Entry{
+			ID:       entry.Username,
+			Tokens:   float64(entry.Tokens),
+			Requests: float64(entry.Requests),
+		})
 	}
 
-	// 排序：分数降序；分数相同时请求数多者在前；再相同按用户名（稳定、可预期）。
-	sort.SliceStable(entries, func(i, j int) bool {
-		si := entries[i].LeaderboardScore(maxRequests, maxTokens)
-		sj := entries[j].LeaderboardScore(maxRequests, maxTokens)
-		if si != sj {
-			return si > sj
-		}
-		if entries[i].Requests != entries[j].Requests {
-			return entries[i].Requests > entries[j].Requests
-		}
-		return entries[i].Username < entries[j].Username
-	})
+	// 动态评分：全量重算，不做增量更新（增量会让锚点与实际数据脱节）。
+	result := score.ScoreBoard(inputs)
 
-	// 当前用户的名次（即使被截断也要能返回）。
-	myRank := 0
-	for index, entry := range entries {
-		if entry.UserID == myUserID {
-			myRank = index + 1
+	// 分数 → 用户 ID 的反查表（score 包只认 ID 字符串，不知道 user_id）。
+	scoreToEntry := make(map[string]model.LeaderboardEntry, len(result.Rows))
+	for _, entry := range entries {
+		scoreToEntry[entry.Username] = entry
+	}
+
+	// 我的名次：无论是否被截断都要能回答"我排第几"。
+	for _, row := range result.Rows {
+		if entry, ok := scoreToEntry[row.ID]; ok && entry.UserID == myUserID {
+			section.MyRank = row.Rank
 			break
 		}
 	}
-	section.MyRank = myRank
 
 	// 截断后构建 DTO。
-	limit := len(entries)
-	if topN > 0 && limit > topN {
-		limit = topN
+	rows := result.Rows
+	if topN > 0 && len(rows) > topN {
+		rows = rows[:topN]
 	}
-	section.Items = make([]leaderboardEntryDTO, 0, limit)
-	for index := 0; index < limit; index++ {
-		entry := entries[index]
+	section.Items = make([]leaderboardEntryDTO, 0, len(rows))
+	for _, row := range rows {
+		entry := scoreToEntry[row.ID]
 		section.Items = append(section.Items, leaderboardEntryDTO{
-			Rank:            index + 1,
+			Rank:            row.Rank,
 			UserID:          entry.UserID,
 			Username:        entry.Username,
 			Requests:        entry.Requests,
 			Tokens:          entry.Tokens,
-			Score:           entry.LeaderboardScore(maxRequests, maxTokens),
+			Score:           row.Total,
 			SuccessRate:     entry.SuccessRate(),
 			AvgLatencyMS:    entry.AvgLatencyMS,
 			PeakConcurrency: entry.PeakConcurrency,

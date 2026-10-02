@@ -82,6 +82,12 @@ func (f *fakeUsageLogRepo) ModelFailureStats(context.Context, uint64, time.Time)
 	return nil, nil
 }
 
+// Leaderboard 是排行榜聚合的桩：转发链路不关心榜单，实现空即可。
+// 但必须存在——接口新增方法后，缺实现的桩会让整个测试包编译失败。
+func (f *fakeUsageLogRepo) Leaderboard(context.Context, model.UsageLogQuery) ([]model.LeaderboardEntry, error) {
+	return nil, nil
+}
+
 // waitForUsageLog 轮询等待调用日志写入（写库发生在响应体回传之后，存在极短的时间差）。
 func waitForUsageLog(t *testing.T, logs *fakeUsageLogRepo) *model.UsageLog {
 	t.Helper()
