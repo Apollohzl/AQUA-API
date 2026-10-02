@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
-import { createMyToken, deleteMyToken, listMyGroups, listMyTokens, updateMyToken } from '@/api/portal'
+import { createMyToken, deleteMyToken, getMyTokenKey, listMyGroups, listMyTokens, updateMyToken } from '@/api/portal'
 import type { AccessToken, CreateTokenPayload, CreateTokenResult, PortalGroup } from '@/api/types'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Display'
@@ -35,6 +35,31 @@ export default function ConsoleTokensPage() {
   const [groups, setGroups] = useState<PortalGroup[]>([])
 
   const { toast, toastError } = useToast()
+
+  /** 明文密钥查看态：点击「查看」后调接口取回原文并展示 + 一键复制 */
+  const [revealed, setRevealed] = useState<Record<number, string>>({})
+  const [revealing, setRevealing] = useState<number | null>(null)
+
+  async function handleRevealKey(token: AccessToken) {
+    // 已取回的直接显示（无需重复请求）；未取回的调用取明文接口
+    if (revealed[token.id]) {
+      setRevealed((prev) => {
+        const next = { ...prev }
+        delete next[token.id] // 再次点击 = 收起（回到掩码）
+        return next
+      })
+      return
+    }
+    setRevealing(token.id)
+    try {
+      const data = await getMyTokenKey(token.id)
+      setRevealed((prev) => ({ ...prev, [token.id]: data.key }))
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : '获取密钥失败')
+    } finally {
+      setRevealing(null)
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -82,12 +107,23 @@ export default function ConsoleTokensPage() {
     { title: '名称', render: (row) => <span className="font-medium text-ink">{row.name}</span> },
     {
       title: '密钥',
-      render: (row) => (
-        <span className="flex items-center gap-2 font-mono text-xs text-ink-2">
-          {row.masked_key}
-          <CopyButton text={row.masked_key} />
-        </span>
-      ),
+      render: (row) => {
+        const shown = revealed[row.id]
+        return (
+          <span className="flex items-center gap-2 font-mono text-xs text-ink-2">
+            <span className={shown ? 'text-ink' : ''}>{shown || row.masked_key}</span>
+            <button
+              type="button"
+              onClick={() => void handleRevealKey(row)}
+              disabled={revealing === row.id}
+              className="text-[13px] text-ink-3 transition hover:text-brand disabled:opacity-50"
+            >
+              {revealing === row.id ? '…' : shown ? '收起' : '查看原文'}
+            </button>
+            {shown && <CopyButton text={shown} label="复制" />}
+          </span>
+        )
+      },
     },
     { title: '状态', render: (row) => (row.status === 1 ? <Badge tone="ok">启用</Badge> : <Badge tone="off">停用</Badge>) },
     {

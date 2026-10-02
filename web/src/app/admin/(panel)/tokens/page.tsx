@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
-import { createTokenForUser, deleteToken, listAllTokens, updateToken } from '@/api/admin'
+import { createTokenForUser, deleteToken, getTokenKey, listAllTokens, updateToken } from '@/api/admin'
 import type { AccessToken, AdminUpdateTokenPayload, CreateTokenPayload } from '@/api/types'
 import { STATUS_DISABLED, STATUS_ENABLED } from '@/api/types'
 import { Badge, Card } from '@/components/ui/Display'
@@ -27,6 +27,30 @@ export default function AdminTokensPage() {
   const [editing, setEditing] = useState<AccessToken | null | 'new'>(null)
   const [deleteTarget, setDeleteTarget] = useState<AccessToken | null>(null)
   const { toast, toastError } = useToast()
+
+  /** 明文密钥查看态：点击「查看」后调接口取回原文并展示 + 一键复制 */
+  const [revealed, setRevealed] = useState<Record<number, string>>({})
+  const [revealing, setRevealing] = useState<number | null>(null)
+
+  async function handleRevealKey(token: AccessToken) {
+    if (revealed[token.id]) {
+      setRevealed((prev) => {
+        const next = { ...prev }
+        delete next[token.id]
+        return next
+      })
+      return
+    }
+    setRevealing(token.id)
+    try {
+      const data = await getTokenKey(token.id)
+      setRevealed((prev) => ({ ...prev, [token.id]: data.key }))
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : '获取密钥失败')
+    } finally {
+      setRevealing(null)
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -60,7 +84,26 @@ export default function AdminTokensPage() {
   const columns: Column<AccessToken>[] = [
     { title: 'ID', render: (row) => <span className="text-ink-3">#{row.id}</span> },
     { title: '名称', render: (row) => <span className="font-medium text-ink">{row.name}</span> },
-    { title: '密钥', render: (row) => <code className="font-mono text-[13px] text-ink-2">{row.masked_key}</code> },
+    {
+      title: '密钥',
+      render: (row) => {
+        const shown = revealed[row.id]
+        return (
+          <span className="flex items-center gap-2">
+            <code className="font-mono text-[13px] text-ink-2">{shown || row.masked_key}</code>
+            <button
+              type="button"
+              onClick={() => void handleRevealKey(row)}
+              disabled={revealing === row.id}
+              className="text-[13px] text-ink-3 transition hover:text-brand disabled:opacity-50"
+            >
+              {revealing === row.id ? '…' : shown ? '收起' : '查看原文'}
+            </button>
+            {shown && <CopyButton text={shown} label="复制" />}
+          </span>
+        )
+      },
+    },
     {
       title: '状态',
       render: (row) => (
