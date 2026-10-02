@@ -24,6 +24,7 @@ import Link from 'next/link'
 import { createOrder, getMyOrder } from '@/api/portal'
 import { fetchPaymentInfo } from '@/api/site'
 import type { PaymentOrder, PublicPaymentInfo } from '@/api/types'
+import { ComplianceNotice } from '@/components/site/ComplianceNotice'
 import { Badge, Card } from '@/components/ui/Display'
 import { Button } from '@/components/ui/Button'
 import { useAuth } from '@/lib/auth/auth-context'
@@ -284,6 +285,11 @@ export default function ConsoleRechargePage() {
     return (
       <div className="space-y-5">
         <h1 className="text-xl font-bold text-ink">账户充值</h1>
+        <ComplianceNotice
+          variant="inline"
+          className="mt-2"
+          message="充值前请确认：本站服务仅供学习与研究参考，请遵守上游服务条款与当地法律，勿用于违规用途。"
+        />
         <Card>
           <p className="text-sm text-ink-2">本站当前未开放在线充值。如需充值请联系管理员。</p>
         </Card>
@@ -298,6 +304,11 @@ export default function ConsoleRechargePage() {
         <p className="mt-0.5 text-[13px] text-ink-3">
           充值后余额即时到账 · 单笔 {info.min_cents / 100} 元起
         </p>
+        <ComplianceNotice
+          variant="inline"
+          className="mt-2"
+          message="充值前请确认：本站服务仅供学习与研究参考，请遵守上游服务条款与当地法律，勿用于违规用途。"
+        />
       </div>
 
       {renderResult()}
