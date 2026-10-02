@@ -40,6 +40,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -533,6 +534,58 @@ func (b *Billing) recordUpstreamCall(group string, charged bool) {
 			"retry_ratio", fmt.Sprintf("%.3f", r), "discount_ratio", ratio)
 	}
 	b.retryMu.Unlock()
+}
+
+// RetryRatioSnapshot 是「折扣分组的重试率」读数，供后台运维面板展示。
+//
+// 把 r 从"只在日志里出现"变成"界面上可见"：资损告警若只写日志，
+// 站长不上服务器就永远看不到——这与"面板可达"原则直接冲突，因此必须能查。
+type RetryRatioSnapshot struct {
+	// Group 是分组名。
+	Group string
+	// Ratio 是该分组的计费倍率（百分比，<100 即折扣档）。
+	Ratio int64
+	// UpstreamCalls 是累计上游调用次数（含重试）。
+	UpstreamCalls int64
+	// ChargedRequests 是累计产生了计费的请求数。
+	ChargedRequests int64
+	// RetryRatio 是 r = 上游调用次数 / 计费请求次数（无计费请求时为 0）。
+	RetryRatio float64
+	// OverBreakEven 表示 r 已越过该折扣档的保本线（正在亏本）。
+	OverBreakEven bool
+}
+
+// RetryRatioSnapshots 返回全部折扣分组的重试率快照（按分组名排序，供面板展示）。
+//
+// 读的是 recordUpstreamCall 维护的内存计数；进程重启后从零累计——
+// 这是刻意取舍：r 是"当前运行期的健康度"，历史均值见调用日志，两者不混。
+func (b *Billing) RetryRatioSnapshots() []RetryRatioSnapshot {
+	if b == nil {
+		return nil
+	}
+	b.retryMu.Lock()
+	defer b.retryMu.Unlock()
+	if len(b.retryCounters) == 0 {
+		return nil
+	}
+	out := make([]RetryRatioSnapshot, 0, len(b.retryCounters))
+	for group, c := range b.retryCounters {
+		ratio := b.ratioFor(context.Background(), group)
+		var r float64
+		if c[1] > 0 {
+			r = float64(c[0]) / float64(c[1])
+		}
+		out = append(out, RetryRatioSnapshot{
+			Group:           group,
+			Ratio:           ratio,
+			UpstreamCalls:   c[0],
+			ChargedRequests: c[1],
+			RetryRatio:      r,
+			OverBreakEven:   c[1] >= retryWarnMinSamples && ratio > 0 && int64(r*100) > retryWarnThreshold,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Group < out[j].Group })
+	return out
 }
 
 // Charge 按用量计费并扣减额度，返回实际扣减的额度。
