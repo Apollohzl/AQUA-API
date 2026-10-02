@@ -881,7 +881,12 @@ func (r *Relay) forwardChat(w http.ResponseWriter, req *http.Request, target for
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// ── 失败分流（关键：决定"换密钥"、"换渠道"还是就此收手）────
+	// 折扣分组的重试率统计：每次真实打到上游都计一次（含重试）。
+	// 计费请求数由 charged 标志区分（同一请求的多次重试只算一次计费），
+	// 因此 r = 上游调用次数 / 计费请求次数 才是真实成本放大率（见 billing.recordUpstreamCall）。
+	if r.billing != nil {
+		r.billing.recordUpstreamCall(group, false)
+	}
 	switch kind, _, snippet := r.classifyKeyFailure(resp); kind {
 	case keyFailureCredential:
 		// 凭据不可用（失效/受限/被限流）：按失败类型决定"冷却"还是"摘除"。

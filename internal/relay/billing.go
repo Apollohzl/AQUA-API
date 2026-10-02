@@ -38,6 +38,7 @@ package relay
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -107,6 +108,18 @@ type Billing struct {
 	//   但豁免请求在鉴权阶段就不会创建预留（见 middleware.TokenAuth），
 	//   结算时会走"未预留 → Charge"这条路，因此 Charge 里判一道即可覆盖全链路。
 	free FreeChecker
+
+	// retryCounters 是「分组 → [上游调用次数, 计费请求次数]」的滑动计数，
+	// 用于在【折扣分组】上估算真实重试率 r = 上游调用次数 / 计费请求次数。
+	//
+	// 为什么只统计折扣分组：全价分组的毛利本就厚，重试多吃一点也亏不到本金；
+	// 真正会亏的是代理档（如 6 折），它的净利直接等于"多出来的那几次上游调用"。
+	// 因此只对 ratio < 100 的分组计数，其余分组的锁竞争与内存开销不值得。
+	//
+	// 只存累计计数而不存时间窗：r 是"长期均值"而非瞬时值，
+	// 短时抖动不该触发告警，累计到足够样本才有判断意义（见告警阈值）。
+	retryMu       sync.Mutex
+	retryCounters map[string]*[2]int64
 }
 
 // FreeChecker 是"按用户 + 模型判断是否免计费"的最小接口。
@@ -467,6 +480,59 @@ func (b *Billing) applyDelta(ctx context.Context, userID, tokenID uint64, delta 
 			slog.Warn(action+"用户已用额度失败", "error", err, "user_id", userID, "delta", delta)
 		}
 	}
+}
+
+// ── 折扣分组的重试率告警 ──────────────────────────────────────────────────
+
+// 告警阈值常量：与 docs/17 的定价假设一一对应。
+const (
+	// retryWarnRatio 判定"该分组是折扣档"的边界：倍率低于它才监控。
+	// 100 = 全价，100 以下（如 60 = 6 折）才会被"重试成本"压到接近亏本。
+	retryWarnRatio = 100
+	// retryWarnMinSamples 触发告警所需的最小计费请求数：样本太少时 r 没有意义。
+	// 取 50 是因为 6 折档下即便 50 次请求也能把 r 的抖动控制在可判读范围。
+	retryWarnMinSamples = 50
+	// retryWarnThreshold 告警线（r × 100）：1.37 ≈ 6 折档的保本重试率
+	// （净利率 0.94 × 1.37 ≈ 1.28，略低于上游成本系数 1.3，留 0.03 提前量）。
+	// 超过即意味着"这一档正在亏本或即将亏本"。
+	retryWarnThreshold = 137
+)
+
+// recordUpstreamCall 在每次真实上游调用后累加计数（含重试），用于估算折扣分组的重试率。
+//
+// 调用方是转发链路（openai.go 的 forwardChat），它在每次真实打到上游后调用一次。
+// 参数 charged 表示"本次调用是否产生了对用户计费"——同一请求的重试多次调用只算一次计费，
+// 因此 r = 上游调用次数 / 计费请求次数 才是真实成本放大率。
+func (b *Billing) recordUpstreamCall(group string, charged bool) {
+	if b == nil {
+		return
+	}
+	group = b.resolveGroup(group)
+	// 只统计折扣分组：全价分组的毛利足够厚，重试成本不值得监控（也省锁）。
+	if b.ratioFor(context.Background(), group) >= retryWarnRatio {
+		return
+	}
+	b.retryMu.Lock()
+	if b.retryCounters == nil {
+		b.retryCounters = make(map[string]*[2]int64)
+	}
+	c := b.retryCounters[group]
+	if c == nil {
+		c = &[2]int64{}
+		b.retryCounters[group] = c
+	}
+	c[0]++ // 上游调用次数
+	if charged {
+		c[1]++ // 计费请求次数
+	}
+	ratio := b.ratioFor(context.Background(), group)
+	r := float64(c[0]) / float64(c[1])
+	if c[1] >= retryWarnMinSamples && ratio > 0 && int64(r*100) > retryWarnThreshold {
+		slog.Error("折扣分组重试率已越过保本线，正在亏本：请降低该渠道 max_attempts 或上调价格",
+			"group", group, "upstream_calls", c[0], "charged_requests", c[1],
+			"retry_ratio", fmt.Sprintf("%.3f", r), "discount_ratio", ratio)
+	}
+	b.retryMu.Unlock()
 }
 
 // Charge 按用量计费并扣减额度，返回实际扣减的额度。

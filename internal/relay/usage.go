@@ -624,9 +624,16 @@ func (r *Relay) settleQuota(ctx context.Context, entry usageEntry) int64 {
 	if requestID == "" {
 		// 未预留：退化路径。Charge 内部同样只记录错误不返回错误。
 		// 计费分组沿用 entry.Group（与选渠道同一分组），空值由 Billing 回退到默认分组。
-		return r.billing.Charge(ctx, entry.Group, entry.UserID, entry.TokenID, entry.Model,
+		charged := r.billing.Charge(ctx, entry.Group, entry.UserID, entry.TokenID, entry.Model,
 			int64(entry.Usage.PromptTokens), int64(entry.Usage.CompletionTokens),
 			int64(entry.Usage.CachedTokens))
+		// 折扣分组的重试率统计：本次产生了计费（charged > 0），记一笔"计费请求"。
+		// 上游调用次数已在 forwardChat 的每次真实调用时累加（见 openai.go），
+		// 两者相除即真实重试率 r = 上游调用次数 / 计费请求次数。
+		if charged > 0 {
+			r.billing.recordUpstreamCall(entry.Group, true)
+		}
+		return charged
 	}
 
 	// 请求失败（含上游 4xx/5xx、无可用渠道等）：全额退还预扣额度。
@@ -657,6 +664,10 @@ func (r *Relay) settleQuota(ctx context.Context, entry usageEntry) int64 {
 	}
 	if reservation == nil {
 		return 0
+	}
+	// 折扣分组的重试率统计：本次产生了计费（settled > 0），记一笔"计费请求"。
+	if reservation.Settled > 0 {
+		r.billing.recordUpstreamCall(entry.Group, true)
 	}
 	if actual >= 0 && reservation.Settled != actual {
 		// 补扣受限（可用额度不足）：此时按可用量扣减，账目有缺口，必须可被发现。
