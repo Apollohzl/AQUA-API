@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fetchLeaderboard } from '@/api/portal'
 import type { LeaderboardEntry, LeaderboardStats } from '@/api/types'
 import { useAuth } from '@/lib/auth/auth-context'
+import { StatCard } from '@/components/ui/Display'
 import { formatNumber } from '@/utils/format'
 
 /** 头像配色候选（与 utils/vendor.ts 同风格：浅底深字 + 内描边，昼夜两套） */
@@ -178,7 +179,27 @@ export function UsageLeaderboard() {
   const myRank = stats?.[tab]?.my_rank ?? 0
 
   return (
-    <div className="rounded-lg border border-line bg-card">
+    <div className="space-y-4">
+      {/* ── 全站汇总：与主站概览页同款 StatCard（复用组件，深浅色自动适配） ── */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <StatCard
+          label="总请求"
+          value={stats ? formatNumber(stats.totals.requests) : '—'}
+          hint={`近 ${days} 天 · ${stats ? stats.totals.users : 0} 位用户`}
+        />
+        <StatCard
+          label="总 Token"
+          value={stats ? formatNumber(stats.totals.tokens) : '—'}
+          hint="输入 + 输出"
+        />
+        <StatCard
+          label="总成功率"
+          value={stats ? `${(stats.totals.success_rate * 100).toFixed(1)}%` : '—'}
+          hint={`近 ${days} 天`}
+        />
+      </div>
+
+      <div className="rounded-lg border border-line bg-card">
       {/* 头部：标题 + 窗口切换 + 管理员完整榜单开关 */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
         <div>
@@ -252,6 +273,7 @@ export function UsageLeaderboard() {
         ) : (
           <LeaderboardTable section={section} />
         )}
+      </div>
       </div>
     </div>
   )

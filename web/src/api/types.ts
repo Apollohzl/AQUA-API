@@ -294,9 +294,22 @@ export interface LeaderboardSection {
   my_rank: number
 }
 
+/** 排行榜顶部的全站汇总（与榜单同一时间窗、同一数据源） */
+export interface LeaderboardTotals {
+  /** 窗口内总请求数（含成功与失败） */
+  requests: number
+  /** 窗口内总 Token 消耗 */
+  tokens: number
+  /** 总成功率（0~1） */
+  success_rate: number
+  /** 窗口内有用量的用户数 */
+  users: number
+}
+
 /** GET /api/user/leaderboard?days=30 响应 */
 export interface LeaderboardStats {
   range_days: number
+  totals: LeaderboardTotals
   paid: LeaderboardSection
   free: LeaderboardSection
   updated_at: number
