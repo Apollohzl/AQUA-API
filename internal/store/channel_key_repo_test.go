@@ -50,6 +50,35 @@ func sampleKeys(n int) []string {
 	return keys
 }
 
+// TestChannelKey_ReplaceAll_池顺序与输入一致 钉住「插入顺序决定池顺序」的约定。
+//
+// 背景：插入阶段曾直接遍历 map，同一批密钥每次落库的 ID 顺序都不同，
+// 后台展示与轮询调度随之随机，凭据路由测试也间歇性拿到错误的钥匙。
+// 本用例保证 ListByChannel（按 ID 升序）返回的顺序与导入顺序一致。
+func TestChannelKey_ReplaceAll_池顺序与输入一致(t *testing.T) {
+	repo, _ := newTestKeyRepo(t)
+	ctx := context.Background()
+	const channelID uint64 = 1
+
+	keys := []string{"nvapi-first", "nvapi-second", "nvapi-third"}
+	if _, _, err := repo.ReplaceAll(ctx, channelID, keys, nil); err != nil {
+		t.Fatalf("导入失败: %v", err)
+	}
+
+	pool, err := repo.ListByChannel(ctx, channelID)
+	if err != nil {
+		t.Fatalf("读取密钥池失败: %v", err)
+	}
+	if len(pool) != len(keys) {
+		t.Fatalf("池内应有 %d 把，实际 %d", len(keys), len(pool))
+	}
+	for i, k := range keys {
+		if pool[i].Key != k {
+			t.Errorf("第 %d 把应为 %q（与导入顺序一致），实际 %q", i+1, k, pool[i].Key)
+		}
+	}
+}
+
 func TestChannelKey_ReplaceAll_幂等与差集增删(t *testing.T) {
 	repo, db := newTestKeyRepo(t)
 	ctx := context.Background()
