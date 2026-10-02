@@ -1739,6 +1739,37 @@ export interface TrialGrant {
   expires_in_seconds: number
 }
 
+/**
+ * POST /api/admin/trial-grants 请求体：给全站用户批量发放限时试用额。
+ *
+ * 金额刻意用「分」：站长按"1 毛钱"思考而不是按"100000 额度"，
+ * 分 → 额度的换算由后端按充值比例完成，保证"发放 0.1 元"与"充值 0.1 元"同值。
+ */
+export interface TrialGrantPayload {
+  /** 每位用户获得的金额（分）；0.1 元填 10 */
+  amount_cents: number
+  /** 自发放时刻起的有效小时数（1..720，上限 30 天） */
+  hours: number
+  /** 批次标识：同一批次只允许发放一次（防误发双份） */
+  batch: string
+  /** 必须显式为 true：发放即入用户余额，后端据此拦截误触 */
+  confirm: boolean
+}
+
+/** POST /api/admin/trial-grants 响应：发放结果回执 */
+export interface TrialGrantResult {
+  batch: string
+  /** 本次实际发放的用户数 */
+  recipients: number
+  /** 每人获得的额度（站内单位），用于核对与预期一致 */
+  amount_quota: number
+  /** 每人获得的金额（分），由请求原样回显 */
+  amount_cents: number
+  hours: number
+  /** 到期时间（unix 秒） */
+  expires_at: number
+}
+
 /** 一条返利明细（GET /api/user/referral/rewards） */
 export interface ReferralReward {
   id: number
