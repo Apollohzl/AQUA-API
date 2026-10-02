@@ -111,6 +111,7 @@ function Hero() {
                 浏览模型与价格
               </Button>
             </Link>
+            <QqGroupEntry variant="button" />
           </div>
 
           <div className="mt-7 inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-line bg-card px-3.5 py-2.5 font-mono text-[12px] text-ink-2">

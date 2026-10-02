@@ -20,8 +20,8 @@ const QQ_GROUP_URL = 'https://qm.qq.com/q/hHfKssRkdi'
 const QQ_GROUP_NO = '1103667832'
 
 interface QqGroupEntryProps {
-  /** inline = 紧凑按钮（页脚/头部）；card = 带说明的卡片（首页 CTA 旁） */
-  variant?: 'inline' | 'card'
+  /** inline = 紧凑按钮（页脚/头部）；button = 与大按钮同高（Hero 按钮排）；card = 带说明的卡片（首页 CTA 旁） */
+  variant?: 'inline' | 'button' | 'card'
   className?: string
 }
 
@@ -42,6 +42,18 @@ export function QqGroupEntry({ variant = 'inline', className }: QqGroupEntryProp
 
   if (variant === 'inline') {
     return <span className={className}>{link}</span>
+  }
+
+  if (variant === 'button') {
+    // 与 Hero/CTA 区的大按钮同一高度（size=lg），混排时视觉对齐
+    return (
+      <a href={QQ_GROUP_URL} target="_blank" rel="noreferrer" className={className}>
+        <Button variant="secondary" size="lg">
+          <AppIcon name="qq" size={16} />
+          加入群聊 · 群号 {QQ_GROUP_NO}
+        </Button>
+      </a>
+    )
   }
 
   return (
