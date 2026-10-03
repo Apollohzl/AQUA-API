@@ -19,6 +19,7 @@ import { vendorLabel, vendorOf, vendorTone } from '@/utils/vendor'
 import { formatYuanPerCall, formatYuanPerMillion } from '@/utils/money'
 import { formatLatency } from '@/utils/format'
 import { useSite } from '@/lib/site/site-context'
+import { ModelLivePanel } from './ModelLivePanel'
 
 export function PlazaEmbedded() {
   const { quotaPerYuan } = useSite()
@@ -106,6 +107,8 @@ export function PlazaEmbedded() {
             ) : (
               <p className="text-sm text-ink-3">该模型暂未配置价格规则。</p>
             )}
+            {/* 模型实时指标 + 连通性测试 */}
+            <ModelLivePanel key={selected.model} modelName={selected.model} />
           </div>
         )}
       </Modal>

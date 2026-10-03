@@ -11,7 +11,7 @@
 //
 // 流转（Flow）：
 //
-//	cmd/aqua/main.go
+//	cmd/ltzy/main.go
 //	  └─ config.Load(path)
 //	       ├─ Default()          生成默认值
 //	       ├─ loadFile()         读取 JSON 并「局部覆盖」（文件不存在不算错误）

@@ -8,7 +8,7 @@
 //
 // 流转（Flow）：
 //
-//	cmd/aqua/main.go
+//	cmd/ltzy/main.go
 //	  └─ server.New(Deps{Config, Store, Channels})   装配 gin 引擎与路由
 //	       └─ server.Run(ctx)                         启动监听，ctx 取消后优雅关闭
 //	            └─ 处理器（health.go 等）调用 model / store 完成实际工作
@@ -188,6 +188,12 @@ type Server struct {
 	// sitemap.xml 是"读多写少"的端点，用互斥锁而非原子指针，保持实现直观。
 	sitemapMu sync.Mutex
 	sitemap   sitemapCache
+
+	// nameCache 缓存「用户 ID → 用户名」「渠道 ID → 渠道名」等名称映射，
+	// 供日志列表等需要批量解析名称的接口复用，避免每次请求全表扫描。
+	// 名称变化频率远低于查询频率，短 TTL（30s）足够；管理员改名的改动
+	// 至多滞后 30 秒出现在列表上，展示性数据可接受。
+	nameCache *ttlCache
 }
 
 // New 创建并装配 HTTP 服务（不启动监听，便于测试直接取用 Handler）。
@@ -223,6 +229,8 @@ func New(deps Deps) *Server {
 		loginAccountLimiter: middleware.NewRateLimiter(10, 5*time.Minute),
 		// 内容合规过滤器：词表编译结果在组件内缓存，改词后由后台主动失效。
 		sensitiveFilter: middleware.NewSensitiveFilter(deps.SensitiveWords, deps.Settings),
+		// 名称映射缓存：用户/渠道名等低频变化数据，30 秒 TTL。
+		nameCache: newTTLCache(30 * time.Second),
 	}
 	s.registerRoutes()
 

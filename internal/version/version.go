@@ -18,7 +18,7 @@
 //
 //	go build -ldflags "-X github.com/LTZY-ACU/ltzy-api/internal/version.Version=v1.0.0 \
 //	                   -X github.com/LTZY-ACU/ltzy-api/internal/version.GitCommit=abc1234" \
-//	         ./cmd/aqua
+//	         ./cmd/ltzy
 package version
 
 // 以下变量刻意使用 var 而非 const：只有变量才能被链接器通过 -ldflags 覆盖。

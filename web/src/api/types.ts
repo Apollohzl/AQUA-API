@@ -264,6 +264,95 @@ export interface UsageStats {
   by_model: UsageByModel[]
 }
 
+/* ── 用量排行榜（GET /api/user/leaderboard）──────────────── */
+
+/** 排行榜中一行的对外表示。 */
+export interface LeaderboardEntry {
+  /** 名次（1 起） */
+  rank: number
+  user_id: number
+  /** 账号 ID（用户名） */
+  username: string
+  /** 窗口内请求总数（含成功与失败） */
+  requests: number
+  /** 窗口内 token 消耗总数 */
+  tokens: number
+  /**
+   * 综合使用量分数（0~100 封顶）。
+   *
+   * = 50 分 × 请求数归一 + 50 分 × token 归一（榜内相对刻度），
+   * 衡量「用得多不多」；与 success_rate（用得稳不稳）是两个独立维度。
+   */
+  score: number
+  /** 请求成功率（0~1）：成功数 / 总数，衡量稳定性 */
+  success_rate: number
+  /** 平均请求耗时（毫秒，仅成功请求） */
+  avg_latency_ms: number
+  /** 窗口内峰值并发请求数（差分扫描估算） */
+  peak_concurrency: number
+  /** 是否当前登录用户（前端据此高亮并标注"我"） */
+  is_me: boolean
+}
+
+/** 单个榜单（付费榜 / 免费榜）的响应。 */
+export interface LeaderboardSection {
+  items: LeaderboardEntry[]
+  /** 当前登录用户在该榜中的名次；未上榜为 0 */
+  my_rank: number
+}
+
+/** 排行榜顶部的全站汇总（与榜单同一时间窗、同一数据源） */
+export interface LeaderboardTotals {
+  /** 窗口内总请求数（含成功与失败） */
+  requests: number
+  /** 窗口内总 Token 消耗 */
+  tokens: number
+  /** 总成功率（0~1） */
+  success_rate: number
+  /** 窗口内有用量的用户数 */
+  users: number
+}
+
+/** GET /api/user/leaderboard?days=30 响应 */
+export interface LeaderboardStats {
+  range_days: number
+  totals: LeaderboardTotals
+  paid: LeaderboardSection
+  free: LeaderboardSection
+  updated_at: number
+}
+
+/* ── 模型实时指标与连通性测试（模型详情页）────────────────── */
+
+/** GET /api/user/models/{model}/stats?minutes=15 响应 */
+export interface ModelStats {
+  model: string
+  /** 是否至少有一个启用渠道支持该模型（false = 离线） */
+  available: boolean
+  /** 支持该模型的启用渠道数量（0 = 离线） */
+  channel_count: number
+  /** 窗口内该模型的成功请求数 */
+  requests: number
+  /** 窗口内平均输出速率（tokens/s；0 = 无样本） */
+  avg_tokens_per_second: number
+  /** 窗口内平均总耗时（毫秒；0 = 无请求） */
+  avg_latency_ms: number
+  /** 窗口内平均首字延迟 TTFB（毫秒；0 = 无样本） */
+  avg_first_token_ms: number
+}
+
+/** 模型连通性测试结果（前端直连 /v1/chat/completions 测得） */
+export interface ModelTestResult {
+  /** 是否连通（成功拿到首个数据块） */
+  connected: boolean
+  /** 首字延迟 TTFB（毫秒；未连通为 0） */
+  ttfb_ms: number
+  /** 未连通时的错误信息 */
+  error?: string
+  /** 测试实际使用的模型名 */
+  model: string
+}
+
 /** 调用日志对象（契约四节） */
 export interface UsageLog {
   id: number
