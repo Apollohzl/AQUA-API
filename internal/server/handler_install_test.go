@@ -93,8 +93,8 @@ func TestInstall_安装后接口自锁(t *testing.T) {
 
 	code, body = postJSON(t, srv, http.MethodPost, "/api/install", map[string]any{
 		"username":         "admin",
-		"password":         "Aqua-Install-2026",
-		"confirm_password": "Aqua-Install-2026",
+		"password":         "Ltzy-Install-2026",
+		"confirm_password": "Ltzy-Install-2026",
 		"site_name":        "测试站点",
 	})
 	if code != http.StatusOK {
@@ -114,7 +114,7 @@ func TestInstall_安装后接口自锁(t *testing.T) {
 	// 第二次安装必须被拒绝，否则任何人都能重装并接管站点
 	code, _ = postJSON(t, srv, http.MethodPost, "/api/install", map[string]any{
 		"username": "hacker",
-		"password": "Aqua-Install-2026",
+		"password": "Ltzy-Install-2026",
 	})
 	if code != http.StatusConflict {
 		t.Fatalf("重复安装状态码 = %d，期望 409", code)
@@ -133,8 +133,8 @@ func TestInstall_密码强度不足被拒(t *testing.T) {
 	}
 
 	code, _ = postJSON(t, srv, http.MethodPost, "/api/install", map[string]any{
-		"password":         "Aqua-Install-2026",
-		"confirm_password": "Aqua-Install-2027",
+		"password":         "Ltzy-Install-2026",
+		"confirm_password": "Ltzy-Install-2027",
 	})
 	if code != http.StatusBadRequest {
 		t.Fatalf("两次密码不一致状态码 = %d，期望 400", code)
@@ -151,7 +151,7 @@ func TestAdminLogin_仅密码登录(t *testing.T) {
 	}
 
 	if code, body := postJSON(t, srv, http.MethodPost, "/api/install", map[string]any{
-		"password": "Aqua-Install-2026",
+		"password": "Ltzy-Install-2026",
 	}); code != http.StatusOK {
 		t.Fatalf("安装失败，状态码 = %d（%v）", code, body)
 	}
@@ -164,7 +164,7 @@ func TestAdminLogin_仅密码登录(t *testing.T) {
 	}
 
 	code, body = postJSON(t, srv, http.MethodPost, "/api/auth/admin-login", map[string]any{
-		"password": "Aqua-Install-2026",
+		"password": "Ltzy-Install-2026",
 	})
 	if code != http.StatusOK {
 		t.Fatalf("正确密码状态码 = %d，期望 200（%v）", code, body)

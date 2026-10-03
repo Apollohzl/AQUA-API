@@ -408,7 +408,7 @@ func (s *Server) handleExportCorpusSamples(c *gin.Context) {
 		"to":      unixOrZero(query.To),
 	})
 
-	filename := "aqua-corpus-" + time.Now().Format("20060102-150405") + ".jsonl"
+	filename := "ltzy-corpus-" + time.Now().Format("20060102-150405") + ".jsonl"
 	c.Header("Content-Type", "application/x-ndjson; charset=utf-8")
 	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
 	c.Header("Cache-Control", "no-store")

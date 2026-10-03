@@ -199,7 +199,7 @@ export async function exportCorpusSamples(query: CorpusSampleQuery): Promise<voi
   if (query.to) params.to = query.to
 
   let blob: Blob
-  let filename = `aqua-corpus-${Date.now()}.jsonl`
+  let filename = `ltzy-corpus-${Date.now()}.jsonl`
   try {
     const response = await axios.request<Blob>({
       url: '/admin/corpus/export',

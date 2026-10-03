@@ -342,7 +342,7 @@ func TestModelMappingOverview_聚合映射与无映射渠道(t *testing.T) {
 
 	mapped := &model.Channel{
 		Name: "示例自营渠道", Type: 1, BaseURL: "https://upstream.example.com", APIKey: "sk-x",
-		Models: []string{"vendor/model-a"}, Group: "aqua",
+		Models: []string{"vendor/model-a"}, Group: "ltzy",
 		Priority: 1, Weight: 1, Status: model.ChannelStatusEnabled,
 	}
 	if err := fx.channels.Create(ctx, mapped); err != nil {
@@ -378,7 +378,7 @@ func TestModelMappingOverview_聚合映射与无映射渠道(t *testing.T) {
 	if v, _ := items[0]["channel_name"].(string); v != "示例自营渠道" {
 		t.Fatalf("应带上渠道名，实际 %q", v)
 	}
-	if v, _ := items[0]["group"].(string); v != "aqua" {
+	if v, _ := items[0]["group"].(string); v != "ltzy" {
 		t.Fatalf("应带上分组，实际 %q", v)
 	}
 	if v, _ := items[0]["public_model"].(string); v != "vendor/model-a" {
@@ -446,11 +446,11 @@ func TestResolveMapping_最长前缀优先级与确定性(t *testing.T) {
 // TestResolveMapping_通配捕获替换与未命中 验证结果侧通配替换与边界。
 func TestResolveMapping_通配捕获替换与未命中(t *testing.T) {
 	mappings := []*model.ChannelModelMapping{
-		{ID: 1, PublicModel: "aqua-*", UpstreamModel: "deepseek-*", Enabled: true},
+		{ID: 1, PublicModel: "ltzy-*", UpstreamModel: "deepseek-*", Enabled: true},
 		{ID: 2, PublicModel: "disabled-*", UpstreamModel: "nope", Enabled: false},
 	}
-	// 对外 aqua-chat → 上游 deepseek-chat（捕获 chat 替换结果侧通配）
-	if got, ok := model.ResolveMapping(mappings, "aqua-chat"); !ok || got != "deepseek-chat" {
+	// 对外 ltzy-chat → 上游 deepseek-chat（捕获 chat 替换结果侧通配）
+	if got, ok := model.ResolveMapping(mappings, "ltzy-chat"); !ok || got != "deepseek-chat" {
 		t.Fatalf("通配捕获应产出 deepseek-chat，实际 (%q, %v)", got, ok)
 	}
 	// 停用的映射不参与匹配

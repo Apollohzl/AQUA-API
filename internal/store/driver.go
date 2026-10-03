@@ -99,8 +99,8 @@ func Drivers() []DriverInfo {
 			Fields: []DriverField{
 				{Key: "host", Label: "主机", Placeholder: "127.0.0.1", Default: "127.0.0.1", Required: true},
 				{Key: "port", Label: "端口", Placeholder: "3306", Default: "3306", Required: true},
-				{Key: "database", Label: "数据库名", Placeholder: "aqua", Required: true},
-				{Key: "username", Label: "用户名", Placeholder: "aqua", Required: true},
+				{Key: "database", Label: "数据库名", Placeholder: "ltzy", Required: true},
+				{Key: "username", Label: "用户名", Placeholder: "ltzy", Required: true},
 				{Key: "password", Label: "密码", Required: false, Secret: true},
 			},
 		},
@@ -112,8 +112,8 @@ func Drivers() []DriverInfo {
 			Fields: []DriverField{
 				{Key: "host", Label: "主机", Placeholder: "127.0.0.1", Default: "127.0.0.1", Required: true},
 				{Key: "port", Label: "端口", Placeholder: "5432", Default: "5432", Required: true},
-				{Key: "database", Label: "数据库名", Placeholder: "aqua", Required: true},
-				{Key: "username", Label: "用户名", Placeholder: "aqua", Required: true},
+				{Key: "database", Label: "数据库名", Placeholder: "ltzy", Required: true},
+				{Key: "username", Label: "用户名", Placeholder: "ltzy", Required: true},
 				{Key: "password", Label: "密码", Required: false, Secret: true},
 			},
 		},

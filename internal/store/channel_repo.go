@@ -257,7 +257,7 @@ func buildChannelWhere(q model.ChannelQuery) (string, []any) {
 		// 此时必须回退到 group_name（既有数据与旧版前端都只写这一列），
 		// 否则升级后所有渠道都会因清单为空而匹配不上，直接全站 503。
 		//
-		// 清单匹配用「前后补逗号 + LIKE」实现：它把 CSV 变成 "…,free,aqua,…" 形式，
+		// 清单匹配用「前后补逗号 + LIKE」实现：它把 CSV 变成 "…,free,ltzy,…" 形式，
 		// 从而避免 free 命中 freebies 这类子串误判；SQLite 与 MySQL 都支持，无需方言分支。
 		//
 		// 分组名做 LIKE 转义：分组标识里若含下划线（如 my_group），不转义时 "_"

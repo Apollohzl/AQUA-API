@@ -1,4 +1,4 @@
-// Package aqua 是模块根包，唯一职责是承载前端构建产物的嵌入声明。
+// Package ltzy 是模块根包，唯一职责是承载前端构建产物的嵌入声明。
 //
 // 意图（Why）：
 //
@@ -16,7 +16,7 @@
 //
 //	若将来前端产物改到其他目录（例如 internal/webui/dist），
 //	应把本文件迁移到该目录并删除根包，避免根目录堆砌 Go 文件。
-package aqua
+package ltzy
 
 import "embed"
 

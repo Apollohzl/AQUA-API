@@ -257,7 +257,7 @@ func TestMaintenanceInspect_ValidBackup(t *testing.T) {
 	}
 
 	rec, body := doMaintenanceUpload(t, fx.handler, "/api/admin/maintenance/backup/inspect",
-		fx.adminTok, maintenanceBackupFormField, "aqua-backup.db", backup.Body.Bytes())
+		fx.adminTok, maintenanceBackupFormField, "ltzy-backup.db", backup.Body.Bytes())
 	if rec.Code != http.StatusOK {
 		t.Fatalf("校验接口返回 %d：%s", rec.Code, rec.Body.String())
 	}

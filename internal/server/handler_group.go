@@ -471,7 +471,7 @@ func (s *Server) handleListModels(c *gin.Context) {
 			// 客户端只把它当作可排序字段，填 0 比编造一个时间更诚实。
 			Created: 0,
 			// owned_by 标注为本网关，明确"这些模型是通过网关转发的"。
-			OwnedBy: "aqua-api",
+			OwnedBy: "ltzy-api",
 		})
 	}
 

@@ -704,7 +704,7 @@ type geminiStreamConverter struct {
 // newGeminiStreamConverter 创建流式转换器。
 func newGeminiStreamConverter() *geminiStreamConverter {
 	return &geminiStreamConverter{
-		id:      "chatcmpl-aqua",
+		id:      "chatcmpl-ltzy",
 		created: time.Now().Unix(),
 	}
 }

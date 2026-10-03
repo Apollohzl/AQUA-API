@@ -257,7 +257,7 @@ func (s *Server) handleMaintenanceBackup(c *gin.Context) {
 
 	// 1) 在系统临时目录预留唯一文件名（并发导出不会互相覆盖），随后立即删除：
 	//    VACUUM INTO 要求目标文件不存在，否则会直接报错。
-	tmp, err := os.CreateTemp("", "aqua-backup-*.db")
+	tmp, err := os.CreateTemp("", "ltzy-backup-*.db")
 	if err != nil {
 		s.respondInternalError(c, "创建备份临时文件失败")
 		return
@@ -282,7 +282,7 @@ func (s *Server) handleMaintenanceBackup(c *gin.Context) {
 	}
 
 	// 3) 以 octet-stream 流式下载，文件名带时间戳便于区分多份备份。
-	filename := "aqua-backup-" + time.Now().Format(maintenanceBackupNameLayout) + ".db"
+	filename := "ltzy-backup-" + time.Now().Format(maintenanceBackupNameLayout) + ".db"
 	c.Header("Content-Type", "application/octet-stream")
 	c.FileAttachment(tmpPath, filename)
 }

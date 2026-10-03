@@ -73,7 +73,7 @@ var dummyPasswordHash string
 
 func init() {
 	// 忽略错误：这只是一段用于对齐耗时的常量哈希，生成失败也不影响正确性
-	dummyPasswordHash, _ = crypto.HashPassword("aqua-dummy-password-for-timing-equalization")
+	dummyPasswordHash, _ = crypto.HashPassword("ltzy-dummy-password-for-timing-equalization")
 }
 
 // ---------------------------------------------------------------------------

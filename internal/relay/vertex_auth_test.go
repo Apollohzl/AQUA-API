@@ -56,7 +56,7 @@ func newTestServiceAccount(t *testing.T, tokenURI string) (string, *rsa.PrivateK
 	pemText := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 
 	payload, err := json.Marshal(map[string]string{
-		"client_email": "aqua-test@project.iam.gserviceaccount.com",
+		"client_email": "ltzy-test@project.iam.gserviceaccount.com",
 		"private_key":  string(pemText),
 		"token_uri":    tokenURI,
 	})

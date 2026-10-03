@@ -164,7 +164,7 @@ export async function downloadMaintenanceBackup(): Promise<void> {
   }
 
   const blob = await response.blob()
-  const filename = parseFilename(response.headers.get('Content-Disposition')) || 'aqua-backup.db'
+  const filename = parseFilename(response.headers.get('Content-Disposition')) || 'ltzy-backup.db'
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url

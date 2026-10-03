@@ -41,7 +41,7 @@ export const SUPPORTED_LOCALES = [
 export type LocaleCode = (typeof SUPPORTED_LOCALES)[number]['code']
 
 /** 语言选择的 localStorage 键名（与 api/client.ts 的会话键风格保持一致） */
-const STORAGE_KEY = 'aqua.locale'
+const STORAGE_KEY = 'ltzy.locale'
 
 /** 兜底语言：所有匹配失败时使用 */
 export const FALLBACK_LOCALE: LocaleCode = 'zh-CN'

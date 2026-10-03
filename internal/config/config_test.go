@@ -220,13 +220,13 @@ func TestLoad_RelayGroup(t *testing.T) {
 	}
 
 	// 3) 环境变量优先级最高
-	t.Setenv("AQUA_RELAY_GROUP", "aqua")
+	t.Setenv("AQUA_RELAY_GROUP", "ltzy")
 	cfg, err = Load(path)
 	if err != nil {
 		t.Fatalf("Load 返回错误: %v", err)
 	}
-	if cfg.RelayGroup != "aqua" {
-		t.Errorf("环境变量 relay_group = %q，期望覆盖为 aqua", cfg.RelayGroup)
+	if cfg.RelayGroup != "ltzy" {
+		t.Errorf("环境变量 relay_group = %q，期望覆盖为 ltzy", cfg.RelayGroup)
 	}
 }
 

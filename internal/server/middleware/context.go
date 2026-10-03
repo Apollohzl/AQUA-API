@@ -28,7 +28,7 @@ import (
 //
 // 使用私有常量而非字符串字面量：外部无法直接拼写该键，
 // 只能通过本文件的访问函数读写，从而避免键名不一致的问题。
-const contextKeyToken = "aqua.context.token"
+const contextKeyToken = "ltzy.context.token"
 
 // SetToken 把已认证的令牌写入上下文（仅供本包的中间件调用）。
 func SetToken(c *gin.Context, token *model.Token) {

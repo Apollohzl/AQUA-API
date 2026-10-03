@@ -20,7 +20,7 @@ func TestChannelRepository_多分组_创建读回与匹配(t *testing.T) {
 	ch := newValidChannel()
 	ch.Name = "多分组渠道"
 	ch.Group = "free"                    // 主分组 = 清单首项
-	ch.Groups = []string{"free", "aqua"} // 同时服务免费组与自营组
+	ch.Groups = []string{"free", "ltzy"} // 同时服务免费组与自营组
 	if err := repo.Create(ctx, ch); err != nil {
 		t.Fatalf("Create 失败: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestChannelRepository_多分组_创建读回与匹配(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID 失败: %v", err)
 	}
-	if len(got.Groups) != 2 || got.Groups[0] != "free" || got.Groups[1] != "aqua" {
+	if len(got.Groups) != 2 || got.Groups[0] != "free" || got.Groups[1] != "ltzy" {
 		t.Fatalf("分组清单读回不一致：%v", got.Groups)
 	}
 	if got.Group != "free" {
@@ -39,7 +39,7 @@ func TestChannelRepository_多分组_创建读回与匹配(t *testing.T) {
 
 	// 两个分组都能查到该渠道
 	enabled := model.ChannelStatusEnabled
-	for _, group := range []string{"free", "aqua"} {
+	for _, group := range []string{"free", "ltzy"} {
 		list, err := repo.List(ctx, model.ChannelQuery{Group: group, Status: &enabled})
 		if err != nil {
 			t.Fatalf("按分组 %s 查询失败: %v", group, err)

@@ -240,7 +240,7 @@ func TestLoadSiteSettings_SEO_默认值开箱即用(t *testing.T) {
 
 func TestLoadSiteSettings_SEO_覆盖与解析(t *testing.T) {
 	repo := &fakeSettingRepo{values: map[string]string{
-		SettingKeySEOSiteURL:            "aqua.example.com/",
+		SettingKeySEOSiteURL:            "ltzy.example.com/",
 		SettingKeySEOKeywords:           "网关，中转,自托管",
 		SettingKeySEOBingVerification:   "BING-CODE",
 		SettingKeySEOGoogleVerification: "GOOGLE-CODE",
@@ -257,7 +257,7 @@ func TestLoadSiteSettings_SEO_覆盖与解析(t *testing.T) {
 		t.Fatalf("读取设置失败: %v", err)
 	}
 
-	if loaded.SEO.SiteURL != "https://aqua.example.com" {
+	if loaded.SEO.SiteURL != "https://ltzy.example.com" {
 		t.Fatalf("站点地址应被规范化，实际 %q", loaded.SEO.SiteURL)
 	}
 	// 中文逗号也应被解析

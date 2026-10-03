@@ -70,7 +70,7 @@ func domainOf(email string) string {
 	if _, domain, found := strings.Cut(strings.TrimSpace(email), "@"); found && domain != "" {
 		return domain
 	}
-	return "aqua.local"
+	return "ltzy.local"
 }
 
 // ErrNotConfigured 表示邮件功能未配置。

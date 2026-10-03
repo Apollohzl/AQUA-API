@@ -14,7 +14,7 @@
  */
 
 /** 首次进入控制台确认「使用须知」后写入 localStorage 的键 */
-export const COMPLIANCE_ACK_KEY = 'aqua.compliance_ack'
+export const COMPLIANCE_ACK_KEY = 'ltzy.compliance_ack'
 
 /** 行内 / 横幅提示的默认正文 */
 export const DEFAULT_COMPLIANCE_MESSAGE =

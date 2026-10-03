@@ -35,7 +35,7 @@
 -- 流转（Flow）：
 --   store.trialGrantRepository.GrantAll
 --     → 写台账（快照 used_quota）+ users.quota += amount
---   → cmd/aqua 的定时协程 runTrialGrantReclaimer
+--   → cmd/ltzy 的定时协程 runTrialGrantReclaimer
 --     → store.trialGrantRepository.ReclaimExpired
 --       → 台账置 reclaimed + users.quota -= 应回收
 --   → 门户 GET /api/user/trial（ActiveFor）读出"还剩多少、几时过期"给前端展示

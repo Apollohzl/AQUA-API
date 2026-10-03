@@ -387,7 +387,7 @@ func (a anthropicAdapter) EncodeResponse(upstreamBody []byte) []byte {
 		// 上游响应结构异常：返回一个合法的空响应而不是原始 JSON，
 		// 否则 Anthropic 客户端会报出难以理解的解析错误
 		return mustEncode(map[string]any{
-			"id": "msg_aqua_unparsable", "type": "message", "role": "assistant",
+			"id": "msg_ltzy_unparsable", "type": "message", "role": "assistant",
 			"content": []map[string]any{{"type": "text", "text": ""}},
 			"model":   "", "stop_reason": "end_turn",
 			"usage": map[string]any{"input_tokens": 0, "output_tokens": 0},
@@ -490,7 +490,7 @@ func mapStopReason(finishReason string) string {
 func normalizeAnthropicID(upstreamID string) string {
 	id := strings.TrimSpace(upstreamID)
 	if id == "" {
-		return "msg_aqua"
+		return "msg_ltzy"
 	}
 	if strings.HasPrefix(id, "msg_") {
 		return id

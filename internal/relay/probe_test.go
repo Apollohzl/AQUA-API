@@ -150,10 +150,10 @@ func TestProbeChannel_先套用模型映射再探测(t *testing.T) {
 	r := New(nil, Options{ChannelModelMappings: mappings})
 	ch := &model.Channel{
 		ID: 7, Name: "自营渠道", Type: 1, TypeKey: "openai",
-		BaseURL: upstream.URL, APIKey: "sk-aqua", Models: []string{"vendor/model-a"},
+		BaseURL: upstream.URL, APIKey: "sk-ltzy", Models: []string{"vendor/model-a"},
 	}
 
-	res := r.ProbeChannel(context.Background(), ch, "sk-aqua", "vendor/model-a")
+	res := r.ProbeChannel(context.Background(), ch, "sk-ltzy", "vendor/model-a")
 	if res.Err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("探测失败: err=%v status=%d body=%s", res.Err, res.StatusCode, res.Body)
 	}

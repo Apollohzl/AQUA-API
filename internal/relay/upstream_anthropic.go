@@ -744,7 +744,7 @@ func anthropicStopReasonToOpenAI(stopReason string, hasToolCalls bool) string {
 func normalizeOpenAIID(upstreamID string) string {
 	id := strings.TrimSpace(upstreamID)
 	if id == "" {
-		return "chatcmpl-aqua"
+		return "chatcmpl-ltzy"
 	}
 	if strings.HasPrefix(id, "chatcmpl-") {
 		return id
@@ -943,7 +943,7 @@ type anthropicStreamConverter struct {
 // newAnthropicStreamConverter 创建流式转换器。
 func newAnthropicStreamConverter() *anthropicStreamConverter {
 	return &anthropicStreamConverter{
-		id:               "chatcmpl-aqua",
+		id:               "chatcmpl-ltzy",
 		created:          time.Now().Unix(),
 		toolIndexByBlock: make(map[int]int),
 	}

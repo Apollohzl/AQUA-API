@@ -37,7 +37,7 @@ import {
 export type ThemeMode = 'auto' | 'light' | 'dark' | 'navy'
 export type ResolvedTheme = 'light' | 'dark' | 'navy'
 
-export const THEME_STORAGE_KEY = 'aqua.theme'
+export const THEME_STORAGE_KEY = 'ltzy.theme'
 /** 白天区间（北京时间小时）：[DAY_START, DAY_END) 视为日间，其余为夜间 */
 export const DAY_START = 6
 export const DAY_END = 18

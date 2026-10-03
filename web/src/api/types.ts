@@ -1046,7 +1046,8 @@ export interface DashboardStats {
 /**
  * SEO 与站点收录配置（GET /api/admin/settings 响应中的 seo 对象）。
  *
- * 这些值由后端注入到 index.html 的 head 标记块（见 web/index.html 的 aqua:seo 锚点），
+ * 这些值由后端在响应时注入页面 <head>（Next 静态导出产物没有预留锚点，
+ * 由 internal/server/seo.go 的 injectSEOMeta 直接插入），
  * 并据此生成 sitemap.xml / robots.txt；前端的职责只是采集与展示，不做任何拼接。
  */
 export interface SeoSettings {

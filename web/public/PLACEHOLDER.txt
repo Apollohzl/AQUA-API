@@ -21,7 +21,7 @@ Go 后端通过 `//go:embed web/dist` 把前端构建产物嵌入二进制。
     npm install
     npm run build      # 生成 dist/index.html 与 dist/assets/*
 
-随后执行 `go build ./cmd/aqua`，前端产物会被一并嵌入。
+随后执行 `go build ./cmd/ltzy`，前端产物会被一并嵌入。
 
 若忘记构建，后端启动后访问首页会返回明确提示（而不是空白页或 500），
 按提示执行上面的构建命令即可。

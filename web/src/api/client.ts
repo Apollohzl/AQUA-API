@@ -27,8 +27,8 @@ import type { ApiErrorBody } from './types'
 const API_PREFIX = process.env.NEXT_PUBLIC_API_BASE || '/api'
 
 /** 会话令牌与用户快照在 localStorage 中的键名（刷新页面后仍保持登录态） */
-const TOKEN_KEY = 'aqua.session_token'
-const USER_KEY = 'aqua.session_user'
+const TOKEN_KEY = 'ltzy.session_token'
+const USER_KEY = 'ltzy.session_user'
 
 /**
  * 默认请求超时（毫秒）。

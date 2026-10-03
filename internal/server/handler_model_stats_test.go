@@ -162,7 +162,7 @@ func newModelStatsServer(t *testing.T, st *store.Store) http.Handler {
 	engine.GET("/api/user/models/stats",
 		func(c *gin.Context) {
 			// 注入登录用户（模拟 SessionAuth 成功后的上下文，绕过中间件）
-			c.Set("aqua.context.user", &model.User{
+			c.Set("ltzy.context.user", &model.User{
 				ID: 1, Username: "stats-test-user",
 				Role: model.UserRoleUser, Status: model.UserStatusEnabled, Quota: model.QuotaUnlimited,
 			})

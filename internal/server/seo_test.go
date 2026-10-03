@@ -103,7 +103,7 @@ type sitemapDoc struct {
 // TestSitemap_可解析且lastmod为北京当天 验证 sitemap 的格式与内容。
 func TestSitemap_可解析且lastmod为北京当天(t *testing.T) {
 	srv, _ := newSEOServer(t, map[string]string{
-		model.SettingKeySEOSiteURL:      "https://aqua.example.com/",
+		model.SettingKeySEOSiteURL:      "https://ltzy.example.com/",
 		model.SettingKeySEOSitemapPaths: "/pricing,/faq",
 	}, nil)
 
@@ -146,17 +146,17 @@ func TestSitemap_可解析且lastmod为北京当天(t *testing.T) {
 		if strings.Contains(path, "//") {
 			t.Errorf("loc 在协议之后出现多余斜杠: %q", u.Loc)
 		}
-		if u.Loc != "https://aqua.example.com/" && strings.HasSuffix(u.Loc, "/") {
+		if u.Loc != "https://ltzy.example.com/" && strings.HasSuffix(u.Loc, "/") {
 			t.Errorf("非首页 loc 不应以 / 结尾: %q", u.Loc)
 		}
 	}
 
 	// 配置的 SiteURL 必须作为绝对地址出现在 loc 中
 	for _, want := range []string{
-		"https://aqua.example.com/",
-		"https://aqua.example.com/models",
-		"https://aqua.example.com/pricing",
-		"https://aqua.example.com/faq",
+		"https://ltzy.example.com/",
+		"https://ltzy.example.com/models",
+		"https://ltzy.example.com/pricing",
+		"https://ltzy.example.com/faq",
 	} {
 		if !locs[want] {
 			t.Errorf("sitemap 缺少条目 %q", want)
@@ -167,7 +167,7 @@ func TestSitemap_可解析且lastmod为北京当天(t *testing.T) {
 // TestSitemap_同日命中缓存且可被清空 验证缓存策略与失效。
 func TestSitemap_同日命中缓存且可被清空(t *testing.T) {
 	srv, _ := newSEOServer(t, map[string]string{
-		model.SettingKeySEOSiteURL: "https://aqua.example.com",
+		model.SettingKeySEOSiteURL: "https://ltzy.example.com",
 	}, nil)
 
 	first := getSEOResponse(srv, "/sitemap.xml")
@@ -177,7 +177,7 @@ func TestSitemap_同日命中缓存且可被清空(t *testing.T) {
 		t.Fatal("同一天两次请求的 sitemap 应完全一致（命中缓存）")
 	}
 	// 第二次请求应直接命中缓存：缓存中已存在本次内容。
-	cached, ok := srv.cachedSitemap("https://aqua.example.com")
+	cached, ok := srv.cachedSitemap("https://ltzy.example.com")
 	if !ok {
 		t.Fatal("首次请求后应存在可按同一基址命中的缓存")
 	}
@@ -187,7 +187,7 @@ func TestSitemap_同日命中缓存且可被清空(t *testing.T) {
 
 	// 改配置后必须能立即失效（否则要等第二天才生效）。
 	srv.invalidateSitemapCache()
-	if _, ok := srv.cachedSitemap("https://aqua.example.com"); ok {
+	if _, ok := srv.cachedSitemap("https://ltzy.example.com"); ok {
 		t.Fatal("清空缓存后不应再命中")
 	}
 }
@@ -196,7 +196,7 @@ func TestSitemap_同日命中缓存且可被清空(t *testing.T) {
 func TestSitemap与Robots_开关关闭时返回404(t *testing.T) {
 	srv, _ := newSEOServer(t, map[string]string{
 		model.SettingKeySEOSitemapEnabled: "false",
-		model.SettingKeySEOSiteURL:        "https://aqua.example.com",
+		model.SettingKeySEOSiteURL:        "https://ltzy.example.com",
 	}, nil)
 
 	for _, path := range []string{"/sitemap.xml", "/robots.txt"} {
@@ -209,7 +209,7 @@ func TestSitemap与Robots_开关关闭时返回404(t *testing.T) {
 // TestRobots_内容含Sitemap与Disallow 验证爬虫规则内容。
 func TestRobots_内容含Sitemap与Disallow(t *testing.T) {
 	srv, _ := newSEOServer(t, map[string]string{
-		model.SettingKeySEOSiteURL: "https://aqua.example.com/",
+		model.SettingKeySEOSiteURL: "https://ltzy.example.com/",
 	}, nil)
 
 	rec := getSEOResponse(srv, "/robots.txt")
@@ -232,7 +232,7 @@ func TestRobots_内容含Sitemap与Disallow(t *testing.T) {
 		"Disallow: /api/",
 		"Disallow: /console/",
 		"Disallow: /admin/",
-		"Sitemap: https://aqua.example.com/sitemap.xml",
+		"Sitemap: https://ltzy.example.com/sitemap.xml",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("robots.txt 缺少 %q\n%s", want, body)
@@ -250,7 +250,7 @@ func TestInjectSEOMeta_标签齐全(t *testing.T) {
 	settings.SEO.GeoPosition = "22.5431;114.0579"
 
 	page := []byte("<html><head>\n<!--aqua:seo:start-->\n<!--aqua:seo:end-->\n</head></html>")
-	out := string(injectSEOMeta(page, settings, "https://aqua.example.com/", "/pricing"))
+	out := string(injectSEOMeta(page, settings, "https://ltzy.example.com/", "/pricing"))
 
 	for _, want := range []string{
 		// 默认内置的必应收录码
@@ -263,7 +263,7 @@ func TestInjectSEOMeta_标签齐全(t *testing.T) {
 		`<meta name="geo.position" content="22.5431;114.0579" />`,
 		// ICBM 用逗号分隔
 		`<meta name="ICBM" content="22.5431, 114.0579" />`,
-		`<link rel="canonical" href="https://aqua.example.com/pricing" />`,
+		`<link rel="canonical" href="https://ltzy.example.com/pricing" />`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("注入结果缺少 %q\n%s", want, out)
@@ -281,7 +281,7 @@ func TestInjectSEOMeta_标签齐全(t *testing.T) {
 func TestInjectSEOMeta_无标记有head插入SEO(t *testing.T) {
 	page := []byte("<html><head><title>默认标题</title></head><body>no markers</body></html>")
 
-	out := string(injectSEOMeta(page, model.DefaultSiteSettings(), "https://aqua.example.com", "/"))
+	out := string(injectSEOMeta(page, model.DefaultSiteSettings(), "https://ltzy.example.com", "/"))
 
 	// Next 产物没有标记但有关闭的 </head>：应插入 SEO 块
 	if !strings.Contains(out, `<meta name="keywords"`) {
@@ -302,7 +302,7 @@ func TestInjectSEOMeta_无标记有head插入SEO(t *testing.T) {
 func TestInjectSEOMeta_无head且无标记原样返回(t *testing.T) {
 	original := []byte("<html><body>no head close</body></html>")
 
-	out := injectSEOMeta(original, model.DefaultSiteSettings(), "https://aqua.example.com", "/")
+	out := injectSEOMeta(original, model.DefaultSiteSettings(), "https://ltzy.example.com", "/")
 
 	if string(out) != string(original) {
 		t.Fatalf("无标记且无 </head> 时应原样返回，实际: %s", out)
@@ -315,7 +315,7 @@ func TestInjectSEOMeta_关键词引号被转义(t *testing.T) {
 	settings.SEO.Keywords = []string{`a"b`}
 
 	page := []byte(`<head><!--aqua:seo:start--><!--aqua:seo:end--></head>`)
-	out := string(injectSEOMeta(page, settings, "https://aqua.example.com", "/"))
+	out := string(injectSEOMeta(page, settings, "https://ltzy.example.com", "/"))
 
 	if !strings.Contains(out, "&#34;") {
 		t.Errorf("引号应被 HTML 转义\n%s", out)
@@ -383,7 +383,7 @@ func TestSPA回退注入SEO元信息(t *testing.T) {
 			"<!DOCTYPE html><html><head>\n<!--aqua:seo:start-->\n<!--aqua:seo:end-->\n</head><body></body></html>")},
 	}
 	srv, _ := newSEOServer(t, map[string]string{
-		model.SettingKeySEOSiteURL: "https://aqua.example.com",
+		model.SettingKeySEOSiteURL: "https://ltzy.example.com",
 	}, web)
 
 	rec := getSEOResponse(srv, "/pricing")
@@ -396,7 +396,7 @@ func TestSPA回退注入SEO元信息(t *testing.T) {
 		t.Errorf("SPA 页面未注入必应验证码\n%s", body)
 	}
 	// canonical 必须是"当前请求路径"，而不是写死的首页
-	if !strings.Contains(body, `href="https://aqua.example.com/pricing"`) {
+	if !strings.Contains(body, `href="https://ltzy.example.com/pricing"`) {
 		t.Errorf("canonical 应指向当前路径 /pricing\n%s", body)
 	}
 }
@@ -423,7 +423,7 @@ func TestNext产物_真实页面与SPA回退(t *testing.T) {
 			"<!DOCTYPE html><html><head><!--aqua:seo:start--><!--aqua:seo:end--></head><body>spa fallback</body></html>")},
 	}
 	srv, _ := newSEOServer(t, map[string]string{
-		model.SettingKeySEOSiteURL: "https://aqua.example.com",
+		model.SettingKeySEOSiteURL: "https://ltzy.example.com",
 	}, web)
 
 	cases := []struct {

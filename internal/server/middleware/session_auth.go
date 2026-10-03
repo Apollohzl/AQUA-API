@@ -32,7 +32,7 @@ import (
 )
 
 // contextKeyUser 是登录用户在 gin 上下文中的键。
-const contextKeyUser = "aqua.context.user"
+const contextKeyUser = "ltzy.context.user"
 
 // SetUser 把已认证用户写入上下文（仅供本包中间件调用）。
 func SetUser(c *gin.Context, user *model.User) {

@@ -397,7 +397,7 @@ function ModelFormModal({
           required={!model}
           help={model ? '创建后不可修改：令牌白名单、渠道清单与映射都通过它关联，改名需新建后迁移引用' : '客户端请求时使用的名称；创建后不可修改，不能含空白字符'}
         >
-          <Input value={name} onChange={(e) => setName(e.target.value)} disabled={Boolean(model)} placeholder="如 aqua-chat" />
+          <Input value={name} onChange={(e) => setName(e.target.value)} disabled={Boolean(model)} placeholder="如 ltzy-chat" />
         </Field>
         <Field label="展示名" help={model ? '留空提交将保持原值（后端空值视为不修改）' : '留空时界面回退显示模型名'}>
           <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="可选" />
