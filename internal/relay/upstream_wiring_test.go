@@ -32,31 +32,33 @@ import (
 	"github.com/LTZY-ACU/ltzy-api/internal/oai"
 )
 
-// TestDedupeUpstreamVersionSegment_重复版本段剪除 钉住"base 尾段与 path 首段
-// 重复时剪除"的规则，覆盖三类关键场景：该剪的（/v1/v1）、不该剪的（Anthropic
-// 版本段在 base 里）、绝不能剪的（host 恰好叫 v1）。
-func TestDedupeUpstreamVersionSegment_重复版本段剪除(t *testing.T) {
+// TestJoinUpstreamURL_重复版本段剪除 钉住"base 尾段是版本段、path 又带 /v1
+// 前缀时去重"的规则，覆盖三类关键场景：该剪的（/v1/v1）、不该剪的（Anthropic
+// 的 /messages、主机名恰为 v1）、以及版本段非 v1 的上游（智谱 /api/paas/v4）。
+//
+// 注：实现已由 dedupeUpstreamVersionSegment（剪 base 尾段）演进为
+// joinUpstreamURL（剪 path 的 /v1 前缀）——后者能覆盖"base 版本段不是 v1"
+// 的上游，因此断言口径改为最终拼接出的 URL。
+func TestJoinUpstreamURL_重复版本段剪除(t *testing.T) {
 	cases := []struct {
 		name string
 		base string
 		path string
 		want string
 	}{
-		{"OpenAI 兼容 base 带 v1 尾段", "https://api.openai.com/v1", "/v1/chat/completions", "https://api.openai.com"},
-		{"多级路径只剪最后一段", "https://host/api/v1", "/v1/models", "https://host/api"},
-		{"v1beta 同样处理", "https://host/v1beta", "/v1beta/models/gemini:generateContent", "https://host"},
-		{"带端口", "http://host:8080/v1", "/v1/models", "http://host:8080"},
-		{"尾斜杠先归一化", "https://host/v1/", "/v1/models", "https://host"},
-		{"Anthropic 版本段必须保留", "https://api.anthropic.com/v1", "/messages", "https://api.anthropic.com/v1"},
-		{"主机名恰为 v1 不误剪", "https://v1", "/v1/chat/completions", "https://v1"},
-		{"域名以版本字样开头不误剪", "https://v1.example.com", "/v1/chat/completions", "https://v1.example.com"},
-		{"无路径 base 原样", "https://host", "/v1/chat/completions", "https://host"},
-		{"首段不同不剪", "https://host/api", "/v1/chat/completions", "https://host/api"},
+		{"OpenAI 兼容 base 带 v1 尾段", "https://api.openai.com/v1", "/v1/chat/completions", "https://api.openai.com/v1/chat/completions"},
+		{"多级路径只剪末段", "https://host/api/v1", "/v1/models", "https://host/api/v1/models"},
+		{"智谱 v4 版本段同样去重", "https://open.bigmodel.cn/api/paas/v4", "/v1/chat/completions", "https://open.bigmodel.cn/api/paas/v4/chat/completions"},
+		{"Anthropic 版本段必须保留", "https://api.anthropic.com/v1", "/messages", "https://api.anthropic.com/v1/messages"},
+		{"主机名恰为 v1 不误剪", "https://v1", "/v1/chat/completions", "https://v1/v1/chat/completions"},
+		{"域名以版本字样开头不误剪", "https://v1.example.com", "/v1/chat/completions", "https://v1.example.com/v1/chat/completions"},
+		{"无路径 base 原样", "https://host", "/v1/chat/completions", "https://host/v1/chat/completions"},
+		{"首段不同不剪", "https://host/api", "/v1/chat/completions", "https://host/api/v1/chat/completions"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := dedupeUpstreamVersionSegment(tc.base, tc.path); got != tc.want {
-				t.Fatalf("dedupe(%q, %q) = %q，期望 %q", tc.base, tc.path, got, tc.want)
+			if got := joinUpstreamURL(tc.base, tc.path); got != tc.want {
+				t.Fatalf("joinUpstreamURL(%q, %q) = %q，期望 %q", tc.base, tc.path, got, tc.want)
 			}
 		})
 	}

@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -704,6 +705,12 @@ func (s *Server) handleDeleteChannel(c *gin.Context) {
 		_ = s.deps.ChannelModelCosts.DeleteByChannel(ctx, id)
 	}
 
+	// 级联清理模型测速结果：同上——残留的 (渠道, 模型) 行既不会被广场读到，
+	// 还可能与新渠道的 ID 重合（自增 ID 复用），把旧延迟算到新渠道头上。
+	if s.deps.ModelSpeeds != nil {
+		_ = s.deps.ModelSpeeds.DeleteByChannel(ctx, id)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -766,6 +773,290 @@ func (s *Server) handleTestChannel(c *gin.Context) {
 	_ = s.deps.Channels.RecordTestResult(ctx, channel.ID, time.Now(), result.OK)
 
 	c.JSON(http.StatusOK, result)
+}
+
+// ---------------------------------------------------------------------------
+// 模型测速（逐模型首字延迟）
+// ---------------------------------------------------------------------------
+
+// speedTestRequest 是模型测速的请求体。
+//
+// Models 为空表示测该渠道声明的全部模型；前端为拿到实时进度，通常一次只传一个。
+type speedTestRequest struct {
+	Models []string `json:"models"`
+}
+
+// speedTestItem 是单个模型的测速结果。
+type speedTestItem struct {
+	Model string `json:"model"`
+	// UpstreamModel 是实际发给上游的模型名（可能被渠道级映射改写）。
+	UpstreamModel string `json:"upstream_model,omitempty"`
+	OK            bool   `json:"ok"`
+	StatusCode    int    `json:"status_code"`
+	// TTFBMS 是首字延迟（毫秒）——测速的主指标；失败时为 0。
+	TTFBMS  int `json:"ttfb_ms"`
+	TotalMS int `json:"total_ms"`
+	// Message 是给人看的结论或失败原因。
+	Message string `json:"message,omitempty"`
+	// Blocked 表示该模型因无权限（403/404）被自动从渠道清单移除。
+	Blocked bool `json:"blocked,omitempty"`
+}
+
+// speedTestResponse 是一次测速请求的汇总结果。
+type speedTestResponse struct {
+	Items []speedTestItem `json:"items"`
+	// Tested / OKCount 是本次请求实际探测的模型数与成功数。
+	Tested  int `json:"tested"`
+	OKCount int `json:"ok_count"`
+	// ElapsedMS 是本次请求的总耗时（含全部模型串行探测）。
+	ElapsedMS int `json:"elapsed_ms"`
+	// Message 是整批级别的失败说明（如凭据不可用）；为空表示逐模型结果可信。
+	Message string `json:"message,omitempty"`
+	// BlockedModels 是本次被自动屏蔽（无权限）并从渠道清单移除的模型。
+	BlockedModels []string `json:"blocked_models,omitempty"`
+
+	// 凭据来路与池内状况（与测活同口径，便于解释"这次测速用的是哪把钥匙"）
+	KeyMasked     string `json:"key_masked,omitempty"`
+	KeySource     string `json:"key_source,omitempty"`
+	PoolTotal     int    `json:"pool_total,omitempty"`
+	PoolAvailable int    `json:"pool_available,omitempty"`
+	PoolCooling   int    `json:"pool_cooling,omitempty"`
+	PoolDisabled  int    `json:"pool_disabled,omitempty"`
+	PoolRemoved   int    `json:"pool_removed,omitempty"`
+	PoolExhausted int    `json:"pool_exhausted,omitempty"`
+}
+
+// handleSpeedTestChannel 对渠道的一个或多个模型测首字延迟（TTFB）。
+//
+// 为什么【串行】探测而不用并发：并发探测会互相抬高对端的排队延迟，
+// 测出来的数字彼此污染，失去对比意义；串行虽然慢，但每个数字都干净。
+// 前端为拿到实时进度会一次只传一个模型（循环调用本接口），串行的代价由
+// 请求边界天然摊开，管理端接口不会长时间挂住。
+func (s *Server) handleSpeedTestChannel(c *gin.Context) {
+	id, ok := parseIDParam(c)
+	if !ok {
+		return
+	}
+
+	var req speedTestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		oai.WriteError(c.Writer, http.StatusBadRequest, "请求体格式错误", oai.TypeInvalidRequest, oai.CodeInvalidJSON)
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// 功能开关：测速会对上游产生真实（虽然极小）的消耗，必须可被一键停用；
+	// 关闭时明确拒绝，而不是让管理员在"测了没反应"里猜原因。
+	settings, err := model.LoadSiteSettings(ctx, s.deps.Settings)
+	if err != nil {
+		s.respondInternalError(c, "读取系统设置失败")
+		return
+	}
+	if !settings.SpeedTest.Enabled {
+		oai.WriteError(c.Writer, http.StatusForbidden,
+			"模型测速功能已在系统设置中关闭（如需使用请到「系统设置 → 模型测速」开启）",
+			oai.TypeInvalidRequest, "speedtest_disabled")
+		return
+	}
+
+	channel, err := s.deps.Channels.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, model.ErrChannelNotFound) {
+			oai.WriteError(c.Writer, http.StatusNotFound, "渠道不存在", oai.TypeInvalidRequest, "channel_not_found")
+			return
+		}
+		s.respondInternalError(c, "查询渠道失败")
+		return
+	}
+
+	// 解析待测模型：请求指定优先；未指定则用渠道声明的全部模型。
+	// 去重保序：重复测同一模型既浪费 token 也没有信息增益。
+	requested := make([]string, 0, len(req.Models))
+	seen := make(map[string]struct{}, len(req.Models))
+	for _, raw := range req.Models {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		if _, duplicated := seen[name]; duplicated {
+			continue
+		}
+		seen[name] = struct{}{}
+		requested = append(requested, name)
+	}
+	if len(requested) == 0 {
+		requested = channel.Models
+	}
+	if len(requested) == 0 {
+		oai.WriteError(c.Writer, http.StatusBadRequest,
+			"该渠道未声明任何模型，请先在渠道配置中填写模型列表",
+			oai.TypeInvalidRequest, "no_models")
+		return
+	}
+	if limit := settings.SpeedTest.MaxModels; len(requested) > limit {
+		oai.WriteError(c.Writer, http.StatusBadRequest,
+			fmt.Sprintf("单次最多测速 %d 个模型（当前 %d 个）。请分批测速，或在系统设置中调整上限",
+				limit, len(requested)),
+			oai.TypeInvalidRequest, "too_many_models")
+		return
+	}
+
+	// 凭据选取与测活同源（池优先）；失败属于整批失败，逐模型结果无从谈起。
+	apiKey, cred, credErr := s.pickProbeCredential(ctx, channel)
+	resp := speedTestResponse{
+		Items:         make([]speedTestItem, 0, len(requested)),
+		KeyMasked:     cred.masked,
+		KeySource:     cred.source,
+		PoolTotal:     cred.poolTotal,
+		PoolAvailable: cred.poolAvailable,
+		PoolCooling:   cred.poolCooling,
+		PoolDisabled:  cred.poolDisabled,
+		PoolRemoved:   cred.poolRemoved,
+		PoolExhausted: cred.poolExhausted,
+	}
+	if credErr != "" {
+		resp.Message = credErr
+		c.JSON(http.StatusOK, resp)
+		return
+	}
+
+	if s.deps.Relay == nil {
+		oai.WriteError(c.Writer, http.StatusServiceUnavailable, "转发引擎未就绪", oai.TypeServer, oai.CodeInternal)
+		return
+	}
+
+	// 超时用设置值：不同上游的排队耐心差别很大，站长应能按自己的渠道调它。
+	probeTimeout := time.Duration(settings.SpeedTest.TimeoutSeconds) * time.Second
+	start := time.Now()
+
+	for _, modelName := range requested {
+		probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+		probe := s.deps.Relay.ProbeChannelLatency(probeCtx, channel, apiKey, modelName)
+		cancel()
+
+		item := speedTestItem{
+			Model:         modelName,
+			UpstreamModel: probe.UpstreamModel,
+			StatusCode:    probe.StatusCode,
+			TTFBMS:        probe.TTFBMS,
+			TotalMS:       probe.TotalMS,
+			OK:            probe.StatusCode >= 200 && probe.StatusCode < 300 && probe.TTFBMS > 0,
+		}
+		switch {
+		case probe.Err != nil:
+			if probe.TimedOut() {
+				item.Message = fmt.Sprintf("等待超时（超过 %d 秒）。不代表模型不可用，部分平台排队时间长",
+					int(probeTimeout.Seconds()))
+			} else {
+				item.Message = "无法连接到上游：" + probe.Err.Error()
+			}
+		case !item.OK:
+			item.Message = describeProbeStatus(probe.StatusCode, probe.Body, "")
+		case probe.UpstreamModel != "" && probe.UpstreamModel != modelName:
+			item.Message = fmt.Sprintf("模型映射：%s → %s", modelName, probe.UpstreamModel)
+		}
+		resp.Items = append(resp.Items, item)
+		resp.Tested++
+		if item.OK {
+			resp.OKCount++
+		}
+
+		// 落库失败不影响本次响应：结果已经在手，持久化是"尽力而为"的增强
+		//（磁盘满等异常不应让管理员看着转圈却拿不到刚测出的数字）。
+		if s.deps.ModelSpeeds != nil {
+			_ = s.deps.ModelSpeeds.Upsert(ctx, &model.ModelSpeedResult{
+				ChannelID:     channel.ID,
+				Model:         modelName,
+				UpstreamModel: probe.UpstreamModel,
+				OK:            item.OK,
+				StatusCode:    item.StatusCode,
+				TTFBMS:        item.TTFBMS,
+				TotalMS:       item.TotalMS,
+				Message:       item.Message,
+				TestedAt:      time.Now(),
+			})
+		}
+	}
+
+	resp.ElapsedMS = int(time.Since(start).Milliseconds())
+
+	// 测速的"第二步收益"：顺手清掉上游明确拒绝的模型（可在设置中关闭）。
+	resp.BlockedModels = s.applySpeedTestAutoBlock(ctx, channel, resp.Items, settings.SpeedTest.AutoBlock)
+
+	c.JSON(http.StatusOK, resp)
+}
+
+// applySpeedTestAutoBlock 把测速中「上游明确拒绝」的模型从渠道清单移除，
+// 返回被移除的模型名（关闭或无需移除时返回 nil）。
+//
+// 判据见 model.ModelSpeedResult.NoPermission：只有 403/404 这种确定性失败
+// 才屏蔽；超时与 5xx 属于暂时性故障，移除它们会在偶发抖动时误伤健康模型。
+//
+// 两条安全边界（违反任何一条都宁可不动）：
+//  1. 只移除【本次实测过】且当前仍在渠道清单里的模型——没测到的不动，
+//     避免一次部分测速就把整份清单清掉大半；
+//  2. 若移除后清单会变空，放弃本次移除——空清单在本系统的语义是
+//     "支持全部模型"，恰好与屏蔽的初衷相反。
+func (s *Server) applySpeedTestAutoBlock(
+	ctx context.Context, ch *model.Channel, items []speedTestItem, enabled bool,
+) []string {
+	if !enabled || len(items) == 0 {
+		return nil
+	}
+
+	blocked := make(map[string]struct{})
+	for i := range items {
+		verdict := model.ModelSpeedResult{OK: items[i].OK, StatusCode: items[i].StatusCode}
+		if verdict.NoPermission() {
+			blocked[items[i].Model] = struct{}{}
+		}
+	}
+	if len(blocked) == 0 {
+		return nil
+	}
+
+	remaining := make([]string, 0, len(ch.Models))
+	for _, name := range ch.Models {
+		if _, hit := blocked[name]; hit {
+			continue
+		}
+		remaining = append(remaining, name)
+	}
+	if len(remaining) == len(ch.Models) {
+		// 被屏蔽的模型都不在当前清单里（例如测速名单是手输的）：无需写库。
+		return nil
+	}
+	if len(remaining) == 0 {
+		slog.Warn("测速自动屏蔽：渠道全部模型均无权限，为避免空清单被当作「支持全部模型」而跳过移除",
+			"channel_id", ch.ID, "blocked", len(blocked))
+		return nil
+	}
+
+	before := ch.Models
+	ch.Models = remaining
+	if err := s.deps.Channels.Update(ctx, ch); err != nil {
+		// 写回失败必须回滚内存副本并留痕：调用方随后可能继续使用该渠道对象。
+		ch.Models = before
+		slog.Warn("测速自动屏蔽：写回渠道失败", "channel_id", ch.ID, "error", err)
+		return nil
+	}
+
+	names := make([]string, 0, len(blocked))
+	for i := range items {
+		if _, hit := blocked[items[i].Model]; !hit {
+			continue
+		}
+		items[i].Blocked = true
+		if items[i].Message == "" {
+			items[i].Message = "上游拒绝（403/404），已自动从渠道移除"
+		} else {
+			items[i].Message += "；已自动从渠道移除"
+		}
+		names = append(names, items[i].Model)
+	}
+	slog.Info("测速自动屏蔽：已从渠道移除无权限模型", "channel_id", ch.ID, "count", len(names))
+	return names
 }
 
 // ---------------------------------------------------------------------------
@@ -2093,6 +2384,19 @@ func (s *Server) handleGetSettings(c *gin.Context) {
 			"sensitive_filter_enabled": settings.Safeguard.SensitiveFilterEnabled,
 		},
 
+		// 模型测速参数：功能开关、广场公示开关、单模型超时与单次数量上限。
+		// 后台据此渲染「模型测速」表单区块；timeout/max_models 的合法区间见 model.SpeedTestSettings。
+		"speedtest": gin.H{
+			"enabled":         settings.SpeedTest.Enabled,
+			"public":          settings.SpeedTest.Public,
+			"timeout_seconds": settings.SpeedTest.TimeoutSeconds,
+			"max_models":      settings.SpeedTest.MaxModels,
+			"auto_block":      settings.SpeedTest.AutoBlock,
+			"min_timeout":     model.MinSpeedTestTimeoutSeconds,
+			"max_timeout":     model.MaxSpeedTestTimeoutSeconds,
+			"max_model_limit": model.MaxSpeedTestModels,
+		},
+
 		// 合规信息（对用户公示）：页脚、协议页、举报入口都用这一组。
 		// 单独成块便于后台表单集中维护，也让"哪些是必须公示的信息"一目了然。
 		"compliance": gin.H{
@@ -2288,6 +2592,9 @@ type settingsUpdateRequest struct {
 	// 内容安全参数（逐项覆盖，见 mergeSafeguardSettings）
 	Safeguard *safeguardSettingsDTO `json:"safeguard"`
 
+	// 模型测速参数（逐项覆盖，见 mergeSpeedTestSettings）
+	SpeedTest *speedTestSettingsDTO `json:"speedtest"`
+
 	// 合规信息（逐项覆盖，见 mergeComplianceSettings）
 	Compliance *complianceSettingsDTO `json:"compliance"`
 }
@@ -2328,6 +2635,43 @@ func mergeComplianceSettings(target *model.ComplianceSettings, req *complianceSe
 	apply(&target.ICPLicense, req.ICPLicense)
 	apply(&target.PoliceLicense, req.PoliceLicense)
 	apply(&target.ContactEmail, req.ContactEmail)
+}
+
+// speedTestSettingsDTO 是模型测速设置的可写入参。
+//
+// 字段用指针：未提交的项保持原值，避免前端只改开关却把超时清成默认。
+type speedTestSettingsDTO struct {
+	Enabled        *bool `json:"enabled"`
+	Public         *bool `json:"public"`
+	TimeoutSeconds *int  `json:"timeout_seconds"`
+	MaxModels      *int  `json:"max_models"`
+	AutoBlock      *bool `json:"auto_block"`
+}
+
+// mergeSpeedTestSettings 校验并合并测速设置。
+//
+// 校验交给 model.ValidateSpeedTestSettings（区间只在 model 层维护一处），
+// 非法值直接拒绝保存——静默夹取会让管理员以为"存成了我填的值"。
+func mergeSpeedTestSettings(target *model.SpeedTestSettings, req *speedTestSettingsDTO) error {
+	if target == nil || req == nil {
+		return nil
+	}
+	if req.Enabled != nil {
+		target.Enabled = *req.Enabled
+	}
+	if req.Public != nil {
+		target.Public = *req.Public
+	}
+	if req.TimeoutSeconds != nil {
+		target.TimeoutSeconds = *req.TimeoutSeconds
+	}
+	if req.MaxModels != nil {
+		target.MaxModels = *req.MaxModels
+	}
+	if req.AutoBlock != nil {
+		target.AutoBlock = *req.AutoBlock
+	}
+	return model.ValidateSpeedTestSettings(*target)
 }
 
 // mergeSafeguardSettings 把提交的内容安全参数并入当前设置。
@@ -2440,6 +2784,13 @@ func (s *Server) handleUpdateSettings(c *gin.Context) {
 	}
 	if req.Safeguard != nil {
 		mergeSafeguardSettings(&current.Safeguard, req.Safeguard)
+	}
+	if req.SpeedTest != nil {
+		if err := mergeSpeedTestSettings(&current.SpeedTest, req.SpeedTest); err != nil {
+			oai.WriteError(c.Writer, http.StatusBadRequest, err.Error(),
+				oai.TypeInvalidRequest, "invalid_speedtest_settings")
+			return
+		}
 	}
 	if req.Compliance != nil {
 		mergeComplianceSettings(&current.Compliance, req.Compliance)

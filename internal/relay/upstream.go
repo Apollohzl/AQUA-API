@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -280,9 +281,9 @@ func buildUpstreamRequest(in upstreamRequestInput) (*UpstreamRequest, error) {
 	}
 
 	path := upstreamPath(in)
-	// 剪除 base 尾段与 path 首段重复造成的 /v1/v1（管理员最常见误配，
-	// 见 dedupeUpstreamVersionSegment 的说明）。
-	base = dedupeUpstreamVersionSegment(base, path)
+	// URL 的拼接与版本段去重统一交给 joinUpstreamURL（见其说明）：
+	// 管理员把 base_url 填成带版本段的地址（api.openai.com/v1、智谱 /api/paas/v4）时，
+	// 不能与端点常量自带的 /v1 前缀叠加成 /v1/v1/...（上游一律 404）。
 	query := url.Values{}
 	applyUpstreamQuery(in, query)
 
@@ -320,7 +321,7 @@ func buildUpstreamRequest(in upstreamRequestInput) (*UpstreamRequest, error) {
 	}
 
 	rawQuery := query.Encode()
-	req.URL = base + path
+	req.URL = joinUpstreamURL(base, path)
 	if rawQuery != "" {
 		req.URL += "?" + rawQuery
 	}
@@ -361,52 +362,33 @@ func resolveUpstreamBaseURL(in upstreamRequestInput) (string, error) {
 	return strings.TrimRight(base, "/"), nil
 }
 
-// dedupeUpstreamVersionSegment 剪除 base 末尾与 path 首段重复的路径段，返回净化后的 base。
+// versionSegmentPattern 匹配形如 v1、v4、v1beta 的"版本段"路径组件。
+var versionSegmentPattern = regexp.MustCompile(`^v\d+[a-z0-9]*$`)
+
+// joinUpstreamURL 拼接上游基础地址与端点路径，必要时去掉路径里的 /v1 版本段。
 //
 // 为什么需要它：本项目约定 base_url 只填到域名根、版本前缀由端点路径常量自带
-// （如 oai.ChatCompletionsPath = "/v1/chat/completions"）。但管理员配置时最常见
-// 的错误就是照抄官方文档把版本前缀带上（如 https://api.openai.com/v1），两者叠加
-// 会拼出 /v1/v1/chat/completions，上游一律 404 且从报错看不出原因（历史上踩过：
-// 见 models.go 中 modelsPath 的说明，以及 Anthropic 默认地址与 /messages 的组合）。
+// （如 oai.ChatCompletionsPath = "/v1/chat/completions"）。但渠道目录里大量
+// OpenAI 兼容类型的默认地址自带版本段（api.openai.com/v1、智谱的 /api/paas/v4、
+// 百炼的 compatible-mode/v1），直接拼接会得到 /v1/v1/chat/completions 这类
+// 重复地址——上游一律 404 且从报错看不出原因。
 //
-// 剪除规则：base 的最后一个路径段与 path 的第一个路径段完全相同（如都是 v1、
-// v1beta 或 openai）时，把 base 的该段剪掉。对 Anthropic 这类"版本段本来就在
-// base 里"的协议天然安全——其路径首段是 messages，与 base 尾段 v1 不同，不会误剪。
-func dedupeUpstreamVersionSegment(base, path string) string {
-	base = strings.TrimRight(strings.TrimSpace(base), "/")
-	rest := strings.TrimPrefix(path, "/")
-	if base == "" || rest == "" {
-		return base
+// 剪除规则：base 以"版本段"（v1/v4/v1beta 等）结尾且 path 以 /v1/ 开头时，
+// 去掉 path 的 /v1 前缀——base 的版本段视为管理员显式指定的版本。
+// 只要求"路径以 /v1/ 开头"而不要求两段相同，因此智谱 /api/paas/v4 + /v1/...
+// 这类"版本段不是 v1"的上游也能正确去重（这是与旧 dedupe 实现的关键差异）。
+// Anthropic 的 /messages、Gemini 的 /v1beta/...、Azure 的部署路径均不受影响；
+// "https://v1.example.com"（主机名恰为 v1）也天然安全——尾段带点号，不匹配
+// 纯版本段正则。
+func joinUpstreamURL(base, path string) string {
+	if !strings.HasPrefix(path, "/v1/") {
+		return base + path
 	}
-
-	// 用标准库解析而非字符串切分：只有这样才能可靠区分 host 与路径段，
-	// 避免把 "https://v1"（主机名恰为 v1）或 "https://v1.example.com" 误剪。
-	u, err := url.Parse(base)
-	if err != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
-		// 解析不了或形态异常：原样返回，宁可保持现状也不冒险改写。
-		return base
+	idx := strings.LastIndex(base, "/")
+	if idx < 0 || !versionSegmentPattern.MatchString(base[idx+1:]) {
+		return base + path
 	}
-	segs := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(segs) == 0 || segs[0] == "" {
-		// base 只有 host（无路径段可剪）
-		return base
-	}
-	last := segs[len(segs)-1]
-	first := rest
-	if idx := strings.Index(first, "/"); idx >= 0 {
-		first = first[:idx]
-	}
-	if last == "" || last != first {
-		return base
-	}
-
-	// 剪掉 base 的最后一个路径段，保留 scheme://host 与其余路径。
-	trimmedPath := strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/"+last)
-	result := u.Scheme + "://" + u.Host
-	if trimmedPath != "" && trimmedPath != "/" {
-		result += trimmedPath
-	}
-	return result
+	return base + path[len("/v1"):]
 }
 
 // upstreamPath 返回上游端点路径：按协议改写调用方给出的 OpenAI 路径。

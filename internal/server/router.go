@@ -228,6 +228,9 @@ func (s *Server) registerRoutes() {
 	admin.PUT("/channels/:id", s.handleUpdateChannel)
 	admin.DELETE("/channels/:id", s.handleDeleteChannel)
 	admin.POST("/channels/:id/test", s.handleTestChannel)
+	// 模型测速：逐模型测首字延迟（TTFB），结果落库并供广场展示。
+	// 与 /test（测活）的分工：测活回答"渠道通不通"，测速回答"每个模型各有多快"。
+	admin.POST("/channels/:id/speedtest", s.handleSpeedTestChannel)
 	// 密钥池明细与单把密钥的状态/调度参数管理
 	admin.GET("/channels/:id/keys", s.handleListChannelKeys)
 	admin.PUT("/keys/:keyId", s.handleUpdateChannelKeyStatus)

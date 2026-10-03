@@ -39,6 +39,7 @@ import { ChannelCostModal } from '@/components/admin/ChannelCostModal'
 import { ChannelHealthPanel } from '@/components/admin/ChannelHealthPanel'
 import { ChannelKeyPool } from '@/components/admin/ChannelKeyPool'
 import { ChannelModelMappings } from '@/components/admin/ChannelModelMappings'
+import { SpeedTestModal } from '@/components/admin/SpeedTestModal'
 import { Badge, Card, EmptyState, Tabs } from '@/components/ui/Display'
 import { DataTable, Pagination, type Column } from '@/components/ui/Table'
 import { Button } from '@/components/ui/Button'
@@ -64,8 +65,11 @@ export default function AdminChannelsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Channel | null>(null)
   const [testResult, setTestResult] = useState<ChannelTestResult | null>(null)
   const [testing, setTesting] = useState(false)
-  // 「上游进价」编辑弹层的目标渠道：/admin/finance 对账页的成本数据全靠它录入
+// 「上游进价」编辑弹层的目标渠道：/admin/finance 对账页的成本数据全靠它录入
   const [costTarget, setCostTarget] = useState<Channel | null>(null)
+  // 模型测速弹层的目标渠道（null = 关闭）：与测活分开，两者口径不同
+  //（测活=通不通；测速=每个模型各有多快）。
+  const [speedTarget, setSpeedTarget] = useState<Channel | null>(null)
 
   const { toast, toastError } = useToast()
 
@@ -166,6 +170,7 @@ export default function AdminChannelsPage() {
       align: 'right',
       render: (row) => (
         <span className="flex items-center justify-end gap-2 text-[13px]">
+          <button type="button" onClick={() => setSpeedTarget(row)} className="text-ink-3 hover:text-brand" disabled={row.models.length === 0}>测速</button>
           <button type="button" onClick={() => handleTest(row)} className="text-ink-3 hover:text-brand" disabled={testing}>测活</button>
           <button type="button" onClick={() => setCostTarget(row)} className="text-ink-3 hover:text-brand">进价</button>
           <button type="button" onClick={() => setEditing(row)} className="text-ink-3 hover:text-brand">编辑</button>
@@ -214,6 +219,19 @@ export default function AdminChannelsPage() {
           </div>
         )}
       </Modal>
+
+      {/* 模型测速弹层：逐模型测首字延迟。关闭时刷新列表——
+          自动屏蔽（403/404）可能改了渠道的模型清单，需要反映到表格。 */}
+      <SpeedTestModal
+        open={speedTarget !== null}
+        channelId={speedTarget?.id ?? null}
+        channelName={speedTarget?.name}
+        models={speedTarget?.models ?? []}
+        onClose={() => {
+          setSpeedTarget(null)
+          void load()
+        }}
+      />
 
       <ChannelFormModal
         open={editing !== null}
@@ -281,7 +299,7 @@ function ChannelFormModal({
   const [keyStrategy, setKeyStrategy] = useState('')
   const [failurePolicy, setFailurePolicy] = useState('')
   const [loading, setLoading] = useState(false)
-  // 「从上游拉取模型」结果与进行中标记：拉取回来的清单可直接填入模型列表
+// 「从上游拉取模型」结果与进行中标记：拉取回来的清单先预览，确认后才填入模型列表
   const [fetchingModels, setFetchingModels] = useState(false)
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null)
 
@@ -308,22 +326,30 @@ function ChannelFormModal({
 
   const selectedType = types.find((t) => t.key === typeKey) ?? types[0]
 
-  /** 向上游拉取可用模型清单：模型名（如 meta/llama-3.1-70b-instruct）手抄必错一个字符整条路由就失效。 */
+/** 向上游拉取可用模型清单：模型名（如 meta/llama-3.1-70b-instruct）手抄必错一个字符整条路由就失效。
+   *
+   * 凭据策略（与后端 handleFetchModels 的两种模式对齐）：
+   *   - 编辑态 + 未填新密钥 + 地址未改 → 传 channel_id，后端用库中地址与
+   *     密钥（含密钥池兜底）拉取——这正是"渠道已配好，同步一下清单"的场景；
+   *   - 其余情况（新建、或表单里改了地址/密钥）→ 传表单当前值，
+   *     拉到的一定是"即将保存的这套配置"的真实清单。
+   */
   async function handleFetchModels() {
-    // 编辑已有渠道时用库中地址与密钥（后端语义：以库中数据为准，避免半修改的表单值拉回与实际配置不一致的清单）；
-    // 新建时用表单里刚填的地址与密钥（还没保存，谈不上"用已存渠道"）
-    if (!channel && !baseUrl.trim()) {
+    const url = baseUrl.trim()
+    const key = apiKey.trim()
+    const useSaved = channel != null && !key && url === channel.base_url
+    if (!useSaved && !url) {
       toastError('请先填写上游地址')
       return
     }
     setFetchingModels(true)
     try {
-      const payload: FetchModelsPayload = channel
+      const payload: FetchModelsPayload = useSaved && channel
         ? { channel_id: channel.id }
-        : { base_url: baseUrl.trim(), api_key: apiKey.trim() }
+        : { base_url: url, api_key: key || undefined }
       const data = await fetchUpstreamModels(payload)
       setFetchedModels(data.models ?? [])
-      toast(`拉取到 ${data.count} 个模型`)
+      toast(`拉取到 ${data.count} 个模型，确认后点「填入模型列表」`)
     } catch (err) {
       toastError(err instanceof Error ? err.message : '拉取失败')
     } finally {
@@ -340,7 +366,6 @@ function ChannelFormModal({
     setModelsText([...existing, ...added].join('\n'))
     toast(`已填入：新增 ${added.length} 个，当前共 ${existing.length + added.length} 个`)
   }
-
   async function handleSubmit() {
     if (!name.trim()) {
       toastError('请填写渠道名称')
@@ -456,6 +481,20 @@ function ChannelFormModal({
         </Field>
 
         <Field label="模型列表" help="每行一个；留空表示支持全部模型">
+          {/* 一键从上游拉取：省去逐个手敲模型名（长名字极易敲错导致路由失效）。
+              合并而非覆盖——已填写的条目可能是管理员刻意收敛过的子集。 */}
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-xs text-ink-3">支持从上游自动拉取清单，结果合并到下方</span>
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={fetchingModels}
+              onClick={handleFetchModels}
+              disabled={!fetchingModels && !baseUrl.trim() && channel == null}
+            >
+              从上游获取
+            </Button>
+          </div>
           <Textarea value={modelsText} onChange={(e) => setModelsText(e.target.value)} rows={5} placeholder="gpt-4o\nclaude-3-5-sonnet" />
         </Field>
 

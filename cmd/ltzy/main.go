@@ -420,6 +420,10 @@ func run() error {
 	// 订阅账号令牌刷新器：让 OAuth 凭据在 access_token 过期前自动续期
 	oauthRefresher := relay.NewOAuthRefresher(oauthProviders, channelKeys)
 
+	// 模型测速结果仓储：测速落库、广场延迟展示、auto 路由共用同一实例，
+	// 保证"广场显示的延迟"与"auto 选出的延迟"来自同一份数据。
+	modelSpeeds := store.NewModelSpeedRepository(st.DB())
+
 	relayEngine := relay.New(channels, relay.Options{
 		// 默认路由分组：令牌未指定分组时落到这里。
 		// 由配置注入（AQUA_RELAY_GROUP，默认 default）——站点把渠道迁到自有分组后，
@@ -439,6 +443,8 @@ func run() error {
 		// 语料共建：判定组件 + 样本仓储（同时非 nil 才启用原文采集）
 		Corpus:        corpusGuard,
 		CorpusSamples: corpusRepo,
+		// auto 路由：模型名填 auto 时按延迟选可对话模型（需要测速数据）
+		ModelSpeeds: modelSpeeds,
 	})
 
 	// 语料共建快照的后台刷新：启动加载一次，之后每 30 秒刷新。
@@ -479,6 +485,8 @@ func run() error {
 		SensitiveWords: sensitiveWords,
 		// 上游进价：按密钥核算消耗、计算余额剩余与毛利
 		ChannelModelCosts: channelModelCosts,
+		// 模型测速：渠道 × 模型的最新延迟快照（管理端测速落库、广场展示）
+		ModelSpeeds: modelSpeeds,
 		// 订阅账号：OAuth 提供方配置（后台维护）
 		OAuthProviders: oauthProviders,
 		// 异步任务：仓储（查询）+ 编排服务（提交/轮询/取消）

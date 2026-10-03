@@ -769,6 +769,41 @@ export interface ChannelTestResult {
   pool_exhausted?: number
 }
 
+/** POST /api/admin/channels/{id}/speedtest 的单个模型结果 */
+export interface SpeedTestItem {
+  model: string
+  /** 实际发给上游的模型名（可能被渠道级映射改写） */
+  upstream_model?: string
+  ok: boolean
+  status_code: number
+  /** 首字延迟（毫秒）——测速主指标；失败时为 0 */
+  ttfb_ms: number
+  total_ms: number
+  message?: string
+  /** 该模型因无权限（403/404）被自动从渠道清单移除 */
+  blocked?: boolean
+}
+
+/** POST /api/admin/channels/{id}/speedtest 响应 */
+export interface SpeedTestRunResult {
+  items: SpeedTestItem[]
+  tested: number
+  ok_count: number
+  elapsed_ms: number
+  /** 整批级失败说明（如凭据不可用）；为空表示逐模型结果可信 */
+  message?: string
+  /** 本次被自动屏蔽（无权限 403/404）并从渠道清单移除的模型 */
+  blocked_models?: string[]
+  key_masked?: string
+  key_source?: string
+  pool_total?: number
+  pool_available?: number
+  pool_cooling?: number
+  pool_disabled?: number
+  pool_removed?: number
+  pool_exhausted?: number
+}
+
 /* ────────────────────────── 上游渠道类型目录 ────────────────────────── */
 
 /**
@@ -982,6 +1017,8 @@ export interface SiteSettings {
   seo: SeoSettings
   /** 内容安全（合规过滤）配置 */
   safeguard: SafeguardSettings
+  /** 模型测速配置 */
+  speedtest: SpeedTestSettings
   /**
    * 合规信息（对用户公示）：经营主体、备案号与客服邮箱。
    *
@@ -1014,6 +1051,20 @@ export interface SafeguardSettings {
   sensitive_filter_enabled: boolean
 }
 
+/** 模型测速配置 */
+export interface SpeedTestSettings {
+  /** 测速总开关：关闭时管理端测速接口拒绝、广场不下发延迟 */
+  enabled: boolean
+  /** 是否在模型广场向用户展示测得的延迟 */
+  public: boolean
+  /** 单个模型一次测速的超时（秒），后端限定 5~120 */
+  timeout_seconds: number
+  /** 单次测速请求允许测的模型数上限，后端限定 1~500 */
+  max_models: number
+  /** 测速后自动屏蔽无权限模型（上游明确回 403/404 的从渠道清单移除） */
+  auto_block: boolean
+}
+
 /**
  * PUT /api/admin/settings 的 seo 字段：只包含可写项。
  *
@@ -1044,6 +1095,7 @@ export type UpdateSiteSettingsPayload = Partial<{
   payment: PaymentSettings
   seo: UpdateSeoSettingsPayload
   safeguard: Partial<SafeguardSettings>
+  speedtest: Partial<SpeedTestSettings>
   /**
    * 合规信息：允许提交空串以清空某一项（如备案号填错要删掉），
    * 未提交的字段由后端保持原值。
@@ -1366,6 +1418,14 @@ export interface PlazaModel {
    * 普通用户视图不下发该字段。
    */
   list_price?: PlazaPrice
+  /**
+   * 最近一次测速的最小首字延迟（毫秒）。后台「模型测速」的产物，
+   * 每次测速对上游消耗约 2~3 token，因此是低频快照而非实时数据。
+   * 未测过或站长关闭公示时整个字段不下发（前端不渲染延迟列）。
+   */
+  speed_ttfb_ms?: number
+  /** 该延迟的测速时间（Unix 秒），让用户知道数字有多新鲜 */
+  speed_tested_at?: number
 }
 
 /** 模型广场的分组视图 */

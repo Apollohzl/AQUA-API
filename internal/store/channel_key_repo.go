@@ -119,6 +119,11 @@ func (r *channelKeyRepository) ReplaceCredentials(ctx context.Context, channelID
 	}
 
 	desired := make(map[string]model.CredentialInput, len(inputs))
+	// order 钉住「输入顺序」：插入顺序决定自增 ID，也就是池在后台展示与
+	// 轮询调度的次序。若直接遍历 desired（map），同一批输入每次落库的
+	// 顺序都不同——"先贴的钥匙排前面"的直觉失效，依赖池序的调用方
+	//（含凭据路由测试）会随机拿到另一把钥匙。
+	order := make([]string, 0, len(inputs))
 	touchedKinds := make(map[model.CredentialKind]struct{}, 2)
 	for _, input := range inputs {
 		if err := input.Validate(); err != nil {
@@ -130,6 +135,7 @@ func (r *channelKeyRepository) ReplaceCredentials(ctx context.Context, channelID
 			continue
 		}
 		desired[hash] = input
+		order = append(order, hash)
 	}
 
 	existing, err := r.listHashByKind(ctx, channelID)
@@ -163,7 +169,8 @@ func (r *channelKeyRepository) ReplaceCredentials(ctx context.Context, channelID
 	// 2) 新增目标集合中缺失的凭据；已存在的凭据保留状态与统计（并保护已录余额）
 	now := time.Now().Unix()
 	added := 0
-	for hash, input := range desired {
+	for _, hash := range order {
+		input := desired[hash]
 		if _, ok := existing[input.Kind][hash]; ok {
 			// 已存在：保留其状态与失败统计，不重置。
 			//
