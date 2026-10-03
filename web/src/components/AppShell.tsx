@@ -25,6 +25,8 @@ export interface ShellNavItem {
   icon: IconName
   /** 精确匹配时高亮（默认前缀匹配） */
   exact?: boolean
+  /** 子导航项（如「游乐场」下的功能入口），渲染为缩进子项 */
+  children?: ShellNavItem[]
 }
 
 export interface ShellNavGroup {
@@ -37,6 +39,62 @@ interface AppShellProps {
   /** 外壳品牌名 */
   brand: string
   children: React.ReactNode
+}
+
+/** 导航项列表：渲染单层项；项含 children 时缩进渲染为子项（PC / 移动共用）。
+ *
+ * onNavigate：移动端点击后关闭抽屉；桌面端不传。
+ */
+function NavItemList({
+  items,
+  isActive,
+  onNavigate,
+}: {
+  items: ShellNavItem[]
+  isActive: (item: ShellNavItem) => boolean
+  onNavigate?: () => void
+}) {
+  return (
+    <div className="space-y-0.5">
+      {items.map((item) => {
+        const active = isActive(item)
+        return (
+          <div key={item.href}>
+            <Link
+              href={item.href}
+              onClick={onNavigate}
+              className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] transition ${
+                active ? 'bg-brand/8 font-medium text-brand' : 'text-ink-2 hover:bg-ink/5 hover:text-ink'
+              }`}
+            >
+              <AppIcon name={item.icon} size={17} className={active ? 'text-brand' : 'text-ink-3'} />
+              {item.label}
+            </Link>
+            {item.children && item.children.length > 0 && (
+              <div className="ml-3.5 mt-0.5 space-y-0.5 border-l border-line pl-2.5">
+                {item.children.map((child) => {
+                  const cActive = isActive(child)
+                  return (
+                    <Link
+                      key={child.href}
+                      href={child.href}
+                      onClick={onNavigate}
+                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition ${
+                        cActive ? 'bg-brand/8 font-medium text-brand' : 'text-ink-2 hover:bg-ink/5 hover:text-ink'
+                      }`}
+                    >
+                      <AppIcon name={child.icon} size={15} className={cActive ? 'text-brand' : 'text-ink-3'} />
+                      {child.label}
+                    </Link>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export function AppShell({ groups, brand, children }: AppShellProps) {
@@ -68,23 +126,7 @@ export function AppShell({ groups, brand, children }: AppShellProps) {
               {group.title && (
                 <div className="px-2 pb-1.5 text-xs font-medium tracking-wider text-ink-3">{group.title}</div>
               )}
-              <div className="space-y-0.5">
-                {group.items.map((item) => {
-                  const active = isActive(item)
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] transition ${
-                        active ? 'bg-brand/8 font-medium text-brand' : 'text-ink-2 hover:bg-ink/5 hover:text-ink'
-                      }`}
-                    >
-                      <AppIcon name={item.icon} size={17} className={active ? 'text-brand' : 'text-ink-3'} />
-                      {item.label}
-                    </Link>
-                  )
-                })}
-              </div>
+              <NavItemList items={group.items} isActive={isActive} />
             </div>
           ))}
         </nav>
@@ -105,19 +147,7 @@ export function AppShell({ groups, brand, children }: AppShellProps) {
               {groups.map((group, gi) => (
                 <div key={gi}>
                   {group.title && <div className="px-2 pb-1.5 text-xs font-medium text-ink-3">{group.title}</div>}
-                  {group.items.map((item) => (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={() => setSidebarOpen(false)}
-                      className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] ${
-                        isActive(item) ? 'bg-brand/8 font-medium text-brand' : 'text-ink-2 hover:bg-ink/5'
-                      }`}
-                    >
-                      <AppIcon name={item.icon} size={17} />
-                      {item.label}
-                    </Link>
-                  ))}
+                  <NavItemList items={group.items} isActive={isActive} onNavigate={() => setSidebarOpen(false)} />
                 </div>
               ))}
             </nav>
