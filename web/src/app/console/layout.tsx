@@ -26,7 +26,12 @@ const GROUPS: ShellNavGroup[] = [
     items: [
       { label: '访问令牌', href: '/console/tokens', icon: 'key' },
       { label: '接入示例', href: '/console/docs', icon: 'book' },
-      { label: '游乐场', href: '/console/playground', icon: 'play' },
+      {
+        label: '游乐场',
+        href: '/console/playground',
+        icon: 'play',
+        children: [{ label: '任意门', href: '/console/playground/anydoor', icon: 'door' }],
+      },
     ],
   },
   {
