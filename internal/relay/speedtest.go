@@ -41,8 +41,8 @@ import (
 	"net/http"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
-	"gitee.com/xiaosu4610/aqua-api/internal/oai"
+	"github.com/LTZY-ACU/ltzy-api/internal/model"
+	"github.com/LTZY-ACU/ltzy-api/internal/oai"
 )
 
 // speedProbeMaxBodyBytes 是测速时最多读取的响应体字节数。

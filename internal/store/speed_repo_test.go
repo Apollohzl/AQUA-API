@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/LTZY-ACU/ltzy-api/internal/model"
 )
 
 // TestModelSpeed_UpsertKeepsLatest 验证 UPSERT 语义：同一 (渠道, 模型)

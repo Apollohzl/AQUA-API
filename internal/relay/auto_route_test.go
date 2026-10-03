@@ -28,7 +28,7 @@ import (
 	"sync"
 	"testing"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/LTZY-ACU/ltzy-api/internal/model"
 )
 
 // stubSpeeds 是 model.ModelSpeedRepository 的内存实现，仅供测试注入。

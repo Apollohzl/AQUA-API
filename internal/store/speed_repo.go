@@ -26,7 +26,7 @@ import (
 	"fmt"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/LTZY-ACU/ltzy-api/internal/model"
 )
 
 // modelSpeedColumns 集中定义查询列，顺序必须与 scanModelSpeed 的扫描顺序严格一致。

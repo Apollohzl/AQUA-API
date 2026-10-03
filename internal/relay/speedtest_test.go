@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
+	"github.com/LTZY-ACU/ltzy-api/internal/model"
 )
 
 // TestProbeChannelLatency_Success 验证成功路径：TTFB 被记录、请求体最小化、

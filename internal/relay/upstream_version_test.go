@@ -16,8 +16,8 @@ package relay
 import (
 	"testing"
 
-	"gitee.com/xiaosu4610/aqua-api/internal/model"
-	"gitee.com/xiaosu4610/aqua-api/internal/oai"
+	"github.com/LTZY-ACU/ltzy-api/internal/model"
+	"github.com/LTZY-ACU/ltzy-api/internal/oai"
 )
 
 // TestJoinUpstreamURL 覆盖版本段去重的判定表：何时去重、何时保持原样。
