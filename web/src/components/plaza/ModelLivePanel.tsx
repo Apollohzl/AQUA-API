@@ -7,7 +7,7 @@
  *     2) 这个模型通不通（真实 agent 调用链路：发起 → 鉴权 → 流式返回）。
  *
  * 数据流：
- *   - 实时指标：GET /api/user/models/{model}/stats（5 秒轮询，近 15 分钟窗口）；
+ *   - 实时指标：GET /api/user/models/stats?model=...（5 秒轮询，近 15 分钟窗口）；
  *   - 连通性测试：前端直接调用 /v1/chat/completions（stream=true），
  *     与 Playground 完全同路径——请求发起、Bearer 鉴权、SSE 流式读取，
  *     读到首个 data 块即断开，返回 connected + ttfb_ms。

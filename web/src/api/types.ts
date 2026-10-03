@@ -324,7 +324,7 @@ export interface LeaderboardStats {
 
 /* ── 模型实时指标与连通性测试（模型详情页）────────────────── */
 
-/** GET /api/user/models/{model}/stats?minutes=15 响应 */
+/** GET /api/user/models/stats?model=...&minutes=15 响应 */
 export interface ModelStats {
   model: string
   /** 是否至少有一个启用渠道支持该模型（false = 离线） */

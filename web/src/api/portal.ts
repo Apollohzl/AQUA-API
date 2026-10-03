@@ -93,13 +93,16 @@ export function fetchLeaderboard(days = 30, all = false): Promise<LeaderboardSta
 }
 
 /**
- * GET /api/user/models/{model}/stats：模型实时指标（tokens/s、平均耗时、TTFB）。
+ * GET /api/user/models/stats?model=...：模型实时指标（tokens/s、平均耗时、TTFB）。
  *
  * 供模型详情页的「实时 tokens/s」展示：5 秒轮询一次，
  * 窗口默认近 15 分钟，可传 minutes 调整。
+ *
+ * 模型名走查询参数而不是路径段：本项目对外模型名普遍带斜杠
+ * （如 LTZY-CALL/deepseek-v4.1-flash），放进路径会被后端路由拆成多段而 404。
  */
 export function fetchModelStats(model: string, minutes = 15): Promise<ModelStats> {
-  return api.get<ModelStats>(`/user/models/${encodeURIComponent(model)}/stats`, { minutes })
+  return api.get<ModelStats>('/user/models/stats', { model, minutes })
 }
 
 /** GET /api/user/logs：我的调用日志（分页 + 筛选） */

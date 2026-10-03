@@ -69,7 +69,7 @@ func (s *Server) handleModelStats(c *gin.Context) {
 	}
 	_ = user // 本接口限登录用户调用（会话中间件已保障）
 
-	modelName := strings.TrimSpace(c.Param("model"))
+	modelName := strings.TrimSpace(c.Query("model"))
 	if modelName == "" {
 		oai.WriteError(c.Writer, http.StatusBadRequest,
 			"缺少模型名", oai.TypeInvalidRequest, "invalid_model")

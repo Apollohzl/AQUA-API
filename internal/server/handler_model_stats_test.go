@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -42,7 +43,7 @@ func TestModelStats_AggregatesOnlySuccess(t *testing.T) {
 
 	srv := newModelStatsServer(t, st)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/user/models/gpt-4o/stats?minutes=30", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/user/models/stats?model=gpt-4o&minutes=30", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -72,7 +73,7 @@ func TestModelStats_OfflineModel(t *testing.T) {
 	st := openTestModelStatsStore(t)
 	srv := newModelStatsServer(t, st)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/user/models/nonexistent/stats", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/user/models/stats?model=nonexistent", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -88,6 +89,38 @@ func TestModelStats_OfflineModel(t *testing.T) {
 	}
 	if dto.ChannelCount != 0 {
 		t.Errorf("channel_count = %d，期望 0", dto.ChannelCount)
+	}
+}
+
+// TestModelStats_模型名带斜杠也能查询 是回归测试：本项目对外模型名普遍带斜杠
+// （如 LTZY-CALL/deepseek-v4.1-flash），早期把它放进路径段（/models/:model/stats）
+// 会被 gin 的路由树拆成多段而 404 —— 本用例钉住"模型名走查询参数"这一约定，
+// 防止后人再改回路径参数。
+func TestModelStats_模型名带斜杠也能查询(t *testing.T) {
+	st := openTestModelStatsStore(t)
+	repo := store.NewUsageLogRepository(st.DB(), st.Dialect())
+	now := time.Now()
+
+	const slashed = "LTZY-CALL/deepseek-v4.1-flash"
+	createStatsLog(t, repo, slashed, 200, 42, 80, now.Add(-time.Minute))
+
+	srv := newModelStatsServer(t, st)
+
+	// 走查询参数（注意 model 值里含斜杠，模拟真实模型名）
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/user/models/stats?model="+url.QueryEscape(slashed), nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("带斜杠的模型名应能查询（状态码 = %d，期望 200）；body=%s", rec.Code, rec.Body.String())
+	}
+	var dto modelStatsDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &dto); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if dto.Requests != 1 {
+		t.Errorf("requests = %d，期望 1（该模型名的成功请求）", dto.Requests)
 	}
 }
 
@@ -126,7 +159,7 @@ func newModelStatsServer(t *testing.T, st *store.Store) http.Handler {
 			Channels:  store.NewChannelRepository(st.DB(), cipher),
 		},
 	}
-	engine.GET("/api/user/models/:model/stats",
+	engine.GET("/api/user/models/stats",
 		func(c *gin.Context) {
 			// 注入登录用户（模拟 SessionAuth 成功后的上下文，绕过中间件）
 			c.Set("aqua.context.user", &model.User{

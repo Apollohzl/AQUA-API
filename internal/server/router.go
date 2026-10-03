@@ -169,8 +169,12 @@ func (s *Server) registerRoutes() {
 	portal.GET("/logs", s.handleMyLogs)
 	// 用量排行榜（付费榜 / 免费榜）：登录可见；管理员带 ?all=1 可看完整榜
 	portal.GET("/leaderboard", s.handleLeaderboard)
-	// 模型实时指标（tokens/s / 平均耗时 / TTFB）：模型详情页使用
-	portal.GET("/models/:model/stats", s.handleModelStats)
+	// 模型实时指标（tokens/s / 平均耗时 / TTFB）：模型详情页使用。
+	//
+	// 模型名走查询参数而不是路径段：本项目对外模型名普遍带斜杠
+	// （如 LTZY-CALL/deepseek-v4.1-flash），放进路径会被 gin 拆成多段而 404
+	// （与 /admin/corpus/models/delete 等接口同一处理，见上方 corpus 段注释）。
+	portal.GET("/models/stats", s.handleModelStats)
 	// 异步任务（用户只能看自己的）
 	portal.GET("/tasks", s.handleMyListTasks)
 
