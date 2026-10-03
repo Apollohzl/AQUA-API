@@ -11,8 +11,10 @@
 # ---------- 1. 前端构建 ----------
 FROM node:20-alpine AS web
 WORKDIR /src/web
-# 先只拷贝依赖清单：依赖不变时可复用缓存层，改代码不会重装依赖
-COPY web/package.json web/package-lock.json ./
+# 先只拷贝依赖清单与构建脚本：依赖不变时可复用缓存层，改代码不会重装依赖。
+# 注意：scripts/ 必须一并拷贝，否则 npm ci 的 postinstall（node scripts/ensure-dist.mjs）
+# 在「COPY web/ ./」之前运行时找不到脚本而失败（requireStack: []）。
+COPY web/package.json web/package-lock.json web/scripts/ ./
 RUN npm ci
 COPY web/ ./
 RUN npm run build
