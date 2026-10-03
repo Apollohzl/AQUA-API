@@ -27,7 +27,7 @@ import type { Paged } from './types'
 
 /** 语料清单项（GET /api/admin/corpus/models 的 items 元素） */
 export interface CorpusModel {
-  /** 模型名（主键，含斜杠如 AQUA-CALL/deepseek-v4.1-flash，因此删除走请求体而非路径参数） */
+  /** 模型名（主键，含斜杠如 LTZY-CALL/deepseek-v4.1-flash，因此删除走请求体而非路径参数） */
   model: string
   /** 是否正在采集该模型的对话 */
   enabled: boolean

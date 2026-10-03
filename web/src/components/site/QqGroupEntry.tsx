@@ -63,7 +63,7 @@ export function QqGroupEntry({ variant = 'inline', className }: QqGroupEntryProp
           <AppIcon name="qq" size={16} />
         </span>
         <div className="min-w-0">
-          <div className="text-[14px] font-semibold text-ink">AQUA 开源社区</div>
+          <div className="text-[14px] font-semibold text-ink">LTZY 开源社区</div>
           <div className="mt-0.5 text-[12px] text-ink-3">有问题进群聊，一起反馈、吹牛、出主意</div>
         </div>
       </div>

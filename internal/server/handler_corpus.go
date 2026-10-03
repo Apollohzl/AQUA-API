@@ -124,7 +124,7 @@ type corpusGrantRequest struct {
 // corpusDeleteRequest 是"按名字删除"的请求体。
 //
 // 为什么不用 DELETE /xxx/:name 这种路径参数：模型名里带斜杠
-// （如 AQUA-CALL/deepseek-v4.1-flash），放进路径会被路由拆成多段。
+// （如 LTZY-CALL/deepseek-v4.1-flash），放进路径会被路由拆成多段。
 // 用请求体传名字既避免歧义，也不用做二次转义。
 type corpusDeleteRequest struct {
 	Model  string `json:"model"`

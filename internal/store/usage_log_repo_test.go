@@ -314,7 +314,7 @@ func TestUsageLog_PriceVersionRoundTrip(t *testing.T) {
 	}
 
 	entry := &model.UsageLog{
-		Model:        "AQUA-CALL/glm-5.3",
+		Model:        "LTZY-CALL/glm-5.3",
 		StatusCode:   200,
 		PriceVersion: want,
 		CreatedAt:    time.Now(),

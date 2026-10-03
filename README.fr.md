@@ -121,7 +121,7 @@ flowchart LR
         C4["Applications maison / scripts / plugins"]
     end
 
-    AQUA["LTZY-API<br/>Protocole unifié · ordonnancement intelligent · facturation précise<br/>Groupes · pool de clés · console d'exploitation"]
+    LTZY["LTZY-API<br/>Protocole unifié · ordonnancement intelligent · facturation précise<br/>Groupes · pool de clés · console d'exploitation"]
 
     subgraph U["Services en amont"]
         U1["OpenAI / Azure"]
@@ -131,15 +131,15 @@ flowchart LR
         U5["Ollama / vLLM locaux"]
     end
 
-    C1 --> AQUA
-    C2 --> AQUA
-    C3 --> AQUA
-    C4 --> AQUA
-    AQUA --> U1
-    AQUA --> U2
-    AQUA --> U3
-    AQUA --> U4
-    AQUA --> U5
+    C1 --> LTZY
+    C2 --> LTZY
+    C3 --> LTZY
+    C4 --> LTZY
+    LTZY --> U1
+    LTZY --> U2
+    LTZY --> U3
+    LTZY --> U4
+    LTZY --> U5
 ```
 
 Les problèmes résolus par LTZY-API se résument à trois mots : **unification** (protocole et point d'entrée), **fiabilité** (évitement automatique des pannes) et **traçabilité comptable** (chaque centime justifiable).

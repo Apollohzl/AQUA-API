@@ -25,7 +25,7 @@ func testSender() *Sender {
 		Port:     465,
 		Username: "user@example.com",
 		From:     "user@example.com",
-		FromName: "AQUA 网关",
+		FromName: "LTZY 网关",
 		Password: "not-a-real-password",
 	})
 }
@@ -72,7 +72,7 @@ func TestConfigured_缺口令_应判为未配置(t *testing.T) {
 }
 
 func TestBuildMessage_中文主题与HTML正文_应可正确解码(t *testing.T) {
-	subject, body := RegisterCodeEmail("AQUA 网关", "482913", 5*time.Minute)
+	subject, body := RegisterCodeEmail("LTZY 网关", "482913", 5*time.Minute)
 
 	raw := buildMessage(testSender().snapshot(), "user@example.com", subject, body)
 

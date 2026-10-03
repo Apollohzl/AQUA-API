@@ -27,7 +27,7 @@ func newTestBroadcastRepo(t *testing.T) model.EmailBroadcastRepository {
 func newTestBroadcast() *model.EmailBroadcast {
 	return &model.EmailBroadcast{
 		Template: "billing_line",
-		Subject:  "【AQUA-API】测试通知",
+		Subject:  "【LTZY-API】测试通知",
 		BodyHTML: "<p>正文</p>",
 		Status:   model.BroadcastStatusPending,
 	}

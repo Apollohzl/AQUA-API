@@ -120,7 +120,7 @@ flowchart LR
         C4["In-house apps / scripts / plugins"]
     end
 
-    AQUA["LTZY-API<br/>Unified protocol · smart scheduling · precise billing<br/>Groups · credential pools · admin console"]
+    LTZY["LTZY-API<br/>Unified protocol · smart scheduling · precise billing<br/>Groups · credential pools · admin console"]
 
     subgraph U["Upstream Services"]
         U1["OpenAI / Azure"]
@@ -130,15 +130,15 @@ flowchart LR
         U5["Local Ollama / vLLM"]
     end
 
-    C1 --> AQUA
-    C2 --> AQUA
-    C3 --> AQUA
-    C4 --> AQUA
-    AQUA --> U1
-    AQUA --> U2
-    AQUA --> U3
-    AQUA --> U4
-    AQUA --> U5
+    C1 --> LTZY
+    C2 --> LTZY
+    C3 --> LTZY
+    C4 --> LTZY
+    LTZY --> U1
+    LTZY --> U2
+    LTZY --> U3
+    LTZY --> U4
+    LTZY --> U5
 ```
 
 The core problems it solves come down to three words: **unified** (protocol and entry point), **reliable** (automatic failure avoidance), and **accountable** (every cent is traceable).

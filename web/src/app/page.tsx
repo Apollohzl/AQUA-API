@@ -55,7 +55,7 @@ function SectionHead({ index, title, desc, anchorId }: { index: string; title: s
 function Hero() {
   const { status } = useSite()
   const { isLoggedIn } = useAuth()
-  const sampleModel = status?.models?.[0] || 'AQUA-CALL/deepseek-v4-flash'
+  const sampleModel = status?.models?.[0] || 'LTZY-CALL/deepseek-v4-flash'
 
   const [origin, setOrigin] = useState('https://ltzy.top')
   useEffect(() => {

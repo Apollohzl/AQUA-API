@@ -121,7 +121,7 @@ flowchart LR
         C4["自研应用 / 脚本 / 插件"]
     end
 
-    AQUA["LTZY-API<br/>统一协议 · 智能调度 · 精确计费<br/>分组 · 凭据池 · 运营后台"]
+    LTZY["LTZY-API<br/>统一协议 · 智能调度 · 精确计费<br/>分组 · 凭据池 · 运营后台"]
 
     subgraph U["上游服务"]
         U1["OpenAI / Azure"]
@@ -131,15 +131,15 @@ flowchart LR
         U5["本地 Ollama / vLLM"]
     end
 
-    C1 --> AQUA
-    C2 --> AQUA
-    C3 --> AQUA
-    C4 --> AQUA
-    AQUA --> U1
-    AQUA --> U2
-    AQUA --> U3
-    AQUA --> U4
-    AQUA --> U5
+    C1 --> LTZY
+    C2 --> LTZY
+    C3 --> LTZY
+    C4 --> LTZY
+    LTZY --> U1
+    LTZY --> U2
+    LTZY --> U3
+    LTZY --> U4
+    LTZY --> U5
 ```
 
 它解决的核心问题只有三个词：**统一**（协议与入口）、**可靠**（故障自动避让）、**可算账**（每一分钱有据可查）。

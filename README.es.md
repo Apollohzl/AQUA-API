@@ -127,7 +127,7 @@ flowchart LR
         C4["Aplicaciones propias / scripts / plugins"]
     end
 
-    AQUA["LTZY-API<br/>Protocolo unificado · Enrutamiento inteligente · Facturación precisa<br/>Grupos · Pool de credenciales · Panel de operación"]
+    LTZY["LTZY-API<br/>Protocolo unificado · Enrutamiento inteligente · Facturación precisa<br/>Grupos · Pool de credenciales · Panel de operación"]
 
     subgraph U["Servicios de proveedores"]
         U1["OpenAI / Azure"]
@@ -137,15 +137,15 @@ flowchart LR
         U5["Ollama / vLLM locales"]
     end
 
-    C1 --> AQUA
-    C2 --> AQUA
-    C3 --> AQUA
-    C4 --> AQUA
-    AQUA --> U1
-    AQUA --> U2
-    AQUA --> U3
-    AQUA --> U4
-    AQUA --> U5
+    C1 --> LTZY
+    C2 --> LTZY
+    C3 --> LTZY
+    C4 --> LTZY
+    LTZY --> U1
+    LTZY --> U2
+    LTZY --> U3
+    LTZY --> U4
+    LTZY --> U5
 ```
 
 Resuelve tres problemas fundamentales con tres palabras: **unificación** (protocolos y punto de entrada), **fiabilidad** (evitación automática de fallos) y **contabilidad verificable** (cada céntimo queda registrado).

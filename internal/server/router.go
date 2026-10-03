@@ -303,7 +303,7 @@ func (s *Server) registerRoutes() {
 	//
 	// 注意两处刻意的路径设计：
 	//   - 删除类操作用 POST + 请求体而不是 DELETE /:name —— 模型名里带斜杠
-	//     （AQUA-CALL/deepseek-v4.1-flash），放进路径会被路由拆成多段；
+	//     （LTZY-CALL/deepseek-v4.1-flash），放进路径会被路由拆成多段；
 	//   - 样本列表只回预览，看全文走 /samples/:id，两条访问路径都会写审计。
 	admin.GET("/corpus/models", s.handleListCorpusModels)
 	admin.POST("/corpus/models", s.handleUpsertCorpusModel)
