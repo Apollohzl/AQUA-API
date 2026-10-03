@@ -325,6 +325,37 @@ func (r *paymentOrderRepository) ListPaidUncredited(ctx context.Context, limit i
 	return orders, nil
 }
 
+// ListReconcilable 列出需要主动对账的订单（全部待支付 + since 之后创建的已关闭）。
+//
+// 上限量保护：加 LIMIT 是防失控——若网关长时间不可答，待支付订单会积累，
+// 每轮对账的查单次数必须有限（单次 200 条，剩余下轮继续）。
+func (r *paymentOrderRepository) ListReconcilable(ctx context.Context, since time.Time) ([]*model.PaymentOrder, error) {
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT "+orderColumns+" FROM payment_orders "+
+			"WHERE status = ? OR (status = ? AND created_at >= ?) "+
+			"ORDER BY id ASC LIMIT ?",
+		int(model.PaymentStatusPending),
+		int(model.PaymentStatusClosed), since.Unix(),
+		200)
+	if err != nil {
+		return nil, fmt.Errorf("store: 查询待对账订单失败: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	orders := make([]*model.PaymentOrder, 0, 16)
+	for rows.Next() {
+		order, err := scanPaymentOrder(rows)
+		if err != nil {
+			return nil, err
+		}
+		orders = append(orders, order)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: 遍历待对账订单失败: %w", err)
+	}
+	return orders, nil
+}
+
 // CloseExpired 关闭在 before 之前到期且仍未支付的订单。
 //
 // 为什么必须关单：不关的话，用户可以在支付页面停留任意久，

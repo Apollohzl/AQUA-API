@@ -255,6 +255,10 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
 
+	// 支付对账循环：补偿丢失的回调（主动向网关查单），随 ctx 取消退出。
+	// 见 reconcile_payment.go 的头注释——这是"回调是唯一入账触发器"的单点风险治理。
+	go s.startPaymentReconciler(ctx)
+
 	go func() {
 		if err := s.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
