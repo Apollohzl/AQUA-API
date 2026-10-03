@@ -982,7 +982,7 @@ cd web && npm ci && npm run type-check && npm run build   # Frontend
 Estructura de directorios (la raíz de este repositorio es el directorio de código):
 
 ```
-cmd/aqua/              Punto de entrada del programa (solo ensamblaje, sin lógica de negocio)
+cmd/ltzy/              Punto de entrada del programa (solo ensamblaje, sin lógica de negocio)
 internal/config/       Carga y validación de la configuración
 internal/model/        Modelo de dominio e interfaces de repositorio (sin SQL)
 internal/store/        Implementación de persistencia (SQL + migraciones versionadas, directorios por dialecto)

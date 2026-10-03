@@ -966,7 +966,7 @@ cd web && npm ci && npm run type-check && npm run build   # frontend
 Structure des répertoires (la racine de ce dépôt est le répertoire de code) :
 
 ```
-cmd/aqua/              point d'entrée du programme (assemblage seul, sans logique métier)
+cmd/ltzy/              point d'entrée du programme (assemblage seul, sans logique métier)
 internal/config/       chargement et validation de la configuration
 internal/model/        modèle de domaine et interfaces de dépôt (sans SQL)
 internal/store/        implémentation de la persistance (SQL + migrations versionnées, par dialecte)

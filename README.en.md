@@ -968,7 +968,7 @@ cd web && npm ci && npm run type-check && npm run build   # Frontend
 Directory structure (the repository root is the code directory):
 
 ```
-cmd/aqua/              Program entry point (assembly only, no business logic)
+cmd/ltzy/              Program entry point (assembly only, no business logic)
 internal/config/       Configuration loading and validation
 internal/model/        Domain models and repository interfaces (no SQL)
 internal/store/        Persistence implementation (SQL + versioned migrations, split by dialect)
