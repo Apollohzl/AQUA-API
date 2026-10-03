@@ -30,6 +30,9 @@ const GROUPS: ShellNavGroup[] = [
         label: '游乐场',
         href: '/console/playground',
         icon: 'play',
+        // exact：只让「游乐场」页本身高亮。否则进子页（任意门）时，
+        // 前缀匹配会让父项与子项同时高亮，视觉上分不清当前所在层级。
+        exact: true,
         children: [{ label: '任意门', href: '/console/playground/anydoor', icon: 'door' }],
       },
     ],

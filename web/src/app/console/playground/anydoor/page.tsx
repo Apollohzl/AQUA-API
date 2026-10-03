@@ -30,7 +30,7 @@ export default function ConsoleAnyDoorPage() {
           </div>
         </Card>
 
-        {/* 右侧栏：本期暂不添加内容，预留位置待后续填充 */}
+        {/* 右侧栏：本期暂不添加内容，预留位置待后续填充（CardProps.children 为必填，故显式传 null） */}
         <Card className="min-h-72">{null}</Card>
       </div>
     </div>
